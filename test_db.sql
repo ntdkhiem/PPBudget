@@ -1,0 +1,1 @@
+SELECT (CURRENT_DATE - '2023-01-01'::DATE) as diff;

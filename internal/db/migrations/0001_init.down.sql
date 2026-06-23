@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS transactions;
+DROP TABLE IF EXISTS categories;
+DROP TABLE IF EXISTS accounts;
+DROP FUNCTION IF EXISTS update_modified_column;
