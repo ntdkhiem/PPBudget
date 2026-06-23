@@ -105,6 +105,14 @@ type NetWorthPoint struct {
 	NetWorth    money.Money `json:"net_worth"`
 }
 
+type ReportsSummary struct {
+	InPeriod           money.Money `json:"in_period"`
+	OutPeriod          money.Money `json:"out_period"`
+	SubscriptionsToPay money.Money `json:"subscriptions_to_pay"`
+	LeftToSpend        money.Money `json:"left_to_spend"`
+	NetWorth           money.Money `json:"net_worth"`
+}
+
 type Subscription struct {
 	ID              string      `json:"id"`
 	Name            string      `json:"name"`

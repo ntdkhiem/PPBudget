@@ -114,6 +114,7 @@ func main() {
 			r.Delete("/budgets/{id}", h.DeleteBudget)
 
 			// Reports
+			r.Get("/reports/summary", h.GetReportsSummary)
 			r.Get("/reports/net-worth", h.GetNetWorthTrend)
 			r.Get("/reports/spending", h.GetSpendingByCategory)
 

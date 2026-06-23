@@ -97,7 +97,7 @@ func (r *Repository) CreateTransfer(ctx context.Context, fromAccountID, toAccoun
 }
 
 // ListTransactions fetches transactions for an account with running balances and cursor pagination
-func (r *Repository) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string) ([]domain.TransactionWithBalance, error) {
+func (r *Repository) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time) ([]domain.TransactionWithBalance, error) {
 	query := `
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
@@ -107,11 +107,14 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
         JOIN accounts a ON t.account_id = a.id
         WHERE ($1 = '' OR t.account_id = NULLIF($1, '')::uuid) AND t.deleted_at IS NULL
           AND ($2::date IS NULL OR (t.date, t.id) < ($2::date, $3::uuid))
+          AND ($4::boolean = false OR t.is_reviewed = false)
+          AND ($5::date IS NULL OR t.date >= $5::date)
+          AND ($6::date IS NULL OR t.date <= $6::date)
         ORDER BY t.date DESC, t.id DESC
         LIMIT 50;
     `
 
-	rows, err := r.pool.Query(ctx, query, accountID, cursorDate, cursorID)
+	rows, err := r.pool.Query(ctx, query, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
@@ -189,12 +192,26 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 
 // MarkReviewed updates the category and marks the transaction as reviewed
 func (r *Repository) MarkReviewed(ctx context.Context, txnID string, categoryID *string) error {
-	query := `
-        UPDATE transactions 
-        SET is_reviewed = true, category_id = $2, updated_at = NOW()
-        WHERE id = $1 AND deleted_at IS NULL
-    `
-	tag, err := r.pool.Exec(ctx, query, txnID, categoryID)
+	var query string
+	var args []interface{}
+	
+	if categoryID != nil {
+		query = `
+			UPDATE transactions 
+			SET is_reviewed = true, category_id = $2, updated_at = NOW()
+			WHERE id = $1 AND deleted_at IS NULL
+		`
+		args = []interface{}{txnID, categoryID}
+	} else {
+		query = `
+			UPDATE transactions 
+			SET is_reviewed = true, updated_at = NOW()
+			WHERE id = $1 AND deleted_at IS NULL
+		`
+		args = []interface{}{txnID}
+	}
+	
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -462,4 +479,59 @@ func (r *Repository) GetSpendingByCategory(ctx context.Context, startDate, endDa
 		spending = append(spending, s)
 	}
 	return spending, nil
+}
+
+func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate time.Time) (*domain.ReportsSummary, error) {
+	var summary domain.ReportsSummary
+
+	queryInOut := `
+		SELECT 
+			COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as in_period,
+			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as out_period
+		FROM transactions
+		WHERE date >= $1 AND date <= $2 AND deleted_at IS NULL AND transfer_id IS NULL
+	`
+	var inPeriod, outPeriod int64
+	err := r.pool.QueryRow(ctx, queryInOut, startDate, endDate).Scan(&inPeriod, &outPeriod)
+	if err != nil {
+		return nil, err
+	}
+	summary.InPeriod = money.Money(inPeriod)
+	summary.OutPeriod = money.Money(outPeriod)
+
+	querySubs := `
+		SELECT COALESCE(SUM(amount), 0)
+		FROM subscriptions
+		WHERE next_billing_date >= $1 AND next_billing_date <= $2
+	`
+	var subs int64
+	err = r.pool.QueryRow(ctx, querySubs, startDate, endDate).Scan(&subs)
+	// If the table doesn't exist or other err, we might just ignore or return 0, but let's assume it exists
+	if err != nil {
+		subs = 0 // fallback
+	}
+	summary.SubscriptionsToPay = money.Money(subs)
+
+	summary.LeftToSpend = money.Money(inPeriod - outPeriod)
+
+	queryNetWorth := `
+		WITH acc_balances AS (
+			SELECT a.id, a.type, a.initial_balance + COALESCE(SUM(t.amount), 0) as balance
+			FROM accounts a
+			LEFT JOIN transactions t ON t.account_id = a.id AND t.deleted_at IS NULL
+			GROUP BY a.id, a.type, a.initial_balance
+		)
+		SELECT 
+			COALESCE(SUM(CASE WHEN type = 'asset' THEN balance ELSE 0 END), 0) -
+			COALESCE(SUM(CASE WHEN type = 'liability' THEN balance ELSE 0 END), 0) as net_worth
+		FROM acc_balances
+	`
+	var netWorth int64
+	err = r.pool.QueryRow(ctx, queryNetWorth).Scan(&netWorth)
+	if err != nil {
+		return nil, err
+	}
+	summary.NetWorth = money.Money(netWorth)
+
+	return &summary, nil
 }

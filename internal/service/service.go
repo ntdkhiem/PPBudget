@@ -178,8 +178,8 @@ func (s *Service) CreateTransfer(ctx context.Context, req TransferRequest) error
 	return s.repo.CreateTransfer(ctx, req.FromAccountID, req.ToAccountID, amount, date, req.Description)
 }
 
-func (s *Service) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string) ([]domain.TransactionWithBalance, error) {
-	return s.repo.ListTransactions(ctx, accountID, cursorDate, cursorID)
+func (s *Service) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time) ([]domain.TransactionWithBalance, error) {
+	return s.repo.ListTransactions(ctx, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate)
 }
 
 func (s *Service) ReviewTransaction(ctx context.Context, txnID string, categoryID *string) error {
@@ -398,4 +398,8 @@ func (s *Service) GetNetWorthTrend(ctx context.Context, startDate, endDate time.
 
 func (s *Service) GetSpendingByCategory(ctx context.Context, startDate, endDate time.Time) ([]domain.CategorySpend, error) {
 	return s.repo.GetSpendingByCategory(ctx, startDate, endDate)
+}
+
+func (s *Service) GetReportsSummary(ctx context.Context, startDate, endDate time.Time) (*domain.ReportsSummary, error) {
+	return s.repo.GetReportsSummary(ctx, startDate, endDate)
 }

@@ -87,7 +87,25 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	txns, err := h.svc.ListTransactions(r.Context(), accountID, cursorDate, cursorID)
+	var startDate *time.Time
+	var endDate *time.Time
+	if dateStr := r.URL.Query().Get("start_date"); dateStr != "" {
+		t, err := time.Parse("2006-01-02", dateStr)
+		if err == nil {
+			startDate = &t
+		}
+	}
+	if dateStr := r.URL.Query().Get("end_date"); dateStr != "" {
+		t, err := time.Parse("2006-01-02", dateStr)
+		if err == nil {
+			endDate = &t
+		}
+	}
+
+	unreviewedStr := r.URL.Query().Get("unreviewed")
+	unreviewedOnly := unreviewedStr == "true"
+
+	txns, err := h.svc.ListTransactions(r.Context(), accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch transactions")
 		return
@@ -664,4 +682,31 @@ func (h *Handler) GetSpendingByCategory(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, spending)
+}
+
+func (h *Handler) GetReportsSummary(w http.ResponseWriter, r *http.Request) {
+	startDateStr := r.URL.Query().Get("start_date")
+	endDateStr := r.URL.Query().Get("end_date")
+
+	now := time.Now()
+	startDate := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	endDate := now
+
+	if startDateStr != "" {
+		if parsed, err := time.Parse("2006-01-02", startDateStr); err == nil {
+			startDate = parsed
+		}
+	}
+	if endDateStr != "" {
+		if parsed, err := time.Parse("2006-01-02", endDateStr); err == nil {
+			endDate = parsed
+		}
+	}
+
+	summary, err := h.svc.GetReportsSummary(r.Context(), startDate, endDate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch reports summary")
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
 }
