@@ -143,6 +143,50 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 	return txns, nil
 }
 
+// GetTransactionsByDateRange fetches all transactions (or bounded by dates) without limits
+func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, endDate *time.Time) ([]domain.Transaction, error) {
+	query := `
+        SELECT 
+            t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
+            t.is_reviewed, t.is_reconciled, t.transfer_id, a.simplefin_id as simplefin_account_id
+        FROM transactions t
+        JOIN accounts a ON t.account_id = a.id
+        WHERE t.deleted_at IS NULL
+          AND ($1::date IS NULL OR t.date >= $1::date)
+          AND ($2::date IS NULL OR t.date <= $2::date)
+    `
+
+	rows, err := r.pool.Query(ctx, query, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var txns []domain.Transaction
+	for rows.Next() {
+		var t domain.Transaction
+		var amount int64
+		var catID *string
+		var transferID *string
+		var sfAccountID *string
+
+		err := rows.Scan(
+			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
+			&t.IsReviewed, &t.IsReconciled, &transferID, &sfAccountID,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		t.Amount = money.Money(amount)
+		t.CategoryID = catID
+		t.TransferID = transferID
+		t.SimplefinAccountID = sfAccountID
+		txns = append(txns, t)
+	}
+	return txns, nil
+}
+
 // MarkReviewed updates the category and marks the transaction as reviewed
 func (r *Repository) MarkReviewed(ctx context.Context, txnID string, categoryID *string) error {
 	query := `

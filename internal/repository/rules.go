@@ -16,10 +16,10 @@ func (r *Repository) CreateRule(ctx context.Context, rule *domain.Rule) error {
 	defer tx.Rollback(ctx)
 
 	queryRule := `
-		INSERT INTO rules (name, description, priority, is_active)
-		VALUES ($1, $2, $3, $4) RETURNING id, created_at, updated_at
+		INSERT INTO rules (name, description, trigger_type, strictness, priority, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at, updated_at
 	`
-	err = tx.QueryRow(ctx, queryRule, rule.Name, rule.Description, rule.Priority, rule.IsActive).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
+	err = tx.QueryRow(ctx, queryRule, rule.Name, rule.Description, rule.TriggerType, rule.Strictness, rule.Priority, rule.IsActive).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -53,10 +53,10 @@ func (r *Repository) UpdateRule(ctx context.Context, rule *domain.Rule) error {
 	defer tx.Rollback(ctx)
 
 	queryRule := `
-		UPDATE rules SET name = $1, description = $2, priority = $3, is_active = $4, updated_at = NOW()
-		WHERE id = $5 RETURNING updated_at
+		UPDATE rules SET name = $1, description = $2, trigger_type = $3, strictness = $4, priority = $5, is_active = $6, updated_at = NOW()
+		WHERE id = $7 RETURNING updated_at
 	`
-	err = tx.QueryRow(ctx, queryRule, rule.Name, rule.Description, rule.Priority, rule.IsActive, rule.ID).Scan(&rule.UpdatedAt)
+	err = tx.QueryRow(ctx, queryRule, rule.Name, rule.Description, rule.TriggerType, rule.Strictness, rule.Priority, rule.IsActive, rule.ID).Scan(&rule.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return apperrors.ErrNotFound
@@ -97,8 +97,8 @@ func (r *Repository) UpdateRule(ctx context.Context, rule *domain.Rule) error {
 
 func (r *Repository) GetRule(ctx context.Context, id string) (*domain.Rule, error) {
 	rule := &domain.Rule{}
-	queryRule := `SELECT id, name, description, priority, is_active, created_at, updated_at FROM rules WHERE id = $1`
-	err := r.pool.QueryRow(ctx, queryRule, id).Scan(&rule.ID, &rule.Name, &rule.Description, &rule.Priority, &rule.IsActive, &rule.CreatedAt, &rule.UpdatedAt)
+	queryRule := `SELECT id, name, description, trigger_type, strictness, priority, is_active, created_at, updated_at FROM rules WHERE id = $1`
+	err := r.pool.QueryRow(ctx, queryRule, id).Scan(&rule.ID, &rule.Name, &rule.Description, &rule.TriggerType, &rule.Strictness, &rule.Priority, &rule.IsActive, &rule.CreatedAt, &rule.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, apperrors.ErrNotFound
@@ -140,7 +140,7 @@ func (r *Repository) GetRule(ctx context.Context, id string) (*domain.Rule, erro
 }
 
 func (r *Repository) ListRulesDetailed(ctx context.Context) ([]domain.Rule, error) {
-	queryRule := `SELECT id, name, description, priority, is_active, created_at, updated_at FROM rules ORDER BY priority DESC, created_at DESC`
+	queryRule := `SELECT id, name, description, trigger_type, strictness, priority, is_active, created_at, updated_at FROM rules ORDER BY priority DESC, created_at DESC`
 	rows, err := r.pool.Query(ctx, queryRule)
 	if err != nil {
 		return nil, err
@@ -150,7 +150,7 @@ func (r *Repository) ListRulesDetailed(ctx context.Context) ([]domain.Rule, erro
 	var rules []domain.Rule
 	for rows.Next() {
 		var rule domain.Rule
-		if err := rows.Scan(&rule.ID, &rule.Name, &rule.Description, &rule.Priority, &rule.IsActive, &rule.CreatedAt, &rule.UpdatedAt); err != nil {
+		if err := rows.Scan(&rule.ID, &rule.Name, &rule.Description, &rule.TriggerType, &rule.Strictness, &rule.Priority, &rule.IsActive, &rule.CreatedAt, &rule.UpdatedAt); err != nil {
 			return nil, err
 		}
 		rules = append(rules, rule)

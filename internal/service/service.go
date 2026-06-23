@@ -73,17 +73,50 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 			continue
 		}
 		
-		match := true
+		match := false
+		if rule.Strictness == "all" || len(rule.Conditions) == 0 {
+			match = true
+		}
+
 		for _, cond := range rule.Conditions {
+			condMatch := false
 			if cond.Field == "description" {
 				lowerDesc := strings.ToLower(req.Description)
 				lowerVal := strings.ToLower(cond.Value)
-				if cond.Operator == "contains" && !strings.Contains(lowerDesc, lowerVal) {
+				switch cond.Operator {
+				case "contains":
+					condMatch = strings.Contains(lowerDesc, lowerVal)
+				case "is_exactly":
+					condMatch = lowerDesc == lowerVal
+				case "starts_with":
+					condMatch = strings.HasPrefix(lowerDesc, lowerVal)
+				case "ends_with":
+					condMatch = strings.HasSuffix(lowerDesc, lowerVal)
+				}
+			} else if cond.Field == "amount" {
+				// simple numerical check for amount
+				condAmt, _ := money.NewFromString(cond.Value)
+				if cond.Operator == "greater_than" {
+					condMatch = amount.ToInt64() > condAmt.ToInt64()
+				} else if cond.Operator == "less_than" {
+					condMatch = amount.ToInt64() < condAmt.ToInt64()
+				} else if cond.Operator == "is_exactly" {
+					condMatch = amount.ToInt64() == condAmt.ToInt64()
+				}
+			} else if cond.Field == "source_account" {
+				if cond.Operator == "is_exactly" {
+					condMatch = req.SimplefinAccountID == cond.Value
+				}
+			}
+
+			if rule.Strictness == "all" {
+				if !condMatch {
 					match = false
 					break
 				}
-				if cond.Operator == "equals" && lowerDesc != lowerVal {
-					match = false
+			} else { // "any"
+				if condMatch {
+					match = true
 					break
 				}
 			}
@@ -245,6 +278,116 @@ func (s *Service) DeleteTransaction(ctx context.Context, id string) error {
 
 func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, categoryID *string) error {
 	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, categoryID)
+}
+
+func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, startDate, endDate *time.Time) (int, error) {
+	rule, err := s.repo.GetRule(ctx, ruleID)
+	if err != nil {
+		return 0, err
+	}
+	
+	var sDate, eDate *time.Time
+	if !runAll {
+		sDate = startDate
+		eDate = endDate
+	}
+
+	txns, err := s.repo.GetTransactionsByDateRange(ctx, sDate, eDate)
+	if err != nil {
+		return 0, err
+	}
+
+	updatedCount := 0
+	for _, t := range txns {
+		match := false
+		if rule.Strictness == "all" || len(rule.Conditions) == 0 {
+			match = true
+		}
+
+		sfAccount := ""
+		if t.SimplefinAccountID != nil {
+			sfAccount = *t.SimplefinAccountID
+		}
+
+		for _, cond := range rule.Conditions {
+			condMatch := false
+			if cond.Field == "description" {
+				lowerDesc := strings.ToLower(t.Description)
+				lowerVal := strings.ToLower(cond.Value)
+				switch cond.Operator {
+				case "contains":
+					condMatch = strings.Contains(lowerDesc, lowerVal)
+				case "is_exactly":
+					condMatch = lowerDesc == lowerVal
+				case "starts_with":
+					condMatch = strings.HasPrefix(lowerDesc, lowerVal)
+				case "ends_with":
+					condMatch = strings.HasSuffix(lowerDesc, lowerVal)
+				}
+			} else if cond.Field == "amount" {
+				condAmt, err := money.NewFromString(cond.Value)
+				if err == nil {
+					if cond.Operator == "greater_than" {
+						condMatch = t.Amount.ToInt64() > condAmt.ToInt64()
+					} else if cond.Operator == "less_than" {
+						condMatch = t.Amount.ToInt64() < condAmt.ToInt64()
+					} else if cond.Operator == "is_exactly" {
+						condMatch = t.Amount.ToInt64() == condAmt.ToInt64()
+					}
+				}
+			} else if cond.Field == "source_account" {
+				if cond.Operator == "is_exactly" {
+					condMatch = sfAccount == cond.Value
+				}
+			}
+
+			if rule.Strictness == "all" {
+				if !condMatch {
+					match = false
+					break
+				}
+			} else { // "any"
+				if condMatch {
+					match = true
+					break
+				}
+			}
+		}
+
+		if match {
+			var newCatID *string = t.CategoryID
+			var newAccID string = t.AccountID
+			needsUpdate := false
+
+			for _, act := range rule.Actions {
+				if act.ActionType == "set_category" {
+					if act.Value != "" {
+						catID := act.Value
+						if newCatID == nil || *newCatID != catID {
+							newCatID = &catID
+							needsUpdate = true
+						}
+					}
+				}
+				if act.ActionType == "set_account" {
+					if act.Value != "" && act.Value != newAccID {
+						newAccID = act.Value
+						needsUpdate = true
+					}
+				}
+			}
+
+			if needsUpdate {
+				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, newCatID)
+				if err != nil {
+					continue
+				}
+				updatedCount++
+			}
+		}
+	}
+
+	return updatedCount, nil
 }
 
 // Reports

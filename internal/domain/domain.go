@@ -27,6 +27,7 @@ type Transaction struct {
 	IsReviewed   bool        `json:"is_reviewed"`
 	IsReconciled bool        `json:"is_reconciled"`
 	TransferID   *string     `json:"transfer_id,omitempty"`
+	SimplefinAccountID *string `json:"simplefin_account_id,omitempty"`
 }
 
 type TransactionWithBalance struct {
@@ -45,6 +46,8 @@ type Rule struct {
 	ID          string          `json:"id"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
+	TriggerType string          `json:"trigger_type"`
+	Strictness  string          `json:"strictness"`
 	Priority    int             `json:"priority"`
 	IsActive    bool            `json:"is_active"`
 	Conditions  []RuleCondition `json:"conditions"`
@@ -100,4 +103,15 @@ type NetWorthPoint struct {
 	Assets      money.Money `json:"assets"`
 	Liabilities money.Money `json:"liabilities"`
 	NetWorth    money.Money `json:"net_worth"`
+}
+
+type Subscription struct {
+	ID              string      `json:"id"`
+	Name            string      `json:"name"`
+	Amount          money.Money `json:"amount"`
+	BillingCycle    string      `json:"billing_cycle"`
+	NextBillingDate time.Time   `json:"next_billing_date"`
+	CategoryID      *string     `json:"category_id,omitempty"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }

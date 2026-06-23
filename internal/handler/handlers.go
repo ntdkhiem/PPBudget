@@ -252,6 +252,47 @@ func (h *Handler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (h *Handler) ApplyRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var payload struct {
+		RunAll    bool   `json:"run_all"`
+		StartDate string `json:"start_date"`
+		EndDate   string `json:"end_date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	var sDate, eDate *time.Time
+	if !payload.RunAll {
+		if payload.StartDate != "" {
+			t, err := time.Parse(time.RFC3339, payload.StartDate)
+			if err == nil {
+				sDate = &t
+			}
+		}
+		if payload.EndDate != "" {
+			t, err := time.Parse(time.RFC3339, payload.EndDate)
+			if err == nil {
+				eDate = &t
+			}
+		}
+	}
+
+	updatedCount, err := h.svc.ApplyRule(r.Context(), id, payload.RunAll, sDate, eDate)
+	if err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "rule not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to apply rule")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]int{"updated_count": updatedCount})
+}
+
 func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`

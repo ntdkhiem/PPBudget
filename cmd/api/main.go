@@ -105,6 +105,7 @@ func main() {
 			r.Get("/rules/{id}", h.GetRule)
 			r.Put("/rules/{id}", h.UpdateRule)
 			r.Delete("/rules/{id}", h.DeleteRule)
+			r.Post("/rules/{id}/apply", h.ApplyRule)
 
 			// Budgets
 			r.Get("/budgets/summary", h.GetBudgetsSummary)
@@ -115,6 +116,11 @@ func main() {
 			// Reports
 			r.Get("/reports/net-worth", h.GetNetWorthTrend)
 			r.Get("/reports/spending", h.GetSpendingByCategory)
+
+			// Subscriptions
+			r.Get("/subscriptions", h.ListSubscriptions)
+			r.Post("/subscriptions", h.CreateSubscription)
+			r.Delete("/subscriptions/{id}", h.DeleteSubscription)
 		})
 	})
 
