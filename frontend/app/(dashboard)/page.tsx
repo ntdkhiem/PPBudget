@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet, ShieldCheck } from "lucide-react";
+import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet, ShieldCheck, Inbox, CalendarClock, AlertCircle } from "lucide-react";
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -82,8 +82,11 @@ export default function DashboardPage() {
       return true;
     });
     const grouped = expenses.reduce((acc, t) => {
-      const catName = t.category?.name || "Uncategorized";
-      acc[catName] = (acc[catName] || 0) + Math.abs(t.amount);
+      const cat = t.category_id ? categories.find(c => c.id === t.category_id) : null;
+      const catName = cat?.name || "Uncategorized";
+      // Use effective_amount if present, otherwise fallback to amount.
+      const amount = t.effective_amount !== undefined ? t.effective_amount : t.amount;
+      acc[catName] = (acc[catName] || 0) + Math.abs(amount);
       return acc;
     }, {} as Record<string, number>);
 
@@ -92,6 +95,23 @@ export default function DashboardPage() {
       .sort((a, b) => b.value - a.value)
       .slice(0, 5); // Take top 5
   }, [transactions, categories]);
+
+  const needsReviewTransactions = useMemo(() => {
+    return (transactions || []).filter(t => !t.category_id && t.amount < 0).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [transactions]);
+  const needsReviewTop = needsReviewTransactions.slice(0, 3);
+  const needsReviewCount = needsReviewTransactions.length;
+
+  const upcomingSubs = useMemo(() => {
+    if (!subscriptions) return [];
+    const now = new Date();
+    const nextWeek = new Date();
+    nextWeek.setDate(now.getDate() + 7);
+    return subscriptions.filter(s => {
+      const d = new Date(s.next_billing_date);
+      return d >= now && d <= nextWeek;
+    }).sort((a, b) => new Date(a.next_billing_date).getTime() - new Date(b.next_billing_date).getTime());
+  }, [subscriptions]);
 
   if (loadingAccounts) {
     return (
@@ -189,17 +209,10 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-col gap-1">
             <div className="text-2xl font-bold font-heading text-slate-900 dark:text-white">
-              {(() => {
-                if (loadingSummary || loadingAccounts) return <Skeleton className="h-8 w-24" />;
-                const liquidCash = accounts?.filter(a => a.type === "asset").reduce((acc, a) => acc + a.initial_balance, 0) || 0;
-                const liabilities = accounts?.filter(a => a.type === "liability").reduce((acc, a) => acc + a.initial_balance, 0) || 0;
-                const unpaidSubs = Math.max(0, (summary?.subscriptions_to_pay || 0) - (summary?.subscriptions_paid || 0));
-                const safeToSpend = liquidCash - liabilities - unpaidSubs;
-                return formatCurrency(safeToSpend);
-              })()}
+              {loadingSummary || loadingBudgets ? <Skeleton className="h-8 w-24" /> : formatCurrency(Math.max(0, totalBudget - totalSpent))}
             </div>
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Liquid assets minus credit cards & unpaid subs
+              Remaining from your allocated budget
             </div>
           </div>
         </motion.div>
@@ -212,6 +225,121 @@ export default function DashboardPage() {
           </div>
           <div className="text-2xl font-bold font-heading">
             {loadingSummary ? <Skeleton className="h-8 w-24 bg-white dark:bg-slate-900/20" /> : formatCurrency(summary?.net_worth || 0)}
+          </div>
+        </motion.div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        {/* 1. Needs Review Inbox Widget */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="relative overflow-hidden border border-slate-200 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-3xl shadow-sm hover:shadow-xl hover:shadow-blue-500/5 hover:-translate-y-1 transition-all duration-500 ease-out flex flex-col p-6">
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20 pointer-events-none -z-10" />
+          
+          <div className="flex flex-row items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400">
+                <Inbox className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-bold font-heading text-slate-900 dark:text-white">
+                Needs Review
+              </h2>
+            </div>
+            {needsReviewCount > 0 && (
+              <div className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                {needsReviewCount} pending
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 space-y-2 mb-4">
+            {needsReviewTop.map((tx) => (
+              <div 
+                key={tx.id}
+                className="group flex items-center justify-between p-3 -mx-3 rounded-xl hover:bg-white dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:scale-105 group-hover:text-blue-500 transition-all">
+                    <AlertCircle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">
+                      {tx.description}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {formatDate(tx.date)}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {formatCurrency(tx.amount)}
+                </span>
+              </div>
+            ))}
+            {needsReviewCount === 0 && (
+              <p className="text-sm text-slate-500 text-center py-4">All caught up!</p>
+            )}
+          </div>
+
+          <div className="mt-auto pt-2 border-t border-slate-100 dark:border-slate-800/60">
+            <Link href="/transactions" className="w-full flex items-center justify-center py-2 text-sm font-medium group text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
+              Review all transactions
+              <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+            </Link>
+          </div>
+        </motion.div>
+
+        {/* 2. Upcoming Subscriptions Widget */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="relative overflow-hidden border border-slate-200 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-3xl shadow-sm hover:shadow-xl hover:shadow-purple-500/5 hover:-translate-y-1 transition-all duration-500 ease-out flex flex-col p-6">
+          <div className="absolute inset-0 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20 pointer-events-none -z-10" />
+          
+          <div className="flex flex-row items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-purple-500/10 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                <CalendarClock className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-bold font-heading text-slate-900 dark:text-white">
+                Upcoming Bills
+              </h2>
+            </div>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              Next 7 days
+            </p>
+          </div>
+
+          <div className="flex-1 space-y-2 mb-4">
+            {upcomingSubs.map((sub) => (
+              <div 
+                key={sub.id}
+                className="group flex items-center justify-between p-3 -mx-3 rounded-xl hover:bg-white dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center bg-purple-500/10 text-purple-600 border border-transparent group-hover:border-purple-200 dark:group-hover:border-purple-700/50 transition-colors`}>
+                    <Repeat className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">
+                      {sub.name}
+                    </p>
+                    <div className="flex items-center text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      <CalendarClock className="w-3 h-3 mr-1" />
+                      {formatDate(sub.next_billing_date)}
+                    </div>
+                  </div>
+                </div>
+                <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {formatCurrency(sub.amount)}
+                </span>
+              </div>
+            ))}
+            {upcomingSubs.length === 0 && (
+              <p className="text-sm text-slate-500 text-center py-4">No upcoming bills this week.</p>
+            )}
+          </div>
+
+          <div className="mt-auto pt-2 border-t border-slate-100 dark:border-slate-800/60">
+            <Link href="/subscriptions" className="w-full flex items-center justify-center py-2 text-sm font-medium group text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300">
+              Manage subscriptions
+              <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+            </Link>
           </div>
         </motion.div>
       </div>
@@ -246,7 +374,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-slate-900 dark:text-white truncate">{txn.description.replace(/\s+/g, ' ').trim()}</p>
-                        <p className="text-xs text-slate-500 truncate">{formatDate(txn.date)} &bull; {txn.category?.name || "Uncategorized"}</p>
+                        <p className="text-xs text-slate-500 truncate">{formatDate(txn.date)} &bull; {(txn.category_id ? categories?.find(c => c.id === txn.category_id)?.name : null) || "Uncategorized"}</p>
                       </div>
                     </div>
                     <span className={`font-bold font-heading shrink-0 ${txn.amount < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
