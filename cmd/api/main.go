@@ -9,12 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"ntdkhiem/firefly-go/internal/config"
-	"ntdkhiem/firefly-go/internal/db"
-	"ntdkhiem/firefly-go/internal/handler"
-	"ntdkhiem/firefly-go/internal/middleware"
-	"ntdkhiem/firefly-go/internal/repository"
-	"ntdkhiem/firefly-go/internal/service"
+	"ntdkhiem/ppbudget-go/internal/config"
+	"ntdkhiem/ppbudget-go/internal/db"
+	"ntdkhiem/ppbudget-go/internal/handler"
+	"ntdkhiem/ppbudget-go/internal/middleware"
+	"ntdkhiem/ppbudget-go/internal/repository"
+	"ntdkhiem/ppbudget-go/internal/service"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -71,6 +71,17 @@ func main() {
 			r.Use(middleware.RequireAPIKey(cfg.IngestAPIKey))
 			r.Post("/ingest", h.Ingest)
 		})
+		
+			// Importer endpoints
+		r.Group(func(r chi.Router) {
+			// This could be JWT protected, but the prompt didn't specify. We'll protect it with JWT for now.
+			r.Use(middleware.RequireJWT(cfg.JWTSecret))
+			r.Post("/import/simplefin/claim", h.SimpleFinClaim)
+			r.Post("/import/simplefin/fetch-accounts", h.SimpleFinFetchAccounts)
+			r.Post("/import/simplefin/execute", h.SimpleFinExecute)
+			r.Get("/import/simplefin/status", h.SimpleFinStatus)
+			r.Get("/import/simplefin/config", h.SimpleFinConfig)
+		})
 
 		// Secure user routes (Dashboard)
 		r.Group(func(r chi.Router) {
@@ -121,6 +132,7 @@ func main() {
 			// Subscriptions
 			r.Get("/subscriptions", h.ListSubscriptions)
 			r.Post("/subscriptions", h.CreateSubscription)
+			r.Put("/subscriptions/{id}", h.UpdateSubscription)
 			r.Delete("/subscriptions/{id}", h.DeleteSubscription)
 		})
 	})

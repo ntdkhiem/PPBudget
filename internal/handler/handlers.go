@@ -5,13 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"ntdkhiem/firefly-go/internal/domain"
+	"ntdkhiem/ppbudget-go/internal/domain"
 	"time"
 
-	"ntdkhiem/firefly-go/internal/config"
-	"ntdkhiem/firefly-go/internal/service"
+	"ntdkhiem/ppbudget-go/internal/config"
+	"ntdkhiem/ppbudget-go/internal/service"
 
-	apperrors "ntdkhiem/firefly-go/internal/errors"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
@@ -79,7 +79,7 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	var cursorDate *time.Time
 	var cursorID *string
 	if dateStr := r.URL.Query().Get("cursor_date"); dateStr != "" {
-		t, err := time.Parse("2006-01-02", dateStr)
+		t, err := time.Parse(time.RFC3339, dateStr)
 		if err == nil {
 			cursorDate = &t
 			id := r.URL.Query().Get("cursor_id")
@@ -552,6 +552,7 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 		Amount      int64   `json:"amount"`
 		Date        string  `json:"date"`
 		Description string  `json:"description"`
+		Notes       *string `json:"notes"`
 		CategoryID  *string `json:"category_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -565,7 +566,7 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.CreateTransaction(r.Context(), body.AccountID, body.Amount, date, body.Description, body.CategoryID)
+	err = h.svc.CreateTransaction(r.Context(), body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create transaction")
 		return
@@ -604,6 +605,7 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		Amount      int64   `json:"amount"`
 		Date        string  `json:"date"`
 		Description string  `json:"description"`
+		Notes       *string `json:"notes"`
 		CategoryID  *string `json:"category_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -617,7 +619,7 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.UpdateTransaction(r.Context(), id, body.AccountID, body.Amount, date, body.Description, body.CategoryID)
+	err = h.svc.UpdateTransaction(r.Context(), id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")

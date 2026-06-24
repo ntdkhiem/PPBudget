@@ -15,7 +15,7 @@ type Config struct {
 
 func Load() *Config {
 	cfg := &Config{
-		DatabaseURL:   getEnv("DATABASE_URL", "postgres://firefly:firefly_password@localhost:5432/firefly?sslmode=disable"),
+		DatabaseURL:   getEnv("DATABASE_URL", "postgres://ppbudget:ppbudget_password@localhost:5432/ppbudget?sslmode=disable"),
 		Port:          getEnv("PORT", "8080"),
 		IngestAPIKey:  getEnv("INGEST_API_KEY", "super-secret-api-key"),
 		JWTSecret:     getEnv("JWT_SECRET", "super-secret-jwt-key"),

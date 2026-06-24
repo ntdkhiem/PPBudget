@@ -2,8 +2,8 @@ package repository
 
 import (
 	"context"
-	"ntdkhiem/firefly-go/internal/domain"
-	apperrors "ntdkhiem/firefly-go/internal/errors"
+	"ntdkhiem/ppbudget-go/internal/domain"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 
 	"github.com/jackc/pgx/v5"
 )

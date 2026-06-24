@@ -2,9 +2,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"ntdkhiem/firefly-go/internal/config"
-	"ntdkhiem/firefly-go/internal/db"
-	"ntdkhiem/firefly-go/internal/repository"
+	"ntdkhiem/ppbudget-go/internal/config"
+	"ntdkhiem/ppbudget-go/internal/db"
+	"ntdkhiem/ppbudget-go/internal/repository"
 )
 func main() {
 	cfg := config.Load()

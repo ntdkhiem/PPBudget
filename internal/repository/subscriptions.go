@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"ntdkhiem/firefly-go/internal/domain"
-	apperrors "ntdkhiem/firefly-go/internal/errors"
-	"ntdkhiem/firefly-go/pkg/money"
+	"ntdkhiem/ppbudget-go/internal/domain"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
+	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
 func (r *Repository) CreateSubscription(ctx context.Context, name string, amount int64, cycle string, nextDate time.Time, categoryID *string) error {
@@ -46,6 +46,22 @@ func (r *Repository) ListSubscriptions(ctx context.Context) ([]domain.Subscripti
 func (r *Repository) DeleteSubscription(ctx context.Context, id string) error {
 	query := `DELETE FROM subscriptions WHERE id = $1`
 	tag, err := r.pool.Exec(ctx, query, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return apperrors.ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) UpdateSubscription(ctx context.Context, id string, name string, amount int64, cycle string, nextDate time.Time, categoryID *string) error {
+	query := `
+		UPDATE subscriptions 
+		SET name = $1, amount = $2, billing_cycle = $3, next_billing_date = $4, category_id = $5, updated_at = NOW()
+		WHERE id = $6
+	`
+	tag, err := r.pool.Exec(ctx, query, name, amount, cycle, nextDate, categoryID, id)
 	if err != nil {
 		return err
 	}

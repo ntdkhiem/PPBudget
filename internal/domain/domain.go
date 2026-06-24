@@ -3,7 +3,7 @@ package domain
 import (
 	"time"
 
-	"ntdkhiem/firefly-go/pkg/money"
+	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
 type Account struct {
@@ -24,6 +24,7 @@ type Transaction struct {
 	Amount       money.Money `json:"amount"`
 	Date         time.Time   `json:"date"`
 	Description  string      `json:"description"`
+	Notes        *string     `json:"notes,omitempty"`
 	IsReviewed   bool        `json:"is_reviewed"`
 	IsReconciled bool        `json:"is_reconciled"`
 	TransferID   *string     `json:"transfer_id,omitempty"`
@@ -36,10 +37,11 @@ type TransactionWithBalance struct {
 }
 
 type Category struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	CreatedAt time.Time `json:"created_at"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Type             string    `json:"type"`
+	TransactionCount int       `json:"transaction_count"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type Rule struct {
@@ -109,6 +111,7 @@ type ReportsSummary struct {
 	InPeriod           money.Money `json:"in_period"`
 	OutPeriod          money.Money `json:"out_period"`
 	SubscriptionsToPay money.Money `json:"subscriptions_to_pay"`
+	SubscriptionsPaid  money.Money `json:"subscriptions_paid"`
 	LeftToSpend        money.Money `json:"left_to_spend"`
 	NetWorth           money.Money `json:"net_worth"`
 }

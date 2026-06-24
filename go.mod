@@ -1,4 +1,4 @@
-module ntdkhiem/firefly-go
+module ntdkhiem/ppbudget-go
 
 go 1.25.5
 

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"ntdkhiem/firefly-go/internal/domain"
-	"ntdkhiem/firefly-go/internal/repository"
-	"ntdkhiem/firefly-go/pkg/money"
+	"ntdkhiem/ppbudget-go/internal/domain"
+	"ntdkhiem/ppbudget-go/internal/repository"
+	"ntdkhiem/ppbudget-go/pkg/money"
 
-	apperrors "ntdkhiem/firefly-go/internal/errors"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 )
 
 type Service struct {
@@ -268,16 +268,16 @@ func (s *Service) DeleteAccount(ctx context.Context, id string) error {
 
 // Transactions (Manual)
 
-func (s *Service) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, categoryID *string) error {
-	return s.repo.CreateTransaction(ctx, accountID, amount, date, description, categoryID)
+func (s *Service) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string) error {
+	return s.repo.CreateTransaction(ctx, accountID, amount, date, description, notes, categoryID)
 }
 
 func (s *Service) DeleteTransaction(ctx context.Context, id string) error {
 	return s.repo.DeleteTransaction(ctx, id)
 }
 
-func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, categoryID *string) error {
-	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, categoryID)
+func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string) error {
+	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, notes, categoryID)
 }
 
 func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, startDate, endDate *time.Time) (int, error) {
@@ -378,7 +378,7 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 			}
 
 			if needsUpdate {
-				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, newCatID)
+				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID)
 				if err != nil {
 					continue
 				}

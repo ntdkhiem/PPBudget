@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"ntdkhiem/firefly-go/internal/domain"
-	"ntdkhiem/firefly-go/pkg/money"
+	"ntdkhiem/ppbudget-go/internal/domain"
+	"ntdkhiem/ppbudget-go/pkg/money"
 
-	apperrors "ntdkhiem/firefly-go/internal/errors"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -101,12 +101,12 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 	query := `
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.is_reviewed, t.is_reconciled, t.transfer_id,
+            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id,
             (a.initial_balance + SUM(t.amount) OVER (PARTITION BY t.account_id ORDER BY t.date, t.id)) as running_balance
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE ($1 = '' OR t.account_id = NULLIF($1, '')::uuid) AND t.deleted_at IS NULL
-          AND ($2::date IS NULL OR (t.date, t.id) < ($2::date, $3::uuid))
+          AND ($2::timestamptz IS NULL OR (t.date, t.id) < ($2::timestamptz, $3::uuid))
           AND ($4::boolean = false OR t.is_reviewed = false)
           AND ($5::date IS NULL OR t.date >= $5::date)
           AND ($6::date IS NULL OR t.date <= $6::date)
@@ -126,11 +126,12 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		var amount int64
 		var balance int64
 		var catID *string
+		var notes *string
 		var transferID *string
 
 		err := rows.Scan(
 			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-			&t.IsReviewed, &t.IsReconciled, &transferID,
+			&notes, &t.IsReviewed, &t.IsReconciled, &transferID,
 			&balance,
 		)
 		if err != nil {
@@ -140,6 +141,7 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		t.Amount = money.Money(amount)
 		t.RunningBalance = money.Money(balance)
 		t.CategoryID = catID
+		t.Notes = notes
 		t.TransferID = transferID
 		txns = append(txns, t)
 	}
@@ -151,7 +153,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 	query := `
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.is_reviewed, t.is_reconciled, t.transfer_id, a.simplefin_id as simplefin_account_id
+            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, a.simplefin_id as simplefin_account_id
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE t.deleted_at IS NULL
@@ -170,12 +172,13 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 		var t domain.Transaction
 		var amount int64
 		var catID *string
+		var notes *string
 		var transferID *string
 		var sfAccountID *string
 
 		err := rows.Scan(
 			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-			&t.IsReviewed, &t.IsReconciled, &transferID, &sfAccountID,
+			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &sfAccountID,
 		)
 		if err != nil {
 			return nil, err
@@ -183,6 +186,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 
 		t.Amount = money.Money(amount)
 		t.CategoryID = catID
+		t.Notes = notes
 		t.TransferID = transferID
 		t.SimplefinAccountID = sfAccountID
 		txns = append(txns, t)
@@ -280,7 +284,12 @@ func (r *Repository) DeleteCategory(ctx context.Context, id string) error {
 }
 
 func (r *Repository) ListCategories(ctx context.Context) ([]domain.Category, error) {
-	query := `SELECT id, name, type, created_at FROM categories ORDER BY name ASC`
+	query := `
+		SELECT c.id, c.name, c.type, c.created_at, COUNT(t.id) as transaction_count
+		FROM categories c
+		LEFT JOIN transactions t ON c.id = t.category_id
+		GROUP BY c.id
+		ORDER BY c.name ASC`
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -290,7 +299,7 @@ func (r *Repository) ListCategories(ctx context.Context) ([]domain.Category, err
 	var categories []domain.Category
 	for rows.Next() {
 		var c domain.Category
-		if err := rows.Scan(&c.ID, &c.Name, &c.Type, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Type, &c.CreatedAt, &c.TransactionCount); err != nil {
 			return nil, err
 		}
 		categories = append(categories, c)
@@ -358,13 +367,13 @@ func (r *Repository) DeleteAccount(ctx context.Context, id string) error {
 
 // Transactions (Manual)
 
-func (r *Repository) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, categoryID *string) error {
+func (r *Repository) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string) error {
 	query := `
-		INSERT INTO transactions (account_id, amount, date, description, category_id, is_reviewed)
-		VALUES ($1, $2, $3, $4, $5, true)
+		INSERT INTO transactions (account_id, amount, date, description, notes, category_id, is_reviewed)
+		VALUES ($1, $2, $3, $4, $5, $6, true)
 	`
 	// Manual transactions are considered reviewed automatically.
-	_, err := r.pool.Exec(ctx, query, accountID, amount, date, description, categoryID)
+	_, err := r.pool.Exec(ctx, query, accountID, amount, date, description, notes, categoryID)
 	return err
 }
 
@@ -380,7 +389,7 @@ func (r *Repository) DeleteTransaction(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, categoryID *string) error {
+func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -389,10 +398,10 @@ func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string
 
 	query := `
 		UPDATE transactions 
-		SET account_id = $1, amount = $2, date = $3, description = $4, category_id = $5, updated_at = NOW()
-		WHERE id = $6 AND deleted_at IS NULL
+		SET account_id = $1, amount = $2, date = $3, description = $4, notes = $5, category_id = $6, updated_at = NOW()
+		WHERE id = $7 AND deleted_at IS NULL
 	`
-	tag, err := tx.Exec(ctx, query, accountID, amount, date, description, categoryID, id)
+	tag, err := tx.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, id)
 	if err != nil {
 		return err
 	}
@@ -506,11 +515,26 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 	`
 	var subs int64
 	err = r.pool.QueryRow(ctx, querySubs, startDate, endDate).Scan(&subs)
-	// If the table doesn't exist or other err, we might just ignore or return 0, but let's assume it exists
 	if err != nil {
 		subs = 0 // fallback
 	}
 	summary.SubscriptionsToPay = money.Money(subs)
+
+	querySubsPaid := `
+		WITH sub_payments AS (
+			SELECT DISTINCT t.id, ABS(t.amount) as amount
+			FROM transactions t
+			JOIN subscriptions s ON ABS(t.amount) = s.amount AND t.deleted_at IS NULL
+			WHERE t.date >= $1 AND t.date <= $2 AND t.amount < 0
+		)
+		SELECT COALESCE(SUM(amount), 0) FROM sub_payments
+	`
+	var subsPaid int64
+	err = r.pool.QueryRow(ctx, querySubsPaid, startDate, endDate).Scan(&subsPaid)
+	if err != nil {
+		subsPaid = 0
+	}
+	summary.SubscriptionsPaid = money.Money(subsPaid)
 
 	queryBudgets := `
 		WITH budget_spent AS (
