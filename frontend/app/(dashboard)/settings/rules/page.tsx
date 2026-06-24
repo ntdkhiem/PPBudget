@@ -42,6 +42,11 @@ function RulesContent() {
     queryFn: () => apiFetch<Category[]>("/categories", {}, token),
   });
 
+  const { data: subscriptions } = useQuery<any[]>({
+    queryKey: ["subscriptions"],
+    queryFn: () => apiFetch<any[]>("/subscriptions", {}, token),
+  });
+
   const resetForm = () => {
     setName("");
     setDescription("");
@@ -194,7 +199,7 @@ function RulesContent() {
                         <div className="flex flex-wrap gap-1">
                           {rule.actions?.map((a, i) => (
                             <span key={i} className="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded text-xs font-medium border border-emerald-100 dark:border-emerald-500/20 whitespace-nowrap">
-                              {a.action_type === 'set_category' ? 'Cat' : a.action_type}: {a.action_type === 'set_category' ? (categories?.find(c => c.id === a.value)?.name || a.value) : a.value}
+                              {a.action_type === 'set_category' ? 'Cat' : a.action_type === 'link_to_subscription' ? 'Sub' : a.action_type}: {a.action_type === 'set_category' ? (categories?.find(c => c.id === a.value)?.name || a.value) : a.action_type === 'link_to_subscription' ? (subscriptions?.find((s: any) => s.id === a.value)?.name || a.value) : a.value}
                             </span>
                           ))}
                         </div>
@@ -353,6 +358,7 @@ function RulesContent() {
                       <SelectTrigger className="w-full sm:w-[180px] bg-white"><SelectValue/></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="set_category">Set Category</SelectItem>
+                        <SelectItem value="link_to_subscription">Link to Subscription</SelectItem>
                         <SelectItem value="add_tag">Add Tag</SelectItem>
                         <SelectItem value="set_budget">Set Budget</SelectItem>
                       </SelectContent>
@@ -364,6 +370,15 @@ function RulesContent() {
                         <SelectContent>
                           {categories?.map(c => (
                             <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : act.action_type === 'link_to_subscription' ? (
+                      <Select value={act.value} onValueChange={(v) => updateAction(idx, "value", v)}>
+                        <SelectTrigger className="flex-1 bg-white"><SelectValue placeholder="Select Subscription..." /></SelectTrigger>
+                        <SelectContent>
+                          {subscriptions?.map(s => (
+                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>

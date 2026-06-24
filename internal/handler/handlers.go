@@ -552,8 +552,9 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 		Amount      int64   `json:"amount"`
 		Date        string  `json:"date"`
 		Description string  `json:"description"`
-		Notes       *string `json:"notes"`
-		CategoryID  *string `json:"category_id"`
+		Notes          *string `json:"notes"`
+		CategoryID     *string `json:"category_id"`
+		SubscriptionID *string `json:"subscription_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
@@ -566,7 +567,7 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.CreateTransaction(r.Context(), body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID)
+	err = h.svc.CreateTransaction(r.Context(), body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create transaction")
 		return
@@ -605,8 +606,9 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		Amount      int64   `json:"amount"`
 		Date        string  `json:"date"`
 		Description string  `json:"description"`
-		Notes       *string `json:"notes"`
-		CategoryID  *string `json:"category_id"`
+		Notes          *string `json:"notes"`
+		CategoryID     *string `json:"category_id"`
+		SubscriptionID *string `json:"subscription_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
@@ -619,7 +621,7 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.UpdateTransaction(r.Context(), id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID)
+	err = h.svc.UpdateTransaction(r.Context(), id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")

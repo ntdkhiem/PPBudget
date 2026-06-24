@@ -315,7 +315,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 					}
 				}
 
-				_, err = s.repo.InsertIngestedTransaction(bgCtx, tx, targetAccountID, amount, date, txn.Description, txn.ID, nil, false)
+				_, err = s.repo.InsertIngestedTransaction(bgCtx, tx, targetAccountID, amount, date, txn.Description, txn.ID, nil, nil, false)
 				if err != nil {
 					s.logger.Error("failed to insert transaction", "error", err, "sf_txn_id", txn.ID)
 				}

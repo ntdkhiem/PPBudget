@@ -52,15 +52,15 @@ func (r *Repository) GetAccountBySimplefinID(ctx context.Context, tx pgx.Tx, sim
 }
 
 // InsertIngestedTransaction inserts a transaction, returning true if created, false if it was a duplicate
-func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, accountID string, amount money.Money, date time.Time, description, simplefinTxID string, categoryID *string, isReviewed bool) (bool, error) {
+func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, accountID string, amount money.Money, date time.Time, description, simplefinTxID string, categoryID *string, subscriptionID *string, isReviewed bool) (bool, error) {
 	query := `
-        INSERT INTO transactions (account_id, amount, date, description, simplefin_id, category_id, is_reviewed)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO transactions (account_id, amount, date, description, simplefin_id, category_id, subscription_id, is_reviewed)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (simplefin_id) DO NOTHING
         RETURNING id
     `
 	var id string
-	err := tx.QueryRow(ctx, query, accountID, amount.ToInt64(), date, description, simplefinTxID, categoryID, isReviewed).Scan(&id)
+	err := tx.QueryRow(ctx, query, accountID, amount.ToInt64(), date, description, simplefinTxID, categoryID, subscriptionID, isReviewed).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil // Duplicate safely ignored
@@ -101,7 +101,7 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 	query := `
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id,
+            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id,
             (a.initial_balance + SUM(t.amount) OVER (PARTITION BY t.account_id ORDER BY t.date, t.id)) as running_balance
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
@@ -128,10 +128,11 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		var catID *string
 		var notes *string
 		var transferID *string
+		var subID *string
 
 		err := rows.Scan(
 			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-			&notes, &t.IsReviewed, &t.IsReconciled, &transferID,
+			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID,
 			&balance,
 		)
 		if err != nil {
@@ -143,6 +144,7 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		t.CategoryID = catID
 		t.Notes = notes
 		t.TransferID = transferID
+		t.SubscriptionID = subID
 		txns = append(txns, t)
 	}
 	return txns, nil
@@ -153,7 +155,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 	query := `
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, a.simplefin_id as simplefin_account_id
+            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, a.simplefin_id as simplefin_account_id
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE t.deleted_at IS NULL
@@ -175,10 +177,11 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 		var notes *string
 		var transferID *string
 		var sfAccountID *string
+		var subID *string
 
 		err := rows.Scan(
 			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &sfAccountID,
+			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &sfAccountID,
 		)
 		if err != nil {
 			return nil, err
@@ -189,6 +192,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 		t.Notes = notes
 		t.TransferID = transferID
 		t.SimplefinAccountID = sfAccountID
+		t.SubscriptionID = subID
 		txns = append(txns, t)
 	}
 	return txns, nil
@@ -367,13 +371,13 @@ func (r *Repository) DeleteAccount(ctx context.Context, id string) error {
 
 // Transactions (Manual)
 
-func (r *Repository) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string) error {
+func (r *Repository) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
 	query := `
-		INSERT INTO transactions (account_id, amount, date, description, notes, category_id, is_reviewed)
-		VALUES ($1, $2, $3, $4, $5, $6, true)
+		INSERT INTO transactions (account_id, amount, date, description, notes, category_id, subscription_id, is_reviewed)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, true)
 	`
 	// Manual transactions are considered reviewed automatically.
-	_, err := r.pool.Exec(ctx, query, accountID, amount, date, description, notes, categoryID)
+	_, err := r.pool.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID)
 	return err
 }
 
@@ -389,7 +393,7 @@ func (r *Repository) DeleteTransaction(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string) error {
+func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -398,10 +402,10 @@ func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string
 
 	query := `
 		UPDATE transactions 
-		SET account_id = $1, amount = $2, date = $3, description = $4, notes = $5, category_id = $6, updated_at = NOW()
-		WHERE id = $7 AND deleted_at IS NULL
+		SET account_id = $1, amount = $2, date = $3, description = $4, notes = $5, category_id = $6, subscription_id = $7, updated_at = NOW()
+		WHERE id = $8 AND deleted_at IS NULL
 	`
-	tag, err := tx.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, id)
+	tag, err := tx.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID, id)
 	if err != nil {
 		return err
 	}

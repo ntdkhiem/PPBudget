@@ -61,6 +61,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 
 	// Auto-categorization
 	var categoryID *string
+	var subscriptionID *string
 	isReviewed := false
 
 	rules, err := s.repo.ListRulesDetailed(ctx)
@@ -81,17 +82,15 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 		for _, cond := range rule.Conditions {
 			condMatch := false
 			if cond.Field == "description" {
-				lowerDesc := strings.ToLower(req.Description)
-				lowerVal := strings.ToLower(cond.Value)
 				switch cond.Operator {
 				case "contains":
-					condMatch = strings.Contains(lowerDesc, lowerVal)
+					condMatch = strings.Contains(strings.ToLower(req.Description), strings.ToLower(cond.Value))
 				case "is_exactly":
-					condMatch = lowerDesc == lowerVal
+					condMatch = req.Description == cond.Value
 				case "starts_with":
-					condMatch = strings.HasPrefix(lowerDesc, lowerVal)
+					condMatch = strings.HasPrefix(req.Description, cond.Value)
 				case "ends_with":
-					condMatch = strings.HasSuffix(lowerDesc, lowerVal)
+					condMatch = strings.HasSuffix(req.Description, cond.Value)
 				}
 			} else if cond.Field == "amount" {
 				// simple numerical check for amount
@@ -127,6 +126,9 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 				if act.ActionType == "set_category" {
 					catID := act.Value
 					categoryID = &catID
+				} else if act.ActionType == "link_to_subscription" {
+					subID := act.Value
+					subscriptionID = &subID
 				}
 			}
 			isReviewed = true
@@ -135,7 +137,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 	}
 
 	// 4. Insert idempotently
-	created, err := s.repo.InsertIngestedTransaction(ctx, tx, accountID, amount, date, req.Description, req.SimplefinTxID, categoryID, isReviewed)
+	created, err := s.repo.InsertIngestedTransaction(ctx, tx, accountID, amount, date, req.Description, req.SimplefinTxID, categoryID, subscriptionID, isReviewed)
 	if err != nil {
 		return err
 	}
@@ -268,16 +270,16 @@ func (s *Service) DeleteAccount(ctx context.Context, id string) error {
 
 // Transactions (Manual)
 
-func (s *Service) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string) error {
-	return s.repo.CreateTransaction(ctx, accountID, amount, date, description, notes, categoryID)
+func (s *Service) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
+	return s.repo.CreateTransaction(ctx, accountID, amount, date, description, notes, categoryID, subscriptionID)
 }
 
 func (s *Service) DeleteTransaction(ctx context.Context, id string) error {
 	return s.repo.DeleteTransaction(ctx, id)
 }
 
-func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string) error {
-	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, notes, categoryID)
+func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
+	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, notes, categoryID, subscriptionID)
 }
 
 func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, startDate, endDate *time.Time) (int, error) {
@@ -312,17 +314,15 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 		for _, cond := range rule.Conditions {
 			condMatch := false
 			if cond.Field == "description" {
-				lowerDesc := strings.ToLower(t.Description)
-				lowerVal := strings.ToLower(cond.Value)
 				switch cond.Operator {
 				case "contains":
-					condMatch = strings.Contains(lowerDesc, lowerVal)
+					condMatch = strings.Contains(strings.ToLower(t.Description), strings.ToLower(cond.Value))
 				case "is_exactly":
-					condMatch = lowerDesc == lowerVal
+					condMatch = t.Description == cond.Value
 				case "starts_with":
-					condMatch = strings.HasPrefix(lowerDesc, lowerVal)
+					condMatch = strings.HasPrefix(t.Description, cond.Value)
 				case "ends_with":
-					condMatch = strings.HasSuffix(lowerDesc, lowerVal)
+					condMatch = strings.HasSuffix(t.Description, cond.Value)
 				}
 			} else if cond.Field == "amount" {
 				condAmt, err := money.NewFromString(cond.Value)
@@ -356,6 +356,7 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 
 		if match {
 			var newCatID *string = t.CategoryID
+			var newSubID *string = t.SubscriptionID
 			var newAccID string = t.AccountID
 			needsUpdate := false
 
@@ -375,10 +376,19 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 						needsUpdate = true
 					}
 				}
+				if act.ActionType == "link_to_subscription" {
+					if act.Value != "" {
+						subID := act.Value
+						if newSubID == nil || *newSubID != subID {
+							newSubID = &subID
+							needsUpdate = true
+						}
+					}
+				}
 			}
 
 			if needsUpdate {
-				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID)
+				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID, newSubID)
 				if err != nil {
 					continue
 				}

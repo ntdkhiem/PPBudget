@@ -29,6 +29,7 @@ type Transaction struct {
 	IsReconciled bool        `json:"is_reconciled"`
 	TransferID   *string     `json:"transfer_id,omitempty"`
 	SimplefinAccountID *string `json:"simplefin_account_id,omitempty"`
+	SubscriptionID *string   `json:"subscription_id,omitempty"`
 }
 
 type TransactionWithBalance struct {
