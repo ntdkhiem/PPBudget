@@ -1,0 +1,13 @@
+--- internal/domain/domain.go
++++ internal/domain/domain.go
+@@ -82,3 +82,10 @@
+ 	ConditionType string `json:"condition_type"` // e.g. "and", "or"
+ 	Conditions    []RuleCondition `json:"conditions"`
+ }
++
++type SearchResult struct {
++	Transactions  []Transaction  `json:"transactions"`
++	Categories    []Category     `json:"categories"`
++	Accounts      []Account      `json:"accounts"`
++	Subscriptions []Subscription `json:"subscriptions"`
++}

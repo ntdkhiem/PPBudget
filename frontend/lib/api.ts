@@ -45,6 +45,7 @@ export interface Transaction {
   is_reviewed: boolean;
   running_balance?: number; // cents
   category_id?: string | null;
+  linked_transaction_id?: string | null;
   category?: { id: string; name: string };
 }
 

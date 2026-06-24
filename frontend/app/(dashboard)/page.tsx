@@ -197,12 +197,14 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-col gap-1">
             <div className="text-2xl font-bold font-heading text-slate-900 dark:text-white">
-              {loadingSummary ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary?.subscriptions_to_pay || 0)}
+              {loadingSummary ? <Skeleton className="h-8 w-24" /> : formatCurrency(Math.max(0, (summary?.subscriptions_to_pay || 0) - (summary?.subscriptions_paid || 0)))}
             </div>
             <div className="text-sm font-medium flex items-center gap-2 text-slate-500 dark:text-slate-400">
               {loadingSummary ? <Skeleton className="h-4 w-32" /> : (
                 <>
                   Paid: <span className="text-emerald-600 dark:text-emerald-500 font-semibold">{formatCurrency(summary?.subscriptions_paid || 0)}</span>
+                  <span className="text-slate-300 dark:text-slate-700">/</span>
+                  Total: <span className="text-slate-600 dark:text-slate-300 font-semibold">{formatCurrency(summary?.subscriptions_to_pay || 0)}</span>
                 </>
               )}
             </div>

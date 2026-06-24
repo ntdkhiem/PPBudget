@@ -555,6 +555,7 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 		Notes          *string `json:"notes"`
 		CategoryID     *string `json:"category_id"`
 		SubscriptionID *string `json:"subscription_id"`
+		LinkedTransactionID *string `json:"linked_transaction_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
@@ -567,7 +568,7 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.CreateTransaction(r.Context(), body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID)
+	err = h.svc.CreateTransaction(r.Context(), body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID, body.LinkedTransactionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create transaction")
 		return
@@ -594,6 +595,39 @@ func (h *Handler) DeleteTransaction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (h *Handler) BulkDeleteTransactions(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TransactionIDs []string `json:"transaction_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+	err := h.svc.BulkDeleteTransactions(r.Context(), body.TransactionIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete transactions")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) BulkUpdateTransactionsCategory(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TransactionIDs []string `json:"transaction_ids"`
+		CategoryID     string   `json:"category_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+	err := h.svc.BulkUpdateTransactionsCategory(r.Context(), body.TransactionIDs, body.CategoryID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update transactions")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -609,6 +643,7 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		Notes          *string `json:"notes"`
 		CategoryID     *string `json:"category_id"`
 		SubscriptionID *string `json:"subscription_id"`
+		LinkedTransactionID *string `json:"linked_transaction_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
@@ -621,7 +656,7 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.UpdateTransaction(r.Context(), id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID)
+	err = h.svc.UpdateTransaction(r.Context(), id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID, body.LinkedTransactionID)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")
@@ -713,4 +748,20 @@ func (h *Handler) GetReportsSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, summary)
+}
+
+func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "missing transaction id", http.StatusBadRequest)
+		return
+	}
+	txn, err := h.svc.GetTransaction(r.Context(), id)
+	if err != nil {
+		h.logger.Error("failed to get transaction", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(txn)
 }

@@ -97,9 +97,12 @@ func main() {
 			// Transactions
 			r.Get("/transactions", h.ListTransactions)
 			r.Post("/transactions", h.CreateTransaction)
+			r.Get("/transactions/{id}", h.GetTransaction)
 			r.Put("/transactions/{id}", h.UpdateTransaction)
 			r.Delete("/transactions/{id}", h.DeleteTransaction)
 			r.Patch("/transactions/{id}/review", h.ReviewTransaction)
+			r.Post("/transactions/bulk/category", h.BulkUpdateTransactionsCategory)
+			r.Post("/transactions/bulk/delete", h.BulkDeleteTransactions)
 
 			// Transfers
 			r.Post("/transfers", h.CreateTransfer)
@@ -134,6 +137,9 @@ func main() {
 			r.Post("/subscriptions", h.CreateSubscription)
 			r.Put("/subscriptions/{id}", h.UpdateSubscription)
 			r.Delete("/subscriptions/{id}", h.DeleteSubscription)
+
+			// Search
+			r.Get("/search", h.GlobalSearch)
 		})
 	})
 

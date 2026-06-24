@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { LayoutDashboard, ReceiptText, ListChecks, PieChart, Settings, SlidersHorizontal, LogOut, Wallet, Database } from "lucide-react";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
+import { GlobalSearch } from "@/components/global-search";
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -50,6 +51,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
         
         <div className="mb-6">
+          <GlobalSearch />
           <DatePickerWithRange date={date} setDate={setDate} className="w-full" />
         </div>
 

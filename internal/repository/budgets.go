@@ -55,13 +55,27 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, month time.Time) ([]
 	// A budget has start_date and end_date. For the summary, we calculate spent_total by joining transactions within start_date and end_date.
 	
 	query := `
-		WITH budget_spent AS (
-			SELECT b.id as budget_id, COALESCE(SUM(ABS(t.amount)), 0) as spent_total
+		WITH effective_transactions AS (
+			SELECT 
+				t.id,
+				t.category_id,
+				t.date,
+				CASE 
+					WHEN t.linked_transaction_id IS NOT NULL THEN 0
+					ELSE t.amount + COALESCE((
+						SELECT SUM(amount) FROM transactions child 
+						WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
+					), 0)
+				END as eff_amount
+			FROM transactions t
+			WHERE t.deleted_at IS NULL
+		),
+		budget_spent AS (
+			SELECT b.id as budget_id, COALESCE(SUM(ABS(t.eff_amount)), 0) as spent_total
 			FROM budgets b
-			LEFT JOIN transactions t ON t.category_id = b.category_id 
+			LEFT JOIN effective_transactions t ON t.category_id = b.category_id 
 				AND t.date >= b.start_date 
 				AND t.date <= b.end_date
-				AND t.deleted_at IS NULL
 			WHERE b.start_date <= $1::date + INTERVAL '1 month - 1 day'
 			  AND b.end_date >= $1::date
 			GROUP BY b.id

@@ -155,6 +155,10 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 	return nil
 }
 
+func (s *Service) GetTransaction(ctx context.Context, id string) (*domain.Transaction, error) {
+	return s.repo.GetTransaction(ctx, id)
+}
+
 type TransferRequest struct {
 	FromAccountID string `json:"from_account_id"`
 	ToAccountID   string `json:"to_account_id"`
@@ -270,16 +274,24 @@ func (s *Service) DeleteAccount(ctx context.Context, id string) error {
 
 // Transactions (Manual)
 
-func (s *Service) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
-	return s.repo.CreateTransaction(ctx, accountID, amount, date, description, notes, categoryID, subscriptionID)
+func (s *Service) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, linkedTransactionID *string) error {
+	return s.repo.CreateTransaction(ctx, accountID, amount, date, description, notes, categoryID, subscriptionID, linkedTransactionID)
 }
 
 func (s *Service) DeleteTransaction(ctx context.Context, id string) error {
 	return s.repo.DeleteTransaction(ctx, id)
 }
 
-func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
-	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, notes, categoryID, subscriptionID)
+func (s *Service) BulkDeleteTransactions(ctx context.Context, ids []string) error {
+	return s.repo.BulkDeleteTransactions(ctx, ids)
+}
+
+func (s *Service) BulkUpdateTransactionsCategory(ctx context.Context, ids []string, categoryID string) error {
+	return s.repo.BulkUpdateTransactionsCategory(ctx, ids, categoryID)
+}
+
+func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, linkedTransactionID *string) error {
+	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, notes, categoryID, subscriptionID, linkedTransactionID)
 }
 
 func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, startDate, endDate *time.Time) (int, error) {
@@ -388,7 +400,7 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 			}
 
 			if needsUpdate {
-				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID, newSubID)
+				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID, newSubID, t.LinkedTransactionID)
 				if err != nil {
 					continue
 				}

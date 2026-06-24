@@ -30,7 +30,6 @@ type Transaction struct {
 	TransferID   *string     `json:"transfer_id,omitempty"`
 	SimplefinAccountID *string `json:"simplefin_account_id,omitempty"`
 	SubscriptionID *string   `json:"subscription_id,omitempty"`
-	LinkedTransactionID *string `json:"linked_transaction_id,omitempty"`
 }
 
 type TransactionWithBalance struct {
@@ -127,11 +126,4 @@ type Subscription struct {
 	CategoryID      *string     `json:"category_id,omitempty"`
 	CreatedAt       time.Time   `json:"created_at"`
 	UpdatedAt       time.Time   `json:"updated_at"`
-}
-
-type SearchResult struct {
-	Transactions  []Transaction  `json:"transactions"`
-	Categories    []Category     `json:"categories"`
-	Accounts      []Account      `json:"accounts"`
-	Subscriptions []Subscription `json:"subscriptions"`
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, Transaction, Category, Account } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
@@ -59,6 +60,29 @@ export default function TransactionsPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [quickEditTxnId, setQuickEditTxnId] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<{date: string, id: string}[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkCategoryOpen, setIsBulkCategoryOpen] = useState(false);
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  useEffect(() => {
+    const editId = searchParams?.get("edit_id");
+    if (editId) {
+      // Fetch this specific transaction
+      apiFetch<Transaction>(`/transactions/${editId}`, {}, token)
+        .then((txn) => {
+          setSelectedTxn(txn);
+          setIsEditOpen(true);
+          // Remove from URL so it doesn't trigger again on refresh
+          router.replace("/transactions", { scroll: false });
+        })
+        .catch((err) => {
+          console.error("Failed to fetch transaction for edit:", err);
+        });
+    }
+  }, [searchParams, router, token]);
 
   const truncateText = (text: string, maxLength: number = 100) => {
     if (!text) return "";
@@ -104,6 +128,53 @@ export default function TransactionsPage() {
     queryKey: ["accounts"],
     queryFn: () => apiFetch<Account[]>("/accounts", {}, token),
   });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => apiFetch("/transactions/bulk/delete", {
+      method: "POST",
+      body: JSON.stringify({ transaction_ids: ids }),
+    }, token),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      setSelectedIds([]);
+      setIsBulkDeleteOpen(false);
+      toast.success("Transactions deleted successfully");
+    },
+    onError: () => toast.error("Failed to delete transactions"),
+  });
+
+  const bulkCategoryMutation = useMutation({
+    mutationFn: ({ ids, catId }: { ids: string[], catId: string }) => apiFetch("/transactions/bulk/category", {
+      method: "POST",
+      body: JSON.stringify({ transaction_ids: ids, category_id: catId }),
+    }, token),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      setSelectedIds([]);
+      setIsBulkCategoryOpen(false);
+      setBulkCategoryId("");
+      toast.success("Categories updated successfully");
+    },
+    onError: () => toast.error("Failed to update categories"),
+  });
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked && transactions) {
+      setSelectedIds(transactions.map(t => t.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelectRow = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedIds(prev => [...prev, id]);
+    } else {
+      setSelectedIds(prev => prev.filter(x => x !== id));
+    }
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) =>
@@ -188,6 +259,7 @@ export default function TransactionsPage() {
       description: formData.get("description"),
       notes: formData.get("notes") || null,
       category_id: formData.get("categoryId") || null,
+      linked_transaction_id: formData.get("linkedTransactionId") || null,
     });
   };
 
@@ -203,6 +275,7 @@ export default function TransactionsPage() {
       description: formData.get("description"),
       notes: formData.get("notes") || null,
       category_id: formData.get("categoryId") || null,
+      linked_transaction_id: formData.get("linkedTransactionId") || null,
     });
   };
 
@@ -313,11 +386,18 @@ export default function TransactionsPage() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent border-slate-200/60 dark:border-slate-800/60">
+              <TableHead className="w-12 py-4 text-center">
+                <input 
+                  type="checkbox" 
+                  className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
+                  checked={transactions?.length ? selectedIds.length === transactions.length : false}
+                  onChange={(e) => handleSelectAll(e.target.checked)}
+                />
+              </TableHead>
               <TableHead className="font-semibold text-slate-500 py-4">Description</TableHead>
               <TableHead className="font-semibold text-slate-500 text-right py-4">Amount</TableHead>
               <TableHead className="font-semibold text-slate-500 py-4">Date</TableHead>
               <TableHead className="font-semibold text-slate-500 py-4">Account</TableHead>
-              <TableHead className="font-semibold text-slate-500 py-4">Destination</TableHead>
               <TableHead className="font-semibold text-slate-500 py-4">Category</TableHead>
               <TableHead className="font-semibold text-slate-500 text-right py-4">Action</TableHead>
             </TableRow>
@@ -326,10 +406,10 @@ export default function TransactionsPage() {
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
+                  <TableCell><Skeleton className="h-4 w-4" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-48" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-8 w-24 rounded-lg" /></TableCell>
                   <TableCell><Skeleton className="h-8 w-16 ml-auto rounded-lg" /></TableCell>
@@ -337,7 +417,7 @@ export default function TransactionsPage() {
               ))
             ) : transactions?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-64 p-0">
+                <TableCell colSpan={7} className="h-64 p-0">
                   <EmptyState 
                     icon={SearchX} 
                     title="No transactions found" 
@@ -354,9 +434,17 @@ export default function TransactionsPage() {
               transactions?.map((txn) => (
                 <TableRow 
                   key={txn.id} 
-                  className="group cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors border-slate-200/60 dark:border-slate-800/60"
+                  className={`group cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors border-slate-200/60 dark:border-slate-800/60 ${selectedIds.includes(txn.id) ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : ''}`}
                   onClick={() => handleRowClick(txn)}
                 >
+                  <TableCell className="w-12 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
+                      checked={selectedIds.includes(txn.id)}
+                      onChange={(e) => handleSelectRow(txn.id, e.target.checked)}
+                    />
+                  </TableCell>
                   <TableCell className="py-4 font-medium text-slate-900 dark:text-slate-100 max-w-xs" title={txn.description}>
                     <div className="line-clamp-3 whitespace-pre-wrap break-words">{truncateText(txn.description)}</div>
                     {!txn.is_reviewed && (
@@ -375,9 +463,6 @@ export default function TransactionsPage() {
                   </TableCell>
                   <TableCell className="py-4 text-slate-600 dark:text-slate-300 max-w-[150px]" title={accounts?.find(a => a.id === txn.account_id)?.name || "Unknown"}>
                     <div className="line-clamp-3 whitespace-pre-wrap break-words">{truncateText(accounts?.find(a => a.id === txn.account_id)?.name || "Unknown")}</div>
-                  </TableCell>
-                  <TableCell className="py-4 text-slate-600 dark:text-slate-300 max-w-[150px]">
-                    <div className="line-clamp-3 whitespace-pre-wrap break-words">-</div>
                   </TableCell>
                   <TableCell className="py-4" onClick={(e) => e.stopPropagation()}>
                     <Popover open={quickEditTxnId === txn.id} onOpenChange={(open) => setQuickEditTxnId(open ? txn.id : null)}>
@@ -514,6 +599,10 @@ export default function TransactionsPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="editLinkedTransactionId" className="text-slate-700 dark:text-slate-300 text-lg">Pays for (Link to Transaction ID)</Label>
+                    <Input id="editLinkedTransactionId" name="linkedTransactionId" defaultValue={selectedTxn.linked_transaction_id || ""} placeholder="UUID of the destination transaction" className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg font-mono text-sm" />
+                  </div>
                 </div>
                 <div className="pt-8 flex gap-4 shrink-0">
                   <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)} className="flex-1 rounded-xl py-8 text-xl border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800">
@@ -528,6 +617,100 @@ export default function TransactionsPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {selectedIds.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 50 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 50 }}
+          className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-slate-900/90 dark:bg-slate-800/90 backdrop-blur-md px-6 py-4 rounded-2xl shadow-2xl border border-slate-700/50"
+        >
+          <span className="text-white font-medium">
+            {selectedIds.length} selected
+          </span>
+          <div className="h-6 w-px bg-slate-700 mx-2" />
+          <Button 
+            variant="ghost" 
+            className="text-white hover:bg-slate-800 hover:text-white"
+            onClick={() => setIsBulkCategoryOpen(true)}
+          >
+            <Edit2 className="w-4 h-4 mr-2" />
+            Set Category
+          </Button>
+          <Button 
+            variant="destructive" 
+            className="bg-rose-500/20 text-rose-300 hover:bg-rose-500 hover:text-white"
+            onClick={() => setIsBulkDeleteOpen(true)}
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Delete
+          </Button>
+        </motion.div>
+      )}
+
+      {/* Bulk Category Modal */}
+      <Dialog open={isBulkCategoryOpen} onOpenChange={setIsBulkCategoryOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Update Category</DialogTitle>
+            <DialogDescription>
+              Select a category for {selectedIds.length} transactions.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label>Category</Label>
+            <Select value={bulkCategoryId} onValueChange={setBulkCategoryId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select category" />
+              </SelectTrigger>
+              <SelectContent>
+                {categories?.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button variant="outline" onClick={() => setIsBulkCategoryOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              onClick={() => bulkCategoryMutation.mutate({ ids: selectedIds, catId: bulkCategoryId })}
+              disabled={bulkCategoryMutation.isPending || !bulkCategoryId}
+            >
+              {bulkCategoryMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : "Save"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Modal */}
+      <Dialog open={isBulkDeleteOpen} onOpenChange={setIsBulkDeleteOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-rose-600">Delete Transactions</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete {selectedIds.length} transactions? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button variant="outline" onClick={() => setIsBulkDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive"
+              onClick={() => bulkDeleteMutation.mutate(selectedIds)}
+              disabled={bulkDeleteMutation.isPending}
+            >
+              {bulkDeleteMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : "Delete"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </motion.div>
   );
 }
