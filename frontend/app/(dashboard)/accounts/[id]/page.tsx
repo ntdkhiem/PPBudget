@@ -86,7 +86,7 @@ export default function AccountDetailPage() {
       <h1 className="text-3xl font-bold mb-6">Account History</h1>
       
       {/* Filtering Bar */}
-      <div className="bg-white p-4 rounded-lg shadow mb-6 flex flex-wrap gap-4 items-center">
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-lg shadow mb-6 flex flex-wrap gap-4 items-center">
         <div className="flex items-center bg-gray-100 rounded px-3 py-2 flex-1 min-w-[200px]">
           <Search size={18} className="text-gray-500 mr-2" />
           <input 
@@ -103,7 +103,7 @@ export default function AccountDetailPage() {
           <span className="text-gray-500">-</span>
           <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="border rounded px-2 py-1 text-sm" />
         </div>
-        <div className="flex items-center gap-2 border rounded px-3 py-1 bg-white">
+        <div className="flex items-center gap-2 border rounded px-3 py-1 bg-white dark:bg-slate-900">
           <Filter size={18} className="text-gray-500" />
           <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className="outline-none text-sm bg-transparent">
             <option value="">All Categories</option>
@@ -115,7 +115,7 @@ export default function AccountDetailPage() {
       </div>
 
       {/* Transactions Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-lg shadow overflow-hidden">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -126,7 +126,7 @@ export default function AccountDetailPage() {
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-200">
             {filteredTxns.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-6 py-12 text-center text-gray-500">No transactions found.</td>
@@ -224,7 +224,7 @@ function ManualEntryModal({ accountId, onClose, token }: { accountId: string, on
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded-lg shadow-xl w-96 relative">
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-lg shadow-xl w-96 relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-800"><X size={20}/></button>
         <h2 className="text-xl font-bold mb-4">Add Transaction</h2>
         <div className="flex flex-col gap-4">

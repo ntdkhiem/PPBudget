@@ -27,7 +27,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-100">
-      <form onSubmit={handleLogin} className="p-8 bg-white rounded shadow-md w-96">
+      <form onSubmit={handleLogin} className="p-8 bg-white dark:bg-slate-900 rounded shadow-md w-96">
         <h1 className="text-2xl font-bold mb-6 text-center">PPBudget Go</h1>
         {error && <p className="text-red-500 mb-4 text-sm">{error}</p>}
         <input

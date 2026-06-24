@@ -102,7 +102,18 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
             t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, t.linked_transaction_id,
-            (a.initial_balance + SUM(t.amount) OVER (PARTITION BY t.account_id ORDER BY t.date, t.id)) as running_balance
+            (a.initial_balance + SUM(t.amount) OVER (PARTITION BY t.account_id ORDER BY t.date, t.id)) as running_balance,
+            (CASE 
+                WHEN t.linked_transaction_id IS NOT NULL THEN 0
+                ELSE t.amount + COALESCE((
+                    SELECT SUM(amount) FROM transactions child 
+                    WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
+                ), 0)
+            END) as effective_amount,
+            COALESCE((
+                SELECT array_agg(child.id::text) FROM transactions child 
+                WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
+            ), '{}'::text[]) as linked_by
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE ($1 = '' OR t.account_id = NULLIF($1, '')::uuid) AND t.deleted_at IS NULL
@@ -130,11 +141,13 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		var transferID *string
 		var subID *string
 		var linkedTxnID *string
+		var effectiveAmount int64
+		var linkedBy []string
 
 		err := rows.Scan(
 			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
 			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &linkedTxnID,
-			&balance,
+			&balance, &effectiveAmount, &linkedBy,
 		)
 		if err != nil {
 			return nil, err
@@ -147,6 +160,8 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		t.TransferID = transferID
 		t.SubscriptionID = subID
 		t.LinkedTransactionID = linkedTxnID
+		t.EffectiveAmount = money.Money(effectiveAmount)
+		t.LinkedBy = linkedBy
 		txns = append(txns, t)
 	}
 	return txns, nil
@@ -157,7 +172,18 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 	query := `
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, t.linked_transaction_id, a.simplefin_id as simplefin_account_id
+            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, t.linked_transaction_id, a.simplefin_id as simplefin_account_id,
+            (CASE 
+                WHEN t.linked_transaction_id IS NOT NULL THEN 0
+                ELSE t.amount + COALESCE((
+                    SELECT SUM(amount) FROM transactions child 
+                    WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
+                ), 0)
+            END) as effective_amount,
+            COALESCE((
+                SELECT array_agg(child.id::text) FROM transactions child 
+                WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
+            ), '{}'::text[]) as linked_by
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE t.deleted_at IS NULL
@@ -181,10 +207,13 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 		var sfAccountID *string
 		var subID *string
 		var linkedTxnID *string
+		var effectiveAmount int64
+		var linkedBy []string
 
 		err := rows.Scan(
 			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
 			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &linkedTxnID, &sfAccountID,
+			&effectiveAmount, &linkedBy,
 		)
 		if err != nil {
 			return nil, err
@@ -197,6 +226,8 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 		t.SimplefinAccountID = sfAccountID
 		t.SubscriptionID = subID
 		t.LinkedTransactionID = linkedTxnID
+		t.EffectiveAmount = money.Money(effectiveAmount)
+		t.LinkedBy = linkedBy
 		txns = append(txns, t)
 	}
 	return txns, nil

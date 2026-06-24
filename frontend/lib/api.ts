@@ -46,6 +46,8 @@ export interface Transaction {
   running_balance?: number; // cents
   category_id?: string | null;
   linked_transaction_id?: string | null;
+  effective_amount?: number;
+  linked_by?: string[];
   category?: { id: string; name: string };
 }
 

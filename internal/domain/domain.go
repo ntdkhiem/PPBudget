@@ -31,6 +31,8 @@ type Transaction struct {
 	SimplefinAccountID *string `json:"simplefin_account_id,omitempty"`
 	SubscriptionID *string   `json:"subscription_id,omitempty"`
 	LinkedTransactionID *string `json:"linked_transaction_id,omitempty"`
+	EffectiveAmount     money.Money `json:"effective_amount"`
+	LinkedBy            []string    `json:"linked_by,omitempty"`
 }
 
 type TransactionWithBalance struct {

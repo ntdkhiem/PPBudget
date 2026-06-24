@@ -7,6 +7,7 @@ import { useState, ReactNode } from "react";
 import { toast } from "sonner";
 import { QueryCache, MutationCache } from "@tanstack/react-query";
 import { DateRangeProvider } from "./contexts/DateRangeContext";
+import { ThemeProvider } from "next-themes";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -27,11 +28,13 @@ export function Providers({ children }: { children: ReactNode }) {
   );
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <DateRangeProvider>
-        {children}
-      </DateRangeProvider>
-      <ReactQueryDevtools initialIsOpen={false} />
-    </QueryClientProvider>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <QueryClientProvider client={queryClient}>
+        <DateRangeProvider>
+          {children}
+        </DateRangeProvider>
+        <ReactQueryDevtools initialIsOpen={false} />
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }

@@ -146,8 +146,8 @@ export default function ReviewPage() {
         </div>
       </div>
 
-      <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/60 dark:border-slate-800/60 rounded-3xl shadow-sm flex-1 flex flex-col overflow-hidden relative">
-        <div className="px-6 py-4 border-b border-slate-200/60 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
+      <div className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 rounded-3xl shadow-sm flex-1 flex flex-col overflow-hidden relative">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50/50 dark:bg-slate-800/50">
           <div className="flex items-center gap-4">
             <input 
               type="checkbox" 
@@ -193,7 +193,7 @@ export default function ReviewPage() {
                         width: '100%',
                         height: `${virtualRow.size}px`,
                       }}
-                      className={`flex items-center px-6 border-b border-slate-100 dark:border-slate-800/60 transition-colors cursor-pointer group ${isActive ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'} ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''}`}
+                      className={`flex items-center px-6 border-b border-slate-100 dark:border-slate-800/60 transition-colors cursor-pointer group ${isActive ? 'bg-indigo-50 dark:bg-indigo-900/30/50 dark:bg-indigo-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:bg-slate-800/50 dark:hover:bg-slate-800/40'} ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''}`}
                       onClick={() => setActiveTxnId(txn.id)}
                     >
                       <div className="flex items-center gap-4 w-full h-full py-4">
@@ -216,7 +216,7 @@ export default function ReviewPage() {
                         <div className="hidden md:block mx-4">
                           <Popover>
                             <PopoverTrigger asChild onClick={(e) => e.stopPropagation()}>
-                              <Button variant="ghost" className={`h-10 px-4 rounded-xl text-sm font-medium border ${txn.category_id ? 'border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-300' : 'border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:text-indigo-400 dark:bg-indigo-500/10 dark:border-indigo-500/30'}`}>
+                              <Button variant="ghost" className={`h-10 px-4 rounded-xl text-sm font-medium border ${txn.category_id ? 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:border-slate-700 dark:text-slate-300' : 'border-indigo-200 text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:text-indigo-400 dark:bg-indigo-500/10 dark:border-indigo-500/30'}`}>
                                 {categories?.find(c => c.id === txn.category_id)?.name || "Assign Category"}
                               </Button>
                             </PopoverTrigger>
@@ -226,7 +226,7 @@ export default function ReviewPage() {
                                 {categories?.map((cat) => (
                                   <div
                                     key={cat.id}
-                                    className={`px-3 py-2 text-sm rounded-xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between mb-1 ${txn.category_id === cat.id ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : ''}`}
+                                    className={`px-3 py-2 text-sm rounded-xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800 flex items-center justify-between mb-1 ${txn.category_id === cat.id ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : ''}`}
                                     onClick={(e) => { e.stopPropagation(); reviewMutation.mutate({ id: txn.id, categoryId: cat.id }); }}
                                   >
                                     {cat.name}
@@ -270,13 +270,13 @@ export default function ReviewPage() {
             initial={{ opacity: 0, y: 50, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.95 }}
-            className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900/90 dark:bg-slate-100/90 backdrop-blur-xl shadow-2xl rounded-2xl px-6 py-4 flex items-center gap-6 z-50 border border-slate-700 dark:border-slate-300"
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900/90 dark:bg-slate-100 dark:bg-slate-800/90 backdrop-blur-xl shadow-2xl rounded-2xl px-6 py-4 flex items-center gap-6 z-50 border border-slate-700 dark:border-slate-300"
           >
             <div className="flex items-center gap-3">
               <div className="bg-indigo-600 text-white font-bold h-8 w-8 rounded-full flex items-center justify-center text-sm shadow-md">
                 {selectedIds.size}
               </div>
-              <span className="text-white dark:text-slate-900 font-medium">Selected</span>
+              <span className="text-white dark:text-slate-900 dark:text-slate-100 font-medium">Selected</span>
             </div>
             
             <div className="h-8 w-px bg-slate-700 dark:bg-slate-300 mx-2"></div>

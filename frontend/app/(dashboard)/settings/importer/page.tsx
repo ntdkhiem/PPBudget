@@ -244,7 +244,7 @@ export default function SimpleFinImporterWizard() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/40 dark:shadow-none border border-slate-200/60 dark:border-slate-800/60 overflow-hidden relative min-h-[450px]">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/40 dark:shadow-none border border-slate-200 dark:border-slate-800 overflow-hidden relative min-h-[450px]">
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500" />
         
         <AnimatePresence mode="wait">
@@ -344,7 +344,7 @@ export default function SimpleFinImporterWizard() {
               <form onSubmit={handleStep2} className="flex-1 flex flex-col min-h-0">
                 <div className="flex-1 overflow-y-auto pr-2 pb-6 space-y-4">
                   {simpleFinAccounts.map((sfAcc) => (
-                    <div key={sfAcc.id} className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-indigo-200 dark:hover:border-indigo-900/50 transition-colors">
+                    <div key={sfAcc.id} className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/30 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-indigo-200 dark:hover:border-indigo-900/50 transition-colors">
                       <div>
                         <div className="font-semibold text-slate-900 dark:text-slate-100">{sfAcc.name}</div>
                         <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">{sfAcc.org?.name} &middot; {sfAcc.currency} {sfAcc.balance}</div>
@@ -382,7 +382,7 @@ export default function SimpleFinImporterWizard() {
                 </div>
 
                 <div className="flex justify-between items-center pt-6 border-t border-slate-100 dark:border-slate-800 mt-auto">
-                  <Button type="button" variant="ghost" onClick={() => setStep(configData?.connected ? 0 : 1)} className="h-12 px-6 rounded-xl text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                  <Button type="button" variant="ghost" onClick={() => setStep(configData?.connected ? 0 : 1)} className="h-12 px-6 rounded-xl text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-300">
                     <ChevronLeft className="w-5 h-5 mr-1.5 -ml-1" /> Back
                   </Button>
                   <Button type="submit" className="h-12 px-8 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-md font-medium text-base transition-all">
@@ -454,7 +454,7 @@ export default function SimpleFinImporterWizard() {
                 </div>
 
                 <div className="flex justify-between items-center pt-6 border-t border-slate-100 dark:border-slate-800 mt-8">
-                  <Button type="button" variant="ghost" onClick={() => setStep(2)} className="h-12 px-6 rounded-xl text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                  <Button type="button" variant="ghost" onClick={() => setStep(2)} className="h-12 px-6 rounded-xl text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-300">
                     <ChevronLeft className="w-5 h-5 mr-1.5 -ml-1" /> Back
                   </Button>
                   <Button type="submit" className="h-12 px-8 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-md font-medium text-base transition-all">
@@ -516,7 +516,7 @@ export default function SimpleFinImporterWizard() {
               )}
 
               <div className="flex justify-between items-center pt-6 border-t border-slate-100 dark:border-slate-800">
-                <Button type="button" variant="ghost" onClick={() => setStep(3)} disabled={isExecuting || executeMutation.isPending} className="h-12 px-6 rounded-xl text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                <Button type="button" variant="ghost" onClick={() => setStep(3)} disabled={isExecuting || executeMutation.isPending} className="h-12 px-6 rounded-xl text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-300">
                   <ChevronLeft className="w-5 h-5 mr-1.5 -ml-1" /> Back
                 </Button>
                 <Button 

@@ -167,7 +167,7 @@ export default function DashboardPage() {
 
       {/* Summary Boxes */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200/60 dark:border-slate-800/60 relative overflow-hidden group">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><ArrowUpRight className="w-16 h-16 text-indigo-600" /></div>
           <div className="flex items-center gap-3 mb-4">
             <div className="bg-indigo-50 dark:bg-indigo-500/10 p-2 rounded-xl text-indigo-600 dark:text-indigo-400"><ArrowUpRight className="w-5 h-5" /></div>
@@ -181,7 +181,7 @@ export default function DashboardPage() {
               {loadingSummary ? <Skeleton className="h-4 w-32" /> : (
                 <>
                   <span className="text-emerald-500">+{formatCurrency(summary?.in_period || 0)}</span>
-                  <span className="text-slate-300 dark:text-slate-700">/</span>
+                  <span className="text-slate-300 dark:text-slate-700 dark:text-slate-300">/</span>
                   <span className="text-rose-500">-{formatCurrency(summary?.out_period || 0)}</span>
                 </>
               )}
@@ -189,7 +189,7 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200/60 dark:border-slate-800/60 relative overflow-hidden group">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Repeat className="w-16 h-16 text-rose-600" /></div>
           <div className="flex items-center gap-3 mb-4">
             <div className="bg-rose-50 dark:bg-rose-500/10 p-2 rounded-xl text-rose-600 dark:text-rose-400"><Repeat className="w-5 h-5" /></div>
@@ -203,7 +203,7 @@ export default function DashboardPage() {
               {loadingSummary ? <Skeleton className="h-4 w-32" /> : (
                 <>
                   Paid: <span className="text-emerald-600 dark:text-emerald-500 font-semibold">{formatCurrency(summary?.subscriptions_paid || 0)}</span>
-                  <span className="text-slate-300 dark:text-slate-700">/</span>
+                  <span className="text-slate-300 dark:text-slate-700 dark:text-slate-300">/</span>
                   Total: <span className="text-slate-600 dark:text-slate-300 font-semibold">{formatCurrency(summary?.subscriptions_to_pay || 0)}</span>
                 </>
               )}
@@ -211,7 +211,7 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200/60 dark:border-slate-800/60 relative overflow-hidden group">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Wallet className="w-16 h-16 text-emerald-600" /></div>
           <div className="flex items-center gap-3 mb-4">
             <div className="bg-emerald-50 dark:bg-emerald-500/10 p-2 rounded-xl text-emerald-600 dark:text-emerald-400"><Wallet className="w-5 h-5" /></div>
@@ -225,11 +225,11 @@ export default function DashboardPage() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-3xl shadow-xl shadow-indigo-500/20 border border-indigo-400/30 relative overflow-hidden group text-white">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><CreditCard className="w-16 h-16" /></div>
           <div className="flex items-center gap-3 mb-4">
-            <div className="bg-white/20 backdrop-blur-sm p-2 rounded-xl text-indigo-100"><CreditCard className="w-5 h-5" /></div>
+            <div className="bg-white dark:bg-slate-900/20 backdrop-blur-sm p-2 rounded-xl text-indigo-100"><CreditCard className="w-5 h-5" /></div>
             <h3 className="text-sm font-medium text-indigo-100 font-heading">NET WORTH</h3>
           </div>
           <div className="text-2xl font-bold font-heading">
-            {loadingSummary ? <Skeleton className="h-8 w-24 bg-white/20" /> : formatCurrency(summary?.net_worth || 0)}
+            {loadingSummary ? <Skeleton className="h-8 w-24 bg-white dark:bg-slate-900/20" /> : formatCurrency(summary?.net_worth || 0)}
           </div>
         </motion.div>
       </div>
@@ -241,7 +241,7 @@ export default function DashboardPage() {
         <div className="lg:col-span-2 space-y-6">
           
           {/* Recent Transactions Widget */}
-          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200/60 dark:border-slate-800/60">
+          <div className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
                 <ReceiptText className="h-5 w-5 text-indigo-600" />
@@ -257,7 +257,7 @@ export default function DashboardPage() {
             ) : recentTransactions.length > 0 ? (
               <div className="space-y-3">
                 {recentTransactions.map((txn) => (
-                  <div key={txn.id} className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-xl transition-colors group cursor-pointer">
+                  <div key={txn.id} className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:bg-slate-800/50 dark:hover:bg-slate-800/50 rounded-xl transition-colors group cursor-pointer">
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-slate-500">
                         {txn.description.charAt(0).toUpperCase()}
@@ -279,7 +279,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Active Budgets Widget */}
-          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200/60 dark:border-slate-800/60">
+          <div className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
                 <PieChart className="h-5 w-5 text-indigo-600" />
@@ -320,7 +320,7 @@ export default function DashboardPage() {
         <div className="space-y-6">
           
           {/* Net Worth Mini Chart */}
-          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200/60 dark:border-slate-800/60">
+          <div className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
             <h3 className="text-md font-semibold mb-4 text-slate-800 dark:text-slate-200 font-heading">6-Month Trend</h3>
             <div className="h-32 -mx-2">
               {netWorthData ? (
@@ -343,13 +343,13 @@ export default function DashboardPage() {
           </div>
 
           {/* Subscriptions Stub */}
-          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200/60 dark:border-slate-800/60">
+          <div className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
                 <Repeat className="h-5 w-5 text-indigo-600" />
                 <h2 className="text-lg font-bold font-heading">Subscriptions</h2>
               </div>
-              <Button size="icon-sm" variant="ghost" onClick={() => handleOpenSub()} className="text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 h-8 w-8">
+              <Button size="icon-sm" variant="ghost" onClick={() => handleOpenSub()} className="text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/30 h-8 w-8">
                 <Plus size={16} />
               </Button>
             </div>
@@ -360,7 +360,7 @@ export default function DashboardPage() {
             ) : subscriptions && subscriptions.length > 0 ? (
               <div className="space-y-3">
                 {subscriptions.map((sub) => (
-                  <div key={sub.id} onClick={() => handleOpenSub(sub)} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer group">
+                  <div key={sub.id} onClick={() => handleOpenSub(sub)} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800 transition-colors cursor-pointer group">
                     <div className="flex items-center gap-3">
                       <div className="h-8 w-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs group-hover:scale-110 transition-transform">
                         {sub.name.charAt(0).toUpperCase()}
@@ -377,13 +377,13 @@ export default function DashboardPage() {
             ) : (
               <div className="text-center py-6">
                 <p className="text-sm text-slate-500 mb-2">No subscriptions found.</p>
-                <Button onClick={() => handleOpenSub()} variant="outline" className="w-full rounded-xl text-indigo-600 border-indigo-200 hover:bg-indigo-50 dark:border-indigo-900 dark:hover:bg-indigo-900/30">
+                <Button onClick={() => handleOpenSub()} variant="outline" className="w-full rounded-xl text-indigo-600 border-indigo-200 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:border-indigo-900 dark:hover:bg-indigo-900/30">
                   Add Subscription
                 </Button>
               </div>
             )}
             {subscriptions && subscriptions.length > 0 && (
-              <Button onClick={() => handleOpenSub()} variant="outline" className="w-full mt-4 rounded-xl text-indigo-600 border-indigo-200 hover:bg-indigo-50 dark:border-indigo-900 dark:hover:bg-indigo-900/30">
+              <Button onClick={() => handleOpenSub()} variant="outline" className="w-full mt-4 rounded-xl text-indigo-600 border-indigo-200 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:border-indigo-900 dark:hover:bg-indigo-900/30">
                 Manage Subscriptions
               </Button>
             )}

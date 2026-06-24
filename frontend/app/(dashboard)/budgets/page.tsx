@@ -106,17 +106,17 @@ export default function BudgetsPage() {
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">Budgets</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100 mb-2">Budgets</h1>
           <p className="text-slate-500">Track and manage your spending limits.</p>
         </div>
         
         <div className="flex items-center gap-4">
-          <div className="flex items-center bg-white rounded-xl shadow-sm border border-slate-200 px-2 py-1.5">
-            <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900"><ChevronLeft size={18}/></Button>
-            <span className="font-semibold text-sm w-32 text-center text-slate-800">
+          <div className="flex items-center bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 px-2 py-1.5">
+            <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900 dark:text-slate-100"><ChevronLeft size={18}/></Button>
+            <span className="font-semibold text-sm w-32 text-center text-slate-800 dark:text-slate-100">
               {format(currentMonth, "MMMM yyyy")}
             </span>
-            <Button variant="ghost" size="icon" onClick={nextMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900"><ChevronRight size={18}/></Button>
+            <Button variant="ghost" size="icon" onClick={nextMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900 dark:text-slate-100"><ChevronRight size={18}/></Button>
           </div>
 
           <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
@@ -173,11 +173,11 @@ export default function BudgetsPage() {
       <motion.div 
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200/60 relative overflow-hidden"
+        className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800/60 relative overflow-hidden"
       >
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-6">
           <div>
-            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-1">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-1">
               <Target size={20} className="text-indigo-500"/> Total Month Overview
             </h2>
             <p className="text-sm text-slate-500">All budgeted categories combined</p>
@@ -186,7 +186,7 @@ export default function BudgetsPage() {
           <div className="flex gap-8">
             <div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Total Spent</p>
-              <p className="text-2xl font-bold text-slate-900">{formatCurrency(totalSpent)}</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">{formatCurrency(totalSpent)}</p>
             </div>
             <div className="text-right">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Total Budget</p>
@@ -201,12 +201,12 @@ export default function BudgetsPage() {
             className="absolute top-0 w-px h-full bg-slate-300 z-10 hidden md:block" 
             style={{ left: `${monthProgress}%` }}
           >
-            <div className="absolute -top-6 -translate-x-1/2 bg-white border border-slate-200 shadow-sm text-xs font-semibold text-slate-600 px-2 py-1 rounded-md flex items-center gap-1 whitespace-nowrap">
+            <div className="absolute -top-6 -translate-x-1/2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm text-xs font-semibold text-slate-600 dark:text-slate-400 px-2 py-1 rounded-md flex items-center gap-1 whitespace-nowrap">
               <Calendar size={12}/> Today (Day {currentDay})
             </div>
           </div>
 
-          <div className="h-4 bg-slate-100 rounded-full overflow-hidden relative">
+          <div className="h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden relative">
             <motion.div 
               className={`h-full rounded-full relative z-20 ${
                 isOverPacing ? 'bg-amber-500' : 'bg-indigo-500'
@@ -218,7 +218,7 @@ export default function BudgetsPage() {
           </div>
         </div>
 
-        <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-100">
+        <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
           <div className="flex items-center gap-2">
             {isOverPacing ? (
               <AlertCircle size={16} className="text-amber-500" />
@@ -229,7 +229,7 @@ export default function BudgetsPage() {
               {isOverPacing ? "Pacing ahead of schedule" : "On track for the month"}
             </span>
           </div>
-          <div className="text-sm font-medium text-slate-600">
+          <div className="text-sm font-medium text-slate-600 dark:text-slate-400">
             {formatCurrency(globalRemaining)} remaining
           </div>
         </div>
@@ -238,7 +238,7 @@ export default function BudgetsPage() {
       {/* Detailed Budget Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {budgetCards.length === 0 ? (
-          <div className="col-span-full text-center py-12 bg-slate-50 rounded-2xl border border-slate-200/60 text-slate-500">
+          <div className="col-span-full text-center py-12 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-800/60 text-slate-500">
             No budgets found for this month.
           </div>
         ) : (
@@ -257,18 +257,18 @@ export default function BudgetsPage() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.05 }}
-                className={`bg-white p-6 rounded-2xl shadow-sm flex flex-col border transition-all ${
+                className={`bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm flex flex-col border transition-all ${
                   isOverLimit && card.limit > 0 
                     ? 'bg-red-50/30 border-red-200 shadow-[0_0_15px_rgba(239,68,68,0.05)]' 
-                    : 'border-slate-200/60 hover:shadow-md hover:border-slate-300'
+                    : 'border-slate-200 dark:border-slate-800/60 hover:shadow-md hover:border-slate-300'
                 }`}
               >
                 <div className="flex justify-between items-center mb-6">
                   <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isOverLimit ? 'bg-red-100 text-red-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isOverLimit ? 'bg-red-100 text-red-600' : 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600'}`}>
                       <Target size={18} />
                     </div>
-                    <h3 className="text-lg font-bold text-slate-800 truncate pr-2">{card.catName}</h3>
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 truncate pr-2">{card.catName}</h3>
                   </div>
                   <AnimatePresence mode="wait">
                     {isEditing ? (
@@ -291,7 +291,7 @@ export default function BudgetsPage() {
                           size="icon-sm"
                           variant="ghost"
                           onClick={() => setEditingId(null)} 
-                          className="text-slate-400 hover:bg-slate-100 h-8 w-8"
+                          className="text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800 dark:bg-slate-800 h-8 w-8"
                         >
                           <X size={16} />
                         </Button>
@@ -319,7 +319,7 @@ export default function BudgetsPage() {
                 <div className="flex justify-between items-end mb-4">
                   <div>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Spent</p>
-                    <p className={`text-2xl font-bold tracking-tight ${isOverLimit && card.limit > 0 ? "text-red-600" : "text-slate-900"}`}>
+                    <p className={`text-2xl font-bold tracking-tight ${isOverLimit && card.limit > 0 ? "text-red-600" : "text-slate-900 dark:text-slate-100"}`}>
                       {formatCurrency(card.spent)}
                     </p>
                   </div>
@@ -358,7 +358,7 @@ export default function BudgetsPage() {
                   </div>
                 </div>
 
-                <div className="w-full bg-slate-100 rounded-full h-2 mb-4 overflow-hidden">
+                <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2 mb-4 overflow-hidden">
                   <motion.div 
                     className={`h-full rounded-full ${
                       isOverLimit ? 'bg-red-500' : progress > 80 ? 'bg-amber-400' : 'bg-emerald-500'
@@ -370,12 +370,12 @@ export default function BudgetsPage() {
                 </div>
                 
                 {card.limit > 0 && (
-                  <div className="grid grid-cols-2 gap-2 mt-auto pt-4 border-t border-slate-100">
-                    <div className="bg-slate-50 rounded-lg p-2 text-center">
+                  <div className="grid grid-cols-2 gap-2 mt-auto pt-4 border-t border-slate-100 dark:border-slate-800/50">
+                    <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2 text-center">
                       <p className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Avg / Day</p>
-                      <p className="text-sm font-semibold text-slate-700">{formatCurrency(avgSpentPerDay)}</p>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">{formatCurrency(avgSpentPerDay)}</p>
                     </div>
-                    <div className="bg-slate-50 rounded-lg p-2 text-center">
+                    <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2 text-center">
                       <p className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Safe / Day</p>
                       <p className={`text-sm font-semibold ${safeToSpendPerDay === 0 ? 'text-red-500' : 'text-emerald-600'}`}>
                         {formatCurrency(safeToSpendPerDay)}

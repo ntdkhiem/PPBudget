@@ -105,7 +105,7 @@ export default function AccountsPage() {
   const totalIncomes = incomes.reduce((sum, a) => sum + a.initial_balance, 0);
 
   const AccountCard = ({ account, idx }: { account: Account; idx: number }) => {
-    let colorClass = "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400";
+    let colorClass = "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:bg-slate-800 dark:text-slate-400";
     let Icon = Wallet;
     if (account.type === 'asset') {
       colorClass = "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400";
@@ -127,7 +127,7 @@ export default function AccountsPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: idx * 0.05 }}
         onClick={() => setSelectedAccount(account)}
-        className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-slate-200/60 dark:border-slate-800/60 group flex flex-col justify-between cursor-pointer"
+        className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 group flex flex-col justify-between cursor-pointer"
       >
         <div className="flex justify-between items-start mb-4">
           <div className={`p-3 rounded-2xl ${colorClass}`}>
@@ -161,7 +161,7 @@ export default function AccountsPage() {
               <Plus className="h-4 w-4" /> Add Account
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200/60 dark:border-slate-800/60 backdrop-blur-xl bg-white/90 dark:bg-slate-900/90 shadow-2xl">
+          <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 backdrop-blur-xl bg-white dark:bg-slate-900/90 dark:bg-slate-900/90 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="text-2xl font-bold font-heading text-slate-900 dark:text-white">New Account</DialogTitle>
             </DialogHeader>
@@ -198,7 +198,7 @@ export default function AccountsPage() {
         </Dialog>
 
         <Dialog open={!!selectedAccount} onOpenChange={(open) => !open && setSelectedAccount(null)}>
-          <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200/60 dark:border-slate-800/60 backdrop-blur-xl bg-white/90 dark:bg-slate-900/90 shadow-2xl">
+          <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 backdrop-blur-xl bg-white dark:bg-slate-900/90 dark:bg-slate-900/90 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="text-2xl font-bold font-heading text-slate-900 dark:text-white">Edit Account</DialogTitle>
             </DialogHeader>

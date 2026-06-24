@@ -8,6 +8,7 @@ import { LayoutDashboard, ReceiptText, ListChecks, PieChart, Settings, SlidersHo
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { GlobalSearch } from "@/components/global-search";
+import { ThemeToggle } from "@/components/theme-toggle";
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -42,12 +43,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950 font-sans">
-      <aside className="w-64 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-r border-slate-200/60 dark:border-slate-800/60 p-4 flex flex-col relative z-10 shadow-sm">
-        <div className="flex items-center gap-3 mb-10 pl-2">
+      <aside className="w-64 bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl border-r border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 p-4 flex flex-col relative z-10 shadow-sm">
+        <div className="flex items-center gap-3 mb-6 pl-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-indigo-500/30">
             F
           </div>
           <h2 className="text-2xl font-bold font-heading bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-600 dark:from-slate-100 dark:to-slate-300">PPBudget</h2>
+        </div>
+        
+        <div className="mb-6 px-1">
+          <ThemeToggle />
         </div>
         
         <div className="mb-6">
@@ -85,7 +90,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   />
                 )}
                 <Icon className={`relative z-10 h-5 w-5 ${isActive ? "text-indigo-600" : "text-slate-500 group-hover:text-indigo-500 transition-colors"}`} />
-                <span className={`relative z-10 ${isActive ? "text-indigo-700 dark:text-indigo-300 font-semibold" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"}`}>
+                <span className={`relative z-10 ${isActive ? "text-indigo-700 dark:text-indigo-300 font-semibold" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:text-slate-100 dark:group-hover:text-slate-200"}`}>
                   {item.label}
                 </span>
               </Link>
@@ -93,7 +98,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           })}
         </nav>
         
-        <div className="mt-auto pt-8 border-t border-slate-200/60 dark:border-slate-800/60">
+        <div className="mt-auto pt-8 border-t border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 flex flex-col gap-4">
           <button 
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-colors"

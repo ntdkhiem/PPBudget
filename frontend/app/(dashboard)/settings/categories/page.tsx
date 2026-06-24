@@ -105,7 +105,7 @@ export default function CategoriesPage() {
         </div>
       </div>
 
-      <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-sm mb-8 flex gap-4 items-center">
+      <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm mb-8 flex flex-col sm:flex-row gap-4 items-center">
         <div className="p-3 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-xl hidden sm:block">
           <Tag className="h-5 w-5" />
         </div>
@@ -114,12 +114,12 @@ export default function CategoriesPage() {
           placeholder="New Category Name"
           value={newCatName}
           onChange={(e) => setNewCatName(e.target.value)}
-          className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
         />
         <select
           value={newCatType}
           onChange={(e) => setNewCatType(e.target.value as any)}
-          className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
           <option value="expense">Expense</option>
           <option value="income">Income</option>
@@ -134,7 +134,7 @@ export default function CategoriesPage() {
         </Button>
       </div>
 
-      <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="grid grid-cols-1 divide-y divide-slate-100 dark:divide-slate-800">
           <AnimatePresence>
             {categories?.map((cat) => (
@@ -143,7 +143,7 @@ export default function CategoriesPage() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="p-5 flex items-center justify-between hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors group"
+                className="p-5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group"
               >
                 {editingId === cat.id ? (
                   <div className="flex items-center gap-4 flex-1">
@@ -175,7 +175,7 @@ export default function CategoriesPage() {
                       size="icon"
                       variant="ghost"
                       onClick={() => setEditingId(null)}
-                      className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      className="text-slate-400 hover:text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800"
                     >
                       <X size={18} />
                     </Button>
@@ -190,7 +190,7 @@ export default function CategoriesPage() {
                             ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
                             : cat.type === "transfer"
                             ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
-                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:bg-slate-800 dark:text-slate-400"
                         }`}
                       >
                         {cat.type}
@@ -210,7 +210,7 @@ export default function CategoriesPage() {
                           setEditName(cat.name);
                           setEditType(cat.type || "expense");
                         }}
-                        className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
+                        className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:bg-indigo-500/10"
                       >
                         <Edit2 size={16} />
                       </Button>

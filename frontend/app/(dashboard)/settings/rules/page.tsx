@@ -143,7 +143,7 @@ function RulesContent() {
     <div className="max-w-5xl mx-auto space-y-8 pb-12">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 mb-2">Rules Engine</h1>
+          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 mb-2">Rules Engine</h1>
           <p className="text-slate-500 text-lg">Automate your finances with powerful, sleek matching rules.</p>
         </div>
         <Button 
@@ -157,9 +157,9 @@ function RulesContent() {
 
       <div className="space-y-6 mt-8">
         {rules?.length === 0 ? (
-          <div className="text-center py-16 bg-white/40 backdrop-blur-md rounded-2xl border border-white text-slate-500 shadow-sm">
+          <div className="text-center py-16 bg-white dark:bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white text-slate-500 shadow-sm">
             <Filter className="mx-auto h-12 w-12 text-slate-300 mb-4" />
-            <h3 className="text-lg font-medium text-slate-900">No rules configured</h3>
+            <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100">No rules configured</h3>
             <p className="mt-1">Create one above to get started automating your finances.</p>
           </div>
         ) : (
@@ -192,7 +192,7 @@ function RulesContent() {
                         </div>
                       </div>
 
-                      <ArrowRight className="h-4 w-4 text-slate-300 dark:text-slate-600 hidden sm:block shrink-0" />
+                      <ArrowRight className="h-4 w-4 text-slate-300 dark:text-slate-600 dark:text-slate-400 hidden sm:block shrink-0" />
 
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">Then</span>
@@ -212,7 +212,7 @@ function RulesContent() {
                       variant="ghost" 
                       size="icon"
                       onClick={() => openEdit(rule)}
-                      className="h-8 w-8 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/10"
+                      className="h-8 w-8 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/10"
                     >
                       <Edit2 size={16} />
                     </Button>
@@ -237,10 +237,10 @@ function RulesContent() {
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[90vw] h-[90vh] overflow-y-auto bg-white/95 backdrop-blur-xl border-slate-200 shadow-2xl p-0 flex flex-col">
-          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+        <DialogContent className="sm:max-w-[90vw] h-[90vh] overflow-y-auto bg-white dark:bg-slate-900/95 backdrop-blur-xl border-slate-200 dark:border-slate-800 shadow-2xl p-0 flex flex-col">
+          <div className="p-6 border-b border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-800/50/50">
             <DialogHeader>
-              <DialogTitle className="text-2xl font-bold text-slate-800">
+              <DialogTitle className="text-2xl font-bold text-slate-800 dark:text-slate-100">
                 {editingRule ? "Edit Rule" : "Create New Rule"}
               </DialogTitle>
               <DialogDescription>
@@ -252,36 +252,36 @@ function RulesContent() {
           <div className="p-6 space-y-8">
             <div className="space-y-4">
               <div className="grid gap-2">
-                <Label htmlFor="name" className="text-slate-700 font-semibold">Rule Name</Label>
+                <Label htmlFor="name" className="text-slate-700 dark:text-slate-300 font-semibold">Rule Name</Label>
                 <Input 
                   id="name" 
                   value={name} 
                   onChange={(e) => setName(e.target.value)} 
                   placeholder="e.g. Groceries Auto-Category"
-                  className="bg-white border-slate-200 focus-visible:ring-indigo-500 h-11"
+                  className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 focus-visible:ring-indigo-500 h-11"
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="description" className="text-slate-700 font-semibold">Description (Optional)</Label>
+                <Label htmlFor="description" className="text-slate-700 dark:text-slate-300 font-semibold">Description (Optional)</Label>
                 <Textarea 
                   id="description" 
                   value={description} 
                   onChange={(e) => setDescription(e.target.value)} 
                   placeholder="What does this rule do?"
-                  className="bg-white border-slate-200 focus-visible:ring-indigo-500 resize-none"
+                  className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 focus-visible:ring-indigo-500 resize-none"
                 />
               </div>
             </div>
 
             <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <h3 className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/50 pb-2">
+                <h3 className="text-lg font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-2">
                   <Filter size={18} className="text-indigo-500"/> Triggers (If)
                 </h3>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-slate-500">Match</span>
                   <Select value={strictness} onValueChange={(val: "all" | "any") => setStrictness(val)}>
-                    <SelectTrigger className="w-[120px] h-8 bg-white">
+                    <SelectTrigger className="w-[120px] h-8 bg-white dark:bg-slate-900">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -298,10 +298,10 @@ function RulesContent() {
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     key={idx} 
-                    className="flex flex-col sm:flex-row gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200"
+                    className="flex flex-col sm:flex-row gap-3 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800"
                   >
                     <Select value={cond.field} onValueChange={(v) => updateCondition(idx, "field", v)}>
-                      <SelectTrigger className="w-full sm:w-[140px] bg-white"><SelectValue/></SelectTrigger>
+                      <SelectTrigger className="w-full sm:w-[140px] bg-white dark:bg-slate-900"><SelectValue/></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="description">Description</SelectItem>
                         <SelectItem value="amount">Amount</SelectItem>
@@ -310,7 +310,7 @@ function RulesContent() {
                     </Select>
 
                     <Select value={cond.operator} onValueChange={(v) => updateCondition(idx, "operator", v)}>
-                      <SelectTrigger className="w-full sm:w-[140px] bg-white"><SelectValue/></SelectTrigger>
+                      <SelectTrigger className="w-full sm:w-[140px] bg-white dark:bg-slate-900"><SelectValue/></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="contains">Contains</SelectItem>
                         <SelectItem value="is">Is exactly</SelectItem>
@@ -325,7 +325,7 @@ function RulesContent() {
                       value={cond.value} 
                       onChange={(e) => updateCondition(idx, "value", e.target.value)} 
                       placeholder="Value..."
-                      className="flex-1 bg-white"
+                      className="flex-1 bg-white dark:bg-slate-900"
                     />
 
                     <Button variant="ghost" size="icon" onClick={() => removeCondition(idx)} disabled={conditions.length === 1} className="text-slate-400 hover:text-red-500">
@@ -334,14 +334,14 @@ function RulesContent() {
                   </motion.div>
                 ))}
               </div>
-              <Button variant="outline" size="sm" onClick={addCondition} className="text-indigo-600 border-indigo-200 bg-indigo-50 hover:bg-indigo-100">
+              <Button variant="outline" size="sm" onClick={addCondition} className="text-indigo-600 border-indigo-200 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100">
                 <PlusCircle size={14} className="mr-2" /> Add Condition
               </Button>
             </div>
 
             <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <h3 className="text-lg font-bold text-purple-900 flex items-center gap-2">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/50 pb-2">
+                <h3 className="text-lg font-bold text-purple-900 dark:text-purple-300 flex items-center gap-2">
                   <Zap size={18} className="text-purple-500"/> Actions (Then)
                 </h3>
               </div>
@@ -355,7 +355,7 @@ function RulesContent() {
                     className="flex flex-col sm:flex-row gap-3 bg-purple-50/30 p-3 rounded-xl border border-purple-100"
                   >
                     <Select value={act.action_type} onValueChange={(v) => updateAction(idx, "action_type", v)}>
-                      <SelectTrigger className="w-full sm:w-[180px] bg-white"><SelectValue/></SelectTrigger>
+                      <SelectTrigger className="w-full sm:w-[180px] bg-white dark:bg-slate-900"><SelectValue/></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="set_category">Set Category</SelectItem>
                         <SelectItem value="link_to_subscription">Link to Subscription</SelectItem>
@@ -366,7 +366,7 @@ function RulesContent() {
 
                     {act.action_type === 'set_category' ? (
                       <Select value={act.value} onValueChange={(v) => updateAction(idx, "value", v)}>
-                        <SelectTrigger className="flex-1 bg-white"><SelectValue placeholder="Select Category..." /></SelectTrigger>
+                        <SelectTrigger className="flex-1 bg-white dark:bg-slate-900"><SelectValue placeholder="Select Category..." /></SelectTrigger>
                         <SelectContent>
                           {categories?.map(c => (
                             <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
@@ -375,7 +375,7 @@ function RulesContent() {
                       </Select>
                     ) : act.action_type === 'link_to_subscription' ? (
                       <Select value={act.value} onValueChange={(v) => updateAction(idx, "value", v)}>
-                        <SelectTrigger className="flex-1 bg-white"><SelectValue placeholder="Select Subscription..." /></SelectTrigger>
+                        <SelectTrigger className="flex-1 bg-white dark:bg-slate-900"><SelectValue placeholder="Select Subscription..." /></SelectTrigger>
                         <SelectContent>
                           {subscriptions?.map(s => (
                             <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
@@ -387,7 +387,7 @@ function RulesContent() {
                         value={act.value} 
                         onChange={(e) => updateAction(idx, "value", e.target.value)} 
                         placeholder="Value..."
-                        className="flex-1 bg-white"
+                        className="flex-1 bg-white dark:bg-slate-900"
                       />
                     )}
 
@@ -403,7 +403,7 @@ function RulesContent() {
             </div>
           </div>
 
-            <div className="space-y-4 pt-4 border-t border-slate-100">
+            <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
               <div className="flex items-center gap-2">
                 <input 
                   type="checkbox" 
@@ -412,7 +412,7 @@ function RulesContent() {
                   onChange={(e) => setRunOnPast(e.target.checked)} 
                   className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
                 />
-                <Label htmlFor="runOnPast" className="text-slate-800 font-semibold cursor-pointer">
+                <Label htmlFor="runOnPast" className="text-slate-800 dark:text-slate-100 font-semibold cursor-pointer">
                   Run this rule on existing transactions
                 </Label>
               </div>
@@ -420,11 +420,11 @@ function RulesContent() {
               {runOnPast && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="pl-6 space-y-4">
                   <div className="flex items-center gap-4">
-                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                       <input type="radio" checked={runAllPast} onChange={() => setRunAllPast(true)} />
                       All transactions
                     </label>
-                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                       <input type="radio" checked={!runAllPast} onChange={() => setRunAllPast(false)} />
                       Specific date range
                     </label>
@@ -446,7 +446,7 @@ function RulesContent() {
               )}
             </div>
 
-          <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3 sticky bottom-0 mt-auto">
+          <div className="p-6 border-t border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-800/50/50 flex justify-end gap-3 sticky bottom-0 mt-auto">
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
             <Button 
               onClick={() => saveMutation.mutate()} 

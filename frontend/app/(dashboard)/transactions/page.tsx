@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, Transaction, Category, Account } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, cn } from "@/lib/utils";
 import { format, parseISO } from "date-fns";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { motion } from "framer-motion";
@@ -40,6 +40,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -47,7 +55,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink } from "lucide-react";
+import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -66,6 +74,15 @@ export default function TransactionsPage() {
   const [bulkCategoryId, setBulkCategoryId] = useState("");
   const searchParams = useSearchParams();
   const router = useRouter();
+
+  const [isLinkedTxnOpen, setIsLinkedTxnOpen] = useState(false);
+  const [linkedTxnId, setLinkedTxnId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedTxn) {
+      setLinkedTxnId(selectedTxn.linked_transaction_id || null);
+    }
+  }, [selectedTxn]);
 
   useEffect(() => {
     const editId = searchParams?.get("edit_id");
@@ -323,7 +340,7 @@ export default function TransactionsPage() {
                 <Plus className="h-4 w-4" /> Add Transaction
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200/60 dark:border-slate-800/60 backdrop-blur-xl bg-white/90 dark:bg-slate-900/90 shadow-2xl">
+            <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 backdrop-blur-xl bg-white dark:bg-slate-900/90 dark:bg-slate-900/90 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="text-2xl font-bold font-heading text-slate-900 dark:text-white">Add Transaction</DialogTitle>
               <DialogDescription>Create a new manual transaction.</DialogDescription>
@@ -382,10 +399,10 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-slate-200/60 dark:border-slate-800/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm overflow-hidden">
+      <div className="rounded-3xl border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow className="hover:bg-transparent border-slate-200/60 dark:border-slate-800/60">
+            <TableRow className="hover:bg-transparent border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
               <TableHead className="w-12 py-4 text-center">
                 <input 
                   type="checkbox" 
@@ -434,7 +451,7 @@ export default function TransactionsPage() {
               transactions?.map((txn) => (
                 <TableRow 
                   key={txn.id} 
-                  className={`group cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors border-slate-200/60 dark:border-slate-800/60 ${selectedIds.includes(txn.id) ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : ''}`}
+                  className={`group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:bg-slate-800/50/50 dark:hover:bg-slate-800/50 transition-colors border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 ${selectedIds.includes(txn.id) ? 'bg-indigo-50 dark:bg-indigo-900/30/30 dark:bg-indigo-900/10' : ''}`}
                   onClick={() => handleRowClick(txn)}
                 >
                   <TableCell className="w-12 py-4 text-center" onClick={(e) => e.stopPropagation()}>
@@ -454,9 +471,32 @@ export default function TransactionsPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right py-4 font-semibold">
-                    <span className={txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
-                      {formatCurrency(txn.amount)}
-                    </span>
+                    <div className="flex flex-col items-end gap-0.5">
+                      {txn.linked_by && txn.linked_by.length > 0 ? (
+                        <>
+                          <span className={txn.effective_amount! < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
+                            {formatCurrency(txn.effective_amount!)}
+                          </span>
+                          <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded" title={`Original: ${formatCurrency(txn.amount)}. Paid by ${txn.linked_by.length} transaction(s).`}>
+                            Remaining
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className={cn(
+                            txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400",
+                            txn.linked_transaction_id ? "line-through opacity-50 text-sm" : ""
+                          )}>
+                            {formatCurrency(txn.amount)}
+                          </span>
+                          {txn.linked_transaction_id && (
+                            <span className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded" title={`Pays for ID: ${txn.linked_transaction_id}`}>
+                              Effective: $0.00
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="py-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                     {format(parseISO(txn.date), "MMM d, yyyy")}
@@ -467,7 +507,7 @@ export default function TransactionsPage() {
                   <TableCell className="py-4" onClick={(e) => e.stopPropagation()}>
                     <Popover open={quickEditTxnId === txn.id} onOpenChange={(open) => setQuickEditTxnId(open ? txn.id : null)}>
                       <PopoverTrigger asChild>
-                        <Button variant="ghost" className={`h-8 px-3 rounded-lg text-sm font-medium ${txn.category_id ? 'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700' : 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:text-indigo-400 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20'}`}>
+                        <Button variant="ghost" className={`h-8 px-3 rounded-lg text-sm font-medium ${txn.category_id ? 'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700' : 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:text-indigo-400 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20'}`}>
                           {categories?.find((c) => c.id === txn.category_id)?.name || "Uncategorized"}
                         </Button>
                       </PopoverTrigger>
@@ -478,7 +518,7 @@ export default function TransactionsPage() {
                             {categories?.map((cat) => (
                               <div
                                 key={cat.id}
-                                className={`px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between ${txn.category_id === cat.id ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : ''}`}
+                                className={`px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800 flex items-center justify-between ${txn.category_id === cat.id ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : ''}`}
                                 onClick={() => reviewMutation.mutate({ id: txn.id, categoryId: cat.id })}
                               >
                                 {cat.name}
@@ -496,7 +536,7 @@ export default function TransactionsPage() {
                         variant="ghost"
                         size="icon"
                         aria-label="Edit transaction"
-                        className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/10 h-8 w-8 rounded-lg"
+                        className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/10 h-8 w-8 rounded-lg"
                         onClick={(e) => { e.stopPropagation(); handleRowClick(txn); }}
                       >
                         <Edit2 className="h-4 w-4" />
@@ -520,7 +560,7 @@ export default function TransactionsPage() {
         </Table>
         
         {/* Pagination Controls */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200/60 dark:border-slate-800/60 bg-slate-50 dark:bg-slate-900/50">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-slate-50 dark:bg-slate-900/50">
           <p className="text-sm text-slate-500">
             {transactions?.length === 50 ? "Showing 50 transactions" : `Showing ${transactions?.length || 0} transactions`}
           </p>
@@ -548,7 +588,7 @@ export default function TransactionsPage() {
       </div>
 
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="max-w-[95vw] w-full h-[95vh] sm:max-w-5xl rounded-3xl border-slate-200/60 dark:border-slate-800/60 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl flex flex-col p-8 overflow-hidden">
+        <DialogContent className="max-w-[95vw] w-full h-[95vh] sm:max-w-5xl rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-white dark:bg-slate-900/95 dark:bg-slate-900/95 backdrop-blur-xl flex flex-col p-8 overflow-hidden">
           <DialogHeader className="mb-6 shrink-0">
             <DialogTitle className="text-3xl font-bold font-heading text-slate-900 dark:text-white">Edit Transaction</DialogTitle>
             <DialogDescription className="text-lg">Update the details of this transaction.</DialogDescription>
@@ -599,13 +639,64 @@ export default function TransactionsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="editLinkedTransactionId" className="text-slate-700 dark:text-slate-300 text-lg">Pays for (Link to Transaction ID)</Label>
-                    <Input id="editLinkedTransactionId" name="linkedTransactionId" defaultValue={selectedTxn.linked_transaction_id || ""} placeholder="UUID of the destination transaction" className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg font-mono text-sm" />
+                  <div className="space-y-2 md:col-span-2 flex flex-col">
+                    <Label className="text-slate-700 dark:text-slate-300 text-lg">Pays for (Link to Transaction)</Label>
+                    <input type="hidden" name="linkedTransactionId" value={linkedTxnId || ""} />
+                    <Popover open={isLinkedTxnOpen} onOpenChange={setIsLinkedTxnOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={isLinkedTxnOpen}
+                          className="justify-between rounded-xl border-slate-200 dark:border-slate-700 h-14 text-lg font-normal bg-white dark:bg-slate-900 overflow-hidden"
+                        >
+                          <span className="truncate">
+                            {linkedTxnId
+                              ? transactions?.find((t) => t.id === linkedTxnId)?.description || `ID: ${linkedTxnId}`
+                              : "Select recent transaction..."}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[500px] p-0 rounded-xl max-w-[90vw]" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search recent transactions..." />
+                          <CommandList className="max-h-[300px]">
+                            <CommandEmpty>No recent transaction found.</CommandEmpty>
+                            <CommandGroup>
+                              {transactions?.slice(0, 50).map((txn) => (
+                                <CommandItem
+                                  key={txn.id}
+                                  value={`${txn.description} ${txn.amount} ${txn.date} ${txn.id}`}
+                                  onSelect={() => {
+                                    setLinkedTxnId(txn.id === linkedTxnId ? null : txn.id);
+                                    setIsLinkedTxnOpen(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4 shrink-0",
+                                      linkedTxnId === txn.id ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <div className="flex w-full justify-between items-center pr-2 gap-2 overflow-hidden">
+                                    <div className="flex flex-col overflow-hidden">
+                                      <span className="font-medium text-base truncate">{txn.description}</span>
+                                      <span className="text-xs text-muted-foreground">{format(parseISO(txn.date), "MMM d, yyyy")}</span>
+                                    </div>
+                                    <span className="font-semibold text-right whitespace-nowrap">{formatCurrency(txn.amount)}</span>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
                 <div className="pt-8 flex gap-4 shrink-0">
-                  <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)} className="flex-1 rounded-xl py-8 text-xl border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800">
+                  <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)} className="flex-1 rounded-xl py-8 text-xl border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800">
                     Cancel
                   </Button>
                   <Button type="submit" disabled={updateMutation.isPending} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-8 text-xl shadow-md shadow-indigo-500/20">

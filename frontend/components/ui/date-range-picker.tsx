@@ -81,8 +81,8 @@ export function DatePickerWithRange({
             id="date"
             variant={"outline"}
             className={cn(
-              "w-full justify-start text-left font-normal text-xs bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm border-slate-200/60 dark:border-slate-800/60 hover:bg-white dark:hover:bg-slate-900 shadow-sm",
-              !date && "text-muted-foreground"
+              "w-full justify-start text-left font-normal text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900/80 backdrop-blur-sm border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 shadow-sm",
+              !date && "text-muted-foreground dark:text-slate-400"
             )}
           >
             <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
@@ -101,13 +101,13 @@ export function DatePickerWithRange({
             </span>
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0 flex flex-col md:flex-row" align="start">
+        <PopoverContent className="w-auto p-0 flex flex-col md:flex-row bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100" align="start">
           <div className="flex flex-col gap-1 border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800 p-2 md:w-[150px] overflow-y-auto max-h-[300px] md:max-h-[350px]">
             {PRESETS.map((preset) => (
               <Button
                 key={preset.name}
                 variant="ghost"
-                className="justify-start text-xs font-normal"
+                className="justify-start text-xs font-normal hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
                 onClick={() => {
                   setDate(preset.getValue())
                   setIsOpen(false)
