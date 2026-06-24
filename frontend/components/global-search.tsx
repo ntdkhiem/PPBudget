@@ -107,7 +107,7 @@ export function GlobalSearch() {
             <CommandGroup heading="Transactions">
               {results.transactions.map((t: any) => (
                 <CommandItem key={t.id} onSelect={() => onSelect(`/transactions?edit_id=${t.id}`)}>
-                  <span>{t.description}</span>
+                  <span>{t.description.replace(/\s+/g, ' ').trim()}</span>
                   <span className="ml-auto text-slate-500">${(t.amount / 100).toFixed(2)}</span>
                 </CommandItem>
               ))}

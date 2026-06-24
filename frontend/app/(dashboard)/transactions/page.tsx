@@ -3,8 +3,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, Transaction, Category, Account } from "@/lib/api";
-import { formatCurrency, cn } from "@/lib/utils";
+import { apiFetch, Transaction, Category, Account, Subscription } from "@/lib/api";
+import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import { format, parseISO } from "date-fns";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { motion } from "framer-motion";
@@ -55,7 +55,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown } from "lucide-react";
+import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown, Repeat } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -103,7 +103,8 @@ export default function TransactionsPage() {
 
   const truncateText = (text: string, maxLength: number = 100) => {
     if (!text) return "";
-    return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
+    const cleaned = text.replace(/\s+/g, ' ').trim();
+    return cleaned.length > maxLength ? cleaned.substring(0, maxLength) + "..." : cleaned;
   };
 
   const { date } = useDateRange();
@@ -143,7 +144,14 @@ export default function TransactionsPage() {
 
   const { data: accounts } = useQuery<Account[]>({
     queryKey: ["accounts"],
-    queryFn: () => apiFetch<Account[]>("/accounts", {}, token),
+    queryFn: () => apiFetch("/accounts", {}, token),
+    enabled: !!token,
+  });
+
+  const { data: subscriptions } = useQuery<Subscription[]>({
+    queryKey: ["subscriptions"],
+    queryFn: () => apiFetch("/subscriptions", {}, token),
+    enabled: !!token,
   });
 
   const bulkDeleteMutation = useMutation({
@@ -276,6 +284,7 @@ export default function TransactionsPage() {
       description: formData.get("description"),
       notes: formData.get("notes") || null,
       category_id: formData.get("categoryId") || null,
+      subscription_id: formData.get("subscriptionId") === "none" ? null : formData.get("subscriptionId") || null,
       linked_transaction_id: formData.get("linkedTransactionId") || null,
     });
   };
@@ -292,6 +301,7 @@ export default function TransactionsPage() {
       description: formData.get("description"),
       notes: formData.get("notes") || null,
       category_id: formData.get("categoryId") || null,
+      subscription_id: formData.get("subscriptionId") === "none" ? null : formData.get("subscriptionId") || null,
       linked_transaction_id: formData.get("linkedTransactionId") || null,
     });
   };
@@ -388,6 +398,20 @@ export default function TransactionsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="subscriptionId" className="text-slate-700 dark:text-slate-300">Subscription</Label>
+                <Select name="subscriptionId" defaultValue="none">
+                  <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700">
+                    <SelectValue placeholder="Select a subscription" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
+                    <SelectItem value="none">None</SelectItem>
+                    {subscriptions?.map((sub) => (
+                      <SelectItem key={sub.id} value={sub.id}>{sub.name} ({formatCurrency(sub.amount)})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="pt-4">
                 <Button type="submit" disabled={createMutation.isPending} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-6 text-lg font-medium shadow-md shadow-indigo-500/20">
                   {createMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : "Save"}
@@ -464,11 +488,18 @@ export default function TransactionsPage() {
                   </TableCell>
                   <TableCell className="py-4 font-medium text-slate-900 dark:text-slate-100 max-w-xs" title={txn.description}>
                     <div className="line-clamp-3 whitespace-pre-wrap break-words">{truncateText(txn.description)}</div>
-                    {!txn.is_reviewed && (
-                      <span className="mt-2 inline-flex items-center rounded-full bg-amber-100/80 dark:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
-                        Needs Review
-                      </span>
-                    )}
+                    <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                      {!txn.is_reviewed && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100/80 dark:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                          Needs Review
+                        </span>
+                      )}
+                      {txn.subscription_id && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100/80 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/30 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:text-indigo-400" title="Subscription Payment">
+                          <Repeat size={12} /> Subscription
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="text-right py-4 font-semibold">
                     <div className="flex flex-col items-end gap-0.5">
@@ -499,7 +530,7 @@ export default function TransactionsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="py-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                    {format(parseISO(txn.date), "MMM d, yyyy")}
+                    {formatDate(txn.date)}
                   </TableCell>
                   <TableCell className="py-4 text-slate-600 dark:text-slate-300 max-w-[150px]" title={accounts?.find(a => a.id === txn.account_id)?.name || "Unknown"}>
                     <div className="line-clamp-3 whitespace-pre-wrap break-words">{truncateText(accounts?.find(a => a.id === txn.account_id)?.name || "Unknown")}</div>
@@ -626,7 +657,7 @@ export default function TransactionsPage() {
                     <Label htmlFor="editNotes" className="text-slate-700 dark:text-slate-300 text-lg">Notes (Optional)</Label>
                     <Input id="editNotes" name="notes" defaultValue={selectedTxn.notes || ""} className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg" />
                   </div>
-                  <div className="space-y-2 md:col-span-2">
+                  <div className="space-y-2 md:col-span-1">
                     <Label htmlFor="editCategoryId" className="text-slate-700 dark:text-slate-300 text-lg">Category</Label>
                     <Select name="categoryId" defaultValue={selectedTxn.category_id || undefined}>
                       <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700 h-14 text-lg">
@@ -635,6 +666,20 @@ export default function TransactionsPage() {
                       <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
                         {categories?.map((cat) => (
                           <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2 md:col-span-1">
+                    <Label htmlFor="editSubscriptionId" className="text-slate-700 dark:text-slate-300 text-lg">Subscription</Label>
+                    <Select name="subscriptionId" defaultValue={selectedTxn.subscription_id || "none"}>
+                      <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700 h-14 text-lg">
+                        <SelectValue placeholder="Select a subscription" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
+                        <SelectItem value="none">None</SelectItem>
+                        {subscriptions?.map((sub) => (
+                          <SelectItem key={sub.id} value={sub.id}>{sub.name} ({formatCurrency(sub.amount)})</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -681,8 +726,8 @@ export default function TransactionsPage() {
                                   />
                                   <div className="flex w-full justify-between items-center pr-2 gap-2 overflow-hidden">
                                     <div className="flex flex-col overflow-hidden">
-                                      <span className="font-medium text-base truncate">{txn.description}</span>
-                                      <span className="text-xs text-muted-foreground">{format(parseISO(txn.date), "MMM d, yyyy")}</span>
+                                      <span className="font-medium text-base truncate">{txn.description.replace(/\s+/g, ' ').trim()}</span>
+                                      <span className="text-xs text-muted-foreground">{formatDate(txn.date)}</span>
                                     </div>
                                     <span className="font-semibold text-right whitespace-nowrap">{formatCurrency(txn.amount)}</span>
                                   </div>

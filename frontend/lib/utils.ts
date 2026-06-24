@@ -13,9 +13,16 @@ export function formatCurrency(cents: number): string {
 }
 
 export function formatDate(dateStr: string): string {
+  if (!dateStr) return "";
   return new Date(dateStr).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   });
+}
+
+export function formatDescription(desc: string): string {
+  if (!desc) return "";
+  return desc.replace(/\s+/g, ' ').trim();
 }

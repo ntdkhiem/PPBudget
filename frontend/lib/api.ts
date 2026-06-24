@@ -49,6 +49,7 @@ export interface Transaction {
   effective_amount?: number;
   linked_by?: string[];
   category?: { id: string; name: string };
+  subscription_id?: string;
 }
 
 export interface Category {

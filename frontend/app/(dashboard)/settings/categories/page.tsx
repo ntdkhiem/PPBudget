@@ -96,6 +96,117 @@ export default function CategoriesPage() {
 
   if (isLoading) return <div className="p-8 text-center text-slate-500">Loading categories...</div>;
 
+  const expenses = categories?.filter((c) => c.type === "expense") || [];
+  const incomes = categories?.filter((c) => c.type === "income") || [];
+  const transfers = categories?.filter((c) => c.type === "transfer") || [];
+
+  const renderCategoryItem = (cat: Category) => (
+    <motion.div
+      key={cat.id}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="p-5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group"
+    >
+      {editingId === cat.id ? (
+        <div className="flex items-center gap-4 flex-1">
+          <input
+            type="text"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            autoFocus
+          />
+          <select
+            value={editType}
+            onChange={(e) => setEditType(e.target.value as any)}
+            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="expense">Expense</option>
+            <option value="income">Income</option>
+            <option value="transfer">Transfer</option>
+          </select>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => updateMutation.mutate({ id: cat.id, name: editName, type: editType })}
+            className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
+          >
+            <Check size={18} />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setEditingId(null)}
+            className="text-slate-400 hover:text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800"
+          >
+            <X size={18} />
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-4">
+            <span className="text-slate-900 dark:text-slate-100 font-semibold text-lg">{cat.name}</span>
+            <span
+              className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wide ${
+                cat.type === "income"
+                  ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
+                  : cat.type === "transfer"
+                  ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:bg-slate-800 dark:text-slate-400"
+              }`}
+            >
+              {cat.type}
+            </span>
+            {cat.transaction_count !== undefined && cat.transaction_count > 0 && (
+              <span className="text-xs text-slate-500 font-medium">
+                {cat.transaction_count} transaction{cat.transaction_count !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => {
+                setEditingId(cat.id);
+                setEditName(cat.name);
+                setEditType(cat.type || "expense");
+              }}
+              className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:bg-indigo-500/10"
+            >
+              <Edit2 size={16} />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setCatToDelete(cat)}
+              className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+            >
+              <Trash2 size={16} />
+            </Button>
+          </div>
+        </>
+      )}
+    </motion.div>
+  );
+
+  const renderCategorySection = (title: string, list: Category[]) => {
+    if (list.length === 0) return null;
+    return (
+      <div className="mb-8">
+        <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4 px-2">{title}</h3>
+        <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+          <div className="grid grid-cols-1 divide-y divide-slate-100 dark:divide-slate-800">
+            <AnimatePresence>
+              {list.map(renderCategoryItem)}
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-12">
       <div className="flex items-center justify-between">
@@ -134,102 +245,16 @@ export default function CategoriesPage() {
         </Button>
       </div>
 
-      <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-        <div className="grid grid-cols-1 divide-y divide-slate-100 dark:divide-slate-800">
-          <AnimatePresence>
-            {categories?.map((cat) => (
-              <motion.div
-                key={cat.id}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="p-5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group"
-              >
-                {editingId === cat.id ? (
-                  <div className="flex items-center gap-4 flex-1">
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      autoFocus
-                    />
-                    <select
-                      value={editType}
-                      onChange={(e) => setEditType(e.target.value as any)}
-                      className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="expense">Expense</option>
-                      <option value="income">Income</option>
-                      <option value="transfer">Transfer</option>
-                    </select>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => updateMutation.mutate({ id: cat.id, name: editName, type: editType })}
-                      className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
-                    >
-                      <Check size={18} />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => setEditingId(null)}
-                      className="text-slate-400 hover:text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800"
-                    >
-                      <X size={18} />
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-4">
-                      <span className="text-slate-900 dark:text-slate-100 font-semibold text-lg">{cat.name}</span>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wide ${
-                          cat.type === "income"
-                            ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
-                            : cat.type === "transfer"
-                            ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:bg-slate-800 dark:text-slate-400"
-                        }`}
-                      >
-                        {cat.type}
-                      </span>
-                      {cat.transaction_count !== undefined && cat.transaction_count > 0 && (
-                        <span className="text-xs text-slate-500 font-medium">
-                          {cat.transaction_count} transaction{cat.transaction_count !== 1 ? "s" : ""}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => {
-                          setEditingId(cat.id);
-                          setEditName(cat.name);
-                          setEditType(cat.type || "expense");
-                        }}
-                        className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:bg-indigo-500/10"
-                      >
-                        <Edit2 size={16} />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setCatToDelete(cat)}
-                        className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                      >
-                        <Trash2 size={16} />
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </motion.div>
-            ))}
-          </AnimatePresence>
-          {categories?.length === 0 && <div className="p-12 text-center text-slate-500">No categories found.</div>}
-        </div>
+      <div>
+        {categories?.length === 0 ? (
+          <div className="p-12 text-center text-slate-500">No categories found.</div>
+        ) : (
+          <>
+            {renderCategorySection("Expenses", expenses)}
+            {renderCategorySection("Incomes", incomes)}
+            {renderCategorySection("Transfers", transfers)}
+          </>
+        )}
       </div>
 
       {/* Delete Confirmation Dialog */}

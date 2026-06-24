@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, Suspense } from "react";
 import { apiFetch, Rule, Category, RuleCondition, RuleAction } from "@/lib/api";
-import { Plus, Trash2, Edit2, ShieldAlert, Zap, Filter, Save, PlusCircle, ArrowRight } from "lucide-react";
+import { Plus, Trash2, Edit2, ShieldAlert, Zap, Filter, Save, PlusCircle, ArrowRight, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -403,47 +403,65 @@ function RulesContent() {
             </div>
           </div>
 
-            <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
-              <div className="flex items-center gap-2">
-                <input 
-                  type="checkbox" 
-                  id="runOnPast" 
-                  checked={runOnPast} 
-                  onChange={(e) => setRunOnPast(e.target.checked)} 
-                  className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
-                />
-                <Label htmlFor="runOnPast" className="text-slate-800 dark:text-slate-100 font-semibold cursor-pointer">
-                  Run this rule on existing transactions
-                </Label>
+            <div className="pt-6 border-t border-slate-100 dark:border-slate-800/50">
+              <div 
+                onClick={() => setRunOnPast(!runOnPast)}
+                className={`p-4 rounded-xl border-2 transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${runOnPast ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-500/10 dark:border-indigo-500/50' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800/50 bg-slate-50 dark:bg-slate-800/20'}`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center shrink-0 border transition-colors ${runOnPast ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900'}`}>
+                    {runOnPast && <Check size={14} strokeWidth={3} />}
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-slate-900 dark:text-slate-100">Run rule on existing transactions</h4>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Apply this rule retroactively to transactions already in your account.</p>
+                  </div>
+                </div>
               </div>
               
+              <AnimatePresence>
               {runOnPast && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="pl-6 space-y-4">
-                  <div className="flex items-center gap-4">
-                    <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                      <input type="radio" checked={runAllPast} onChange={() => setRunAllPast(true)} />
-                      All transactions
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                      <input type="radio" checked={!runAllPast} onChange={() => setRunAllPast(false)} />
-                      Specific date range
-                    </label>
-                  </div>
-                  
-                  {!runAllPast && (
-                    <div className="flex items-center gap-4">
-                      <div className="grid gap-1">
-                        <Label className="text-xs text-slate-500">Start Date (Optional)</Label>
-                        <Input type="date" value={pastStartDate} onChange={e => setPastStartDate(e.target.value)} className="h-9"/>
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                  <div className="p-4 mt-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                      <div 
+                        onClick={() => setRunAllPast(true)}
+                        className={`flex-1 p-3 rounded-lg border cursor-pointer transition-colors flex items-center gap-3 ${runAllPast ? 'bg-indigo-50 dark:bg-indigo-500/10 border-indigo-200 dark:border-indigo-500/30' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${runAllPast ? 'border-indigo-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                          {runAllPast && <div className="w-2 h-2 rounded-full bg-indigo-500" />}
+                        </div>
+                        <span className="font-medium text-slate-700 dark:text-slate-300 text-sm">All past transactions</span>
                       </div>
-                      <div className="grid gap-1">
-                        <Label className="text-xs text-slate-500">End Date (Optional)</Label>
-                        <Input type="date" value={pastEndDate} onChange={e => setPastEndDate(e.target.value)} className="h-9"/>
+                      <div 
+                        onClick={() => setRunAllPast(false)}
+                        className={`flex-1 p-3 rounded-lg border cursor-pointer transition-colors flex items-center gap-3 ${!runAllPast ? 'bg-indigo-50 dark:bg-indigo-500/10 border-indigo-200 dark:border-indigo-500/30' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${!runAllPast ? 'border-indigo-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                          {!runAllPast && <div className="w-2 h-2 rounded-full bg-indigo-500" />}
+                        </div>
+                        <span className="font-medium text-slate-700 dark:text-slate-300 text-sm">Specific date range</span>
                       </div>
                     </div>
-                  )}
+                    
+                    <AnimatePresence>
+                    {!runAllPast && (
+                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex flex-col sm:flex-row items-center gap-4 pt-2 overflow-hidden">
+                        <div className="grid gap-1.5 w-full">
+                          <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Start Date</Label>
+                          <Input type="date" value={pastStartDate} onChange={e => setPastStartDate(e.target.value)} className="bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 h-10"/>
+                        </div>
+                        <div className="grid gap-1.5 w-full">
+                          <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">End Date</Label>
+                          <Input type="date" value={pastEndDate} onChange={e => setPastEndDate(e.target.value)} className="bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 h-10"/>
+                        </div>
+                      </motion.div>
+                    )}
+                    </AnimatePresence>
+                  </div>
                 </motion.div>
               )}
+              </AnimatePresence>
             </div>
 
           <div className="p-6 border-t border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-800/50/50 flex justify-end gap-3 sticky bottom-0 mt-auto">

@@ -5,7 +5,7 @@ import { apiFetch, Account, NetWorthDataPoint, Transaction, BudgetSummary, Categ
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import Link from "next/link";
-import { AreaChart, Area, ResponsiveContainer, YAxis } from "recharts";
+import { AreaChart, Area, ResponsiveContainer, YAxis, PieChart as RechartsPieChart, Pie, Cell, Tooltip as RechartsTooltip } from "recharts";
 import { motion } from "framer-motion";
 import { useState, useMemo } from "react";
 import { format, subMonths } from "date-fns";
@@ -68,73 +68,30 @@ export default function DashboardPage() {
     queryFn: () => apiFetch<Subscription[]>("/subscriptions", {}, token),
   });
 
-  const [isSubOpen, setIsSubOpen] = useState(false);
-  const [selectedSub, setSelectedSub] = useState<Subscription | null>(null);
-  const [subName, setSubName] = useState("");
-  const [subAmount, setSubAmount] = useState("");
-  const [subCycle, setSubCycle] = useState<"monthly" | "yearly">("monthly");
-  const [subDate, setSubDate] = useState("");
 
-  const handleOpenSub = (sub?: Subscription) => {
-    if (sub) {
-      setSelectedSub(sub);
-      setSubName(sub.name);
-      setSubAmount((sub.amount / 100).toString());
-      setSubCycle(sub.billing_cycle as "monthly" | "yearly");
-      setSubDate(sub.next_billing_date.split("T")[0]);
-    } else {
-      setSelectedSub(null);
-      setSubName("");
-      setSubAmount("");
-      setSubCycle("monthly");
-      setSubDate("");
-    }
-    setIsSubOpen(true);
-  };
 
-  const addSubMutation = useMutation({
-    mutationFn: () => {
-      return apiFetch("/subscriptions", {
-        method: "POST",
-        body: JSON.stringify({
-          name: subName,
-          amount: Math.round(parseFloat(subAmount) * 100),
-          billing_cycle: subCycle,
-          next_billing_date: subDate,
-        }),
-      }, token);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
-      setIsSubOpen(false);
-    },
-  });
+  // Top Spending Categories calculation
+  const expensesByCategory = useMemo(() => {
+    if (!transactions || !categories) return [];
+    const expenses = transactions.filter(t => {
+      if (t.amount >= 0) return false;
+      if (t.category_id) {
+        const cat = categories.find(c => c.id === t.category_id);
+        if (cat?.type === 'transfer') return false;
+      }
+      return true;
+    });
+    const grouped = expenses.reduce((acc, t) => {
+      const catName = t.category?.name || "Uncategorized";
+      acc[catName] = (acc[catName] || 0) + Math.abs(t.amount);
+      return acc;
+    }, {} as Record<string, number>);
 
-  const updateSubMutation = useMutation({
-    mutationFn: () => {
-      return apiFetch(`/subscriptions/${selectedSub?.id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          name: subName,
-          amount: Math.round(parseFloat(subAmount) * 100),
-          billing_cycle: subCycle,
-          next_billing_date: subDate,
-        }),
-      }, token);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
-      setIsSubOpen(false);
-    },
-  });
-
-  const deleteSubMutation = useMutation({
-    mutationFn: (id: string) => apiFetch(`/subscriptions/${id}`, { method: "DELETE" }, token),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
-      setIsSubOpen(false);
-    },
-  });
+    return Object.entries(grouped)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5); // Take top 5
+  }, [transactions, categories]);
 
   if (loadingAccounts) {
     return (
@@ -154,6 +111,19 @@ export default function DashboardPage() {
 
   const recentTransactions = transactions?.slice(0, 5) || [];
   const activeBudgets = budgets?.slice(0, 4) || [];
+
+  const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308'];
+
+  // Budget vs Actual summary
+  const totalBudget = budgets?.reduce((acc, b) => acc + b.amount_cents, 0) || 0;
+  const totalSpent = budgets?.reduce((acc, b) => acc + b.spent_total, 0) || 0;
+  const budgetPercent = totalBudget > 0 ? Math.min((totalSpent / totalBudget) * 100, 100) : 0;
+  const isBudgetOver = totalSpent > totalBudget;
+
+  // Savings Rate
+  const inPeriod = summary?.in_period || 0;
+  const outPeriod = summary?.out_period || 0;
+  const savingsRate = inPeriod > 0 ? ((inPeriod - outPeriod) / inPeriod) * 100 : 0;
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="space-y-8">
@@ -257,17 +227,17 @@ export default function DashboardPage() {
             ) : recentTransactions.length > 0 ? (
               <div className="space-y-3">
                 {recentTransactions.map((txn) => (
-                  <div key={txn.id} className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:bg-slate-800/50 dark:hover:bg-slate-800/50 rounded-xl transition-colors group cursor-pointer">
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-slate-500">
-                        {txn.description.charAt(0).toUpperCase()}
+                  <div key={txn.id} className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-xl transition-colors group cursor-pointer gap-4">
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                      <div className="h-10 w-10 shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-slate-500">
+                        {txn.description.trim().charAt(0).toUpperCase()}
                       </div>
-                      <div>
-                        <p className="font-medium text-slate-900 dark:text-white">{txn.description}</p>
-                        <p className="text-xs text-slate-500">{formatDate(txn.date)} &bull; {txn.category?.name || "Uncategorized"}</p>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-slate-900 dark:text-white truncate">{txn.description.replace(/\s+/g, ' ').trim()}</p>
+                        <p className="text-xs text-slate-500 truncate">{formatDate(txn.date)} &bull; {txn.category?.name || "Uncategorized"}</p>
                       </div>
                     </div>
-                    <span className={`font-bold font-heading ${txn.amount < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    <span className={`font-bold font-heading shrink-0 ${txn.amount < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
                       {txn.amount > 0 ? "+" : ""}{formatCurrency(txn.amount)}
                     </span>
                   </div>
@@ -319,131 +289,85 @@ export default function DashboardPage() {
         {/* Right Column: Mini Charts & Subscriptions */}
         <div className="space-y-6">
           
-          {/* Net Worth Mini Chart */}
-          <div className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
-            <h3 className="text-md font-semibold mb-4 text-slate-800 dark:text-slate-200 font-heading">6-Month Trend</h3>
-            <div className="h-32 -mx-2">
-              {netWorthData ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={netWorthData}>
-                    <defs>
-                      <linearGradient id="colorMini" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <YAxis domain={['auto', 'auto']} hide />
-                    <Area type="monotone" dataKey="value" stroke="#4f46e5" strokeWidth={2} fillOpacity={1} fill="url(#colorMini)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <Skeleton className="h-full w-full" />
-              )}
+          {/* Top Spending Categories Widget */}
+          <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800">
+            <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-4">Top Spending</h2>
+            {expensesByCategory.length > 0 ? (
+              <div className="flex flex-col items-center">
+                <div className="w-full h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RechartsPieChart>
+                      <Pie
+                        data={expensesByCategory}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={2}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        {expensesByCategory.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip 
+                        formatter={(value: any) => formatCurrency(Number(value) || 0)}
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: 'var(--tw-prose-body, white)' }}
+                        itemStyle={{ color: 'inherit' }}
+                      />
+                    </RechartsPieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-wrap gap-3 justify-center mt-2">
+                  {expensesByCategory.map((entry, idx) => (
+                    <div key={entry.name} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 font-medium">
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                      <span>{entry.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 text-center py-6">No expenses found.</p>
+            )}
+          </div>
+
+
+          {/* Savings Rate Trend */}
+          <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800">
+            <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-2">Savings Rate</h2>
+            <div className="flex items-end gap-3">
+              <span className={`text-4xl font-extrabold tracking-tight ${savingsRate >= 20 ? 'text-emerald-600 dark:text-emerald-400' : savingsRate > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                {savingsRate.toFixed(1)}%
+              </span>
             </div>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+              You saved {formatCurrency(Math.max(0, inPeriod - outPeriod))} out of {formatCurrency(inPeriod)} income this period.
+            </p>
           </div>
 
           {/* Subscriptions Stub */}
-          <div className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
+          <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
                 <Repeat className="h-5 w-5 text-indigo-600" />
                 <h2 className="text-lg font-bold font-heading">Subscriptions</h2>
               </div>
-              <Button size="icon-sm" variant="ghost" onClick={() => handleOpenSub()} className="text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/30 h-8 w-8">
-                <Plus size={16} />
-              </Button>
             </div>
             
-            
-            {loadingSubs ? (
-              <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14 w-full rounded-xl" />)}</div>
-            ) : subscriptions && subscriptions.length > 0 ? (
-              <div className="space-y-3">
-                {subscriptions.map((sub) => (
-                  <div key={sub.id} onClick={() => handleOpenSub(sub)} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800 transition-colors cursor-pointer group">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs group-hover:scale-110 transition-transform">
-                        {sub.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-slate-900 dark:text-white">{sub.name}</p>
-                        <p className="text-xs text-slate-500">Renews on {formatDate(sub.next_billing_date)}</p>
-                      </div>
-                    </div>
-                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">{formatCurrency(sub.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-6">
-                <p className="text-sm text-slate-500 mb-2">No subscriptions found.</p>
-                <Button onClick={() => handleOpenSub()} variant="outline" className="w-full rounded-xl text-indigo-600 border-indigo-200 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:border-indigo-900 dark:hover:bg-indigo-900/30">
-                  Add Subscription
-                </Button>
-              </div>
-            )}
-            {subscriptions && subscriptions.length > 0 && (
-              <Button onClick={() => handleOpenSub()} variant="outline" className="w-full mt-4 rounded-xl text-indigo-600 border-indigo-200 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:border-indigo-900 dark:hover:bg-indigo-900/30">
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Manage all your recurring payments, track expected costs, and view payment history.</p>
+            <Link href="/subscriptions">
+              <Button className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium">
                 Manage Subscriptions
               </Button>
-            )}
+            </Link>
           </div>
 
         </div>
       </div>
 
-      <Dialog open={isSubOpen} onOpenChange={setIsSubOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>{selectedSub ? "Edit Subscription" : "Add Subscription"}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Name</Label>
-              <Input placeholder="e.g. Netflix" value={subName} onChange={(e) => setSubName(e.target.value)} />
-            </div>
-            <div className="grid gap-2">
-              <Label>Amount ($)</Label>
-              <Input type="number" step="0.01" placeholder="15.99" value={subAmount} onChange={(e) => setSubAmount(e.target.value)} />
-            </div>
-            <div className="grid gap-2">
-              <Label>Billing Cycle</Label>
-              <Select value={subCycle} onValueChange={(v: "monthly" | "yearly") => setSubCycle(v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                  <SelectItem value="yearly">Yearly</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label>Next Billing Date</Label>
-              <Input type="date" value={subDate} onChange={(e) => setSubDate(e.target.value)} />
-            </div>
-          </div>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            {selectedSub && (
-              <Button 
-                variant="destructive" 
-                onClick={() => deleteSubMutation.mutate(selectedSub.id)}
-                disabled={deleteSubMutation.isPending}
-                className="w-full sm:w-auto"
-              >
-                {deleteSubMutation.isPending ? "Deleting..." : "Delete"}
-              </Button>
-            )}
-            <div className="flex-1"></div>
-            <Button variant="outline" onClick={() => setIsSubOpen(false)}>Cancel</Button>
-            <Button 
-              onClick={() => selectedSub ? updateSubMutation.mutate() : addSubMutation.mutate()} 
-              disabled={!subName || !subAmount || !subDate || addSubMutation.isPending || updateSubMutation.isPending}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
-            >
-              {addSubMutation.isPending || updateSubMutation.isPending ? "Saving..." : (selectedSub ? "Save Changes" : "Save Subscription")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
     </motion.div>
   );
 }

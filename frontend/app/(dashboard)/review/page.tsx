@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiFetch, Transaction, Category } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { format, parseISO } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -209,7 +209,7 @@ export default function ReviewPage() {
                             {txn.description}
                           </p>
                           <p className="text-sm text-slate-500">
-                            {format(parseISO(txn.date), "MMM d, yyyy")}
+                            {formatDate(txn.date)}
                           </p>
                         </div>
                         
