@@ -54,8 +54,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown, Repeat } from "lucide-react";
+import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown, Repeat, Search, ListFilter, ArrowRightLeft, XCircle, ChevronDown, Wallet } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -78,6 +89,12 @@ export default function TransactionsPage() {
   const [isLinkedTxnOpen, setIsLinkedTxnOpen] = useState(false);
   const [linkedTxnId, setLinkedTxnId] = useState<string | null>(null);
 
+  // Smart Filtering States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [selectedType, setSelectedType] = useState('All');
+
   useEffect(() => {
     if (selectedTxn) {
       setLinkedTxnId(selectedTxn.linked_transaction_id || null);
@@ -85,7 +102,7 @@ export default function TransactionsPage() {
   }, [selectedTxn]);
 
   useEffect(() => {
-    const editId = searchParams?.get("edit_id");
+    const editId = searchParams.get("edit");
     if (editId) {
       // Fetch this specific transaction
       apiFetch<Transaction>(`/transactions/${editId}`, {}, token)
@@ -153,6 +170,57 @@ export default function TransactionsPage() {
     queryFn: () => apiFetch("/subscriptions", {}, token),
     enabled: !!token,
   });
+
+  const filteredTransactions = useMemo(() => {
+    if (!transactions) return [];
+    return transactions.filter(t => {
+      // Search
+      const searchLower = searchQuery.toLowerCase();
+      const matchesSearch = !searchQuery || 
+        t.description.toLowerCase().includes(searchLower) || 
+        Math.abs(t.amount).toString().includes(searchLower);
+        
+      // Category
+      const catMatches = selectedCategories.length === 0 || 
+        (t.category_id && selectedCategories.includes(t.category_id));
+
+      // Account
+      const accMatches = selectedAccounts.length === 0 ||
+        (t.account_id && selectedAccounts.includes(t.account_id));
+
+      // Type
+      let typeMatches = true;
+      if (selectedType !== 'All') {
+        const cat = categories?.find(c => c.id === t.category_id);
+        const isTransfer = cat?.type === 'transfer';
+        if (selectedType === 'Income') typeMatches = t.amount > 0 && !isTransfer;
+        else if (selectedType === 'Expense') typeMatches = t.amount < 0 && !isTransfer;
+        else if (selectedType === 'Transfer') typeMatches = isTransfer || false;
+      }
+
+      return matchesSearch && catMatches && accMatches && typeMatches;
+    });
+  }, [transactions, searchQuery, selectedCategories, selectedAccounts, selectedType, categories]);
+
+  const toggleCategory = (categoryId: string) => {
+    setSelectedCategories(prev =>
+      prev.includes(categoryId) ? prev.filter(c => c !== categoryId) : [...prev, categoryId]
+    );
+  };
+
+  const toggleAccount = (accountId: string) => {
+    setSelectedAccounts(prev =>
+      prev.includes(accountId) ? prev.filter(a => a !== accountId) : [...prev, accountId]
+    );
+  };
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setSelectedCategories([]);
+    setSelectedAccounts([]);
+    setSelectedType('All');
+  };
+  const hasActiveFilters = searchQuery.length > 0 || selectedCategories.length > 0 || selectedAccounts.length > 0 || selectedType !== 'All';
 
   const bulkDeleteMutation = useMutation({
     mutationFn: (ids: string[]) => apiFetch("/transactions/bulk/delete", {
@@ -477,6 +545,153 @@ export default function TransactionsPage() {
         </div>
       </div>
 
+      {/* Smart Filter Bar */}
+      <div className="w-full relative group mb-6">
+        {/* Subtle ambient glow behind the bar */}
+        <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500/10 to-transparent rounded-xl blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
+        
+        {/* Main Glassmorphic Container */}
+        <div className="relative flex flex-col md:flex-row items-center gap-3 p-2 bg-white/60 dark:bg-slate-900/40 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 shadow-sm rounded-xl transition-all duration-300">
+          
+          {/* Search Field */}
+          <div className="relative w-full md:w-80 flex-shrink-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <Input
+              type="text"
+              placeholder="Search by description or amount..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 pr-4 h-10 w-full bg-transparent border-none shadow-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+            />
+          </div>
+
+          {/* Separator (Desktop only) */}
+          <div className="hidden md:block w-px h-6 bg-slate-200 dark:bg-slate-800 mx-1"></div>
+
+          {/* Filters Group */}
+          <div className="flex w-full md:w-auto items-center gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-hide">
+            
+            {/* Category Multiselect */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className={`h-9 border-slate-200 dark:border-slate-800 transition-all duration-200 ${
+                    selectedCategories.length > 0 
+                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/40' 
+                      : 'bg-transparent text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <ListFilter className="h-4 w-4 mr-2" />
+                  Category
+                  {selectedCategories.length > 0 && (
+                    <Badge variant="secondary" className="ml-2 h-5 px-1.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800">
+                      {selectedCategories.length}
+                    </Badge>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl overflow-y-auto max-h-[300px]">
+                <DropdownMenuLabel>Filter Categories</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {categories?.map(category => (
+                  <DropdownMenuCheckboxItem
+                    key={category.id}
+                    checked={selectedCategories.includes(category.id)}
+                    onCheckedChange={() => toggleCategory(category.id)}
+                    className="cursor-pointer"
+                  >
+                    {category.name}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Account Multiselect */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className={`h-9 border-slate-200 dark:border-slate-800 transition-all duration-200 ${
+                    selectedAccounts.length > 0 
+                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/40' 
+                      : 'bg-transparent text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Wallet className="h-4 w-4 mr-2" />
+                  Account
+                  {selectedAccounts.length > 0 && (
+                    <Badge variant="secondary" className="ml-2 h-5 px-1.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800">
+                      {selectedAccounts.length}
+                    </Badge>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl overflow-y-auto max-h-[300px]">
+                <DropdownMenuLabel>Filter Accounts</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {accounts?.map(account => (
+                  <DropdownMenuCheckboxItem
+                    key={account.id}
+                    checked={selectedAccounts.includes(account.id)}
+                    onCheckedChange={() => toggleAccount(account.id)}
+                    className="cursor-pointer"
+                  >
+                    {account.name}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Type Filter */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className={`h-9 border-slate-200 dark:border-slate-800 transition-all duration-200 ${
+                    selectedType !== 'All' 
+                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/40' 
+                      : 'bg-transparent text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <ArrowRightLeft className="h-4 w-4 mr-2" />
+                  {selectedType === 'All' ? 'Type' : selectedType}
+                  <ChevronDown className="h-3 w-3 ml-2 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl">
+                <DropdownMenuRadioGroup value={selectedType} onValueChange={setSelectedType}>
+                  {['All', 'Income', 'Expense', 'Transfer'].map(type => (
+                    <DropdownMenuRadioItem key={type} value={type} className="cursor-pointer">
+                      {type}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Spacer */}
+            <div className="flex-grow"></div>
+
+            {/* Clear Filters Action */}
+            {hasActiveFilters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearFilters}
+                className="h-9 px-3 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20 transition-colors"
+              >
+                <XCircle className="h-4 w-4 mr-2" />
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-3xl border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm overflow-hidden">
         <Table>
           <TableHeader>
@@ -485,7 +700,7 @@ export default function TransactionsPage() {
                 <input 
                   type="checkbox" 
                   className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
-                  checked={transactions?.length ? selectedIds.length === transactions.length : false}
+                  checked={filteredTransactions.length ? selectedIds.length === filteredTransactions.length : false}
                   onChange={(e) => handleSelectAll(e.target.checked)}
                 />
               </TableHead>
@@ -510,26 +725,32 @@ export default function TransactionsPage() {
                   <TableCell><Skeleton className="h-8 w-16 ml-auto rounded-lg" /></TableCell>
                 </TableRow>
               ))
-            ) : transactions?.length === 0 ? (
+            ) : filteredTransactions.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="h-64 p-0">
                   <EmptyState 
                     icon={SearchX} 
-                    title="No transactions found" 
-                    description="You haven't added any transactions yet. Get started by creating your first transaction." 
+                    title={hasActiveFilters ? "No matching transactions" : "No transactions found"} 
+                    description={hasActiveFilters ? "Try adjusting your filters to find what you're looking for." : "You haven't added any transactions yet. Get started by creating your first transaction."} 
                     action={
-                      <Button onClick={() => setIsAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md">
-                        <Plus className="mr-2 h-4 w-4" /> Add Transaction
-                      </Button>
+                      hasActiveFilters ? (
+                        <Button onClick={clearFilters} variant="outline" className="rounded-xl shadow-sm">
+                          Clear Filters
+                        </Button>
+                      ) : (
+                        <Button onClick={() => setIsAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md">
+                          <Plus className="mr-2 h-4 w-4" /> Add Transaction
+                        </Button>
+                      )
                     }
                   />
                 </TableCell>
               </TableRow>
             ) : (
-              transactions?.map((txn) => (
+              filteredTransactions.map((txn) => (
                 <TableRow 
                   key={txn.id} 
-                  className={`group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:bg-slate-800/50/50 dark:hover:bg-slate-800/50 transition-colors border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 ${selectedIds.includes(txn.id) ? 'bg-indigo-50 dark:bg-indigo-900/30/30 dark:bg-indigo-900/10' : ''}`}
+                  className={`group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 ${selectedIds.includes(txn.id) ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}
                   onClick={() => handleRowClick(txn)}
                 >
                   <TableCell className="w-12 py-4 text-center" onClick={(e) => e.stopPropagation()}>
