@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet } from "lucide-react";
+import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet, ShieldCheck } from "lucide-react";
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -181,14 +181,26 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Wallet className="w-16 h-16 text-emerald-600" /></div>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><ShieldCheck className="w-16 h-16 text-emerald-600" /></div>
           <div className="flex items-center gap-3 mb-4">
-            <div className="bg-emerald-50 dark:bg-emerald-500/10 p-2 rounded-xl text-emerald-600 dark:text-emerald-400"><Wallet className="w-5 h-5" /></div>
-            <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 font-heading">LEFT TO SPEND</h3>
+            <div className="bg-emerald-50 dark:bg-emerald-500/10 p-2 rounded-xl text-emerald-600 dark:text-emerald-400"><ShieldCheck className="w-5 h-5" /></div>
+            <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 font-heading">SAFE TO SPEND</h3>
           </div>
-          <div className="text-2xl font-bold font-heading text-slate-900 dark:text-white">
-            {loadingSummary ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary?.left_to_spend || 0)}
+          <div className="flex flex-col gap-1">
+            <div className="text-2xl font-bold font-heading text-slate-900 dark:text-white">
+              {(() => {
+                if (loadingSummary || loadingAccounts) return <Skeleton className="h-8 w-24" />;
+                const liquidCash = accounts?.filter(a => a.type === "asset").reduce((acc, a) => acc + a.initial_balance, 0) || 0;
+                const liabilities = accounts?.filter(a => a.type === "liability").reduce((acc, a) => acc + a.initial_balance, 0) || 0;
+                const unpaidSubs = Math.max(0, (summary?.subscriptions_to_pay || 0) - (summary?.subscriptions_paid || 0));
+                const safeToSpend = liquidCash - liabilities - unpaidSubs;
+                return formatCurrency(safeToSpend);
+              })()}
+            </div>
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              Liquid assets minus credit cards & unpaid subs
+            </div>
           </div>
         </motion.div>
 

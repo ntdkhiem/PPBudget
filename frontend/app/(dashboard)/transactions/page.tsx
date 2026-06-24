@@ -289,6 +289,60 @@ export default function TransactionsPage() {
     });
   };
 
+  const handleMarkAsCardPayment = async () => {
+    if (!selectedTxn || !linkedTxnId) return;
+    const cardCat = categories?.find((c) => c.name === "Card Payment");
+    if (!cardCat) {
+      toast.error("Category 'Card Payment' not found. Please create it first.");
+      return;
+    }
+    const linkedTxn = transactions?.find((t) => t.id === linkedTxnId);
+    if (!linkedTxn) {
+      toast.error("Linked transaction not found");
+      return;
+    }
+
+    try {
+      // Update current transaction
+      await apiFetch(`/transactions/${selectedTxn.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          account_id: selectedTxn.account_id,
+          amount: selectedTxn.amount,
+          date: selectedTxn.date.split("T")[0],
+          description: selectedTxn.description,
+          notes: selectedTxn.notes || null,
+          category_id: cardCat.id,
+          subscription_id: selectedTxn.subscription_id || null,
+          linked_transaction_id: linkedTxn.id,
+        }),
+      }, token);
+
+      // Update linked transaction
+      await apiFetch(`/transactions/${linkedTxn.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          account_id: linkedTxn.account_id,
+          amount: linkedTxn.amount,
+          date: linkedTxn.date.split("T")[0],
+          description: linkedTxn.description,
+          notes: linkedTxn.notes || null,
+          category_id: cardCat.id,
+          subscription_id: linkedTxn.subscription_id || null,
+          linked_transaction_id: selectedTxn.id,
+        }),
+      }, token);
+
+      toast.success("Successfully linked and categorized as Card Payment");
+      setIsEditOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["unreviewed"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update transactions");
+    }
+  };
+
   const handleUpdateSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedTxn) return;
@@ -738,6 +792,16 @@ export default function TransactionsPage() {
                         </Command>
                       </PopoverContent>
                     </Popover>
+                    {linkedTxnId && categories?.some(c => c.name === "Card Payment") && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleMarkAsCardPayment}
+                        className="mt-2 w-full justify-center bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 dark:text-indigo-400 font-medium"
+                      >
+                        <Repeat className="w-4 h-4 mr-2" /> Mark both as Card Payment Transfer
+                      </Button>
+                    )}
                   </div>
                 </div>
                 <div className="pt-8 flex gap-4 shrink-0">
