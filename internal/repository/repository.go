@@ -512,7 +512,32 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 	}
 	summary.SubscriptionsToPay = money.Money(subs)
 
-	summary.LeftToSpend = money.Money(inPeriod - outPeriod)
+	queryBudgets := `
+		WITH budget_spent AS (
+			SELECT b.id, COALESCE(SUM(ABS(t.amount)), 0) as spent_total
+			FROM budgets b
+			LEFT JOIN transactions t ON t.category_id = b.category_id 
+				AND t.date >= b.start_date 
+				AND t.date <= b.end_date
+				AND t.deleted_at IS NULL
+			WHERE b.start_date <= $2 AND b.end_date >= $1
+			GROUP BY b.id
+		)
+		SELECT 
+			COALESCE(SUM(b.amount), 0) as allocated,
+			COALESCE(SUM(s.spent_total), 0) as spent
+		FROM budgets b
+		JOIN budget_spent s ON b.id = s.id
+		WHERE b.start_date <= $2 AND b.end_date >= $1
+	`
+	var allocated, spent int64
+	err = r.pool.QueryRow(ctx, queryBudgets, startDate, endDate).Scan(&allocated, &spent)
+	if err != nil {
+		// fallback to 0 if budgets table doesn't exist yet
+		allocated = 0
+		spent = 0
+	}
+	summary.LeftToSpend = money.Money(allocated - spent)
 
 	queryNetWorth := `
 		WITH acc_balances AS (
