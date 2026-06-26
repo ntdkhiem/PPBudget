@@ -37,6 +37,7 @@ export interface Account {
   name: string;
   type: "asset" | "liability" | "income" | "expense" | "equity";
   initial_balance: number; // cents
+  current_balance?: number; // cents
 }
 
 export interface Transaction {

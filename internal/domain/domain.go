@@ -12,6 +12,7 @@ type Account struct {
 	Type           string      `json:"type"`
 	Currency       string      `json:"currency"`
 	InitialBalance money.Money `json:"initial_balance"`
+	CurrentBalance money.Money `json:"current_balance"`
 	SimplefinID    *string     `json:"simplefin_id,omitempty"`
 	CreatedAt      time.Time   `json:"created_at"`
 	UpdatedAt      time.Time   `json:"updated_at"`

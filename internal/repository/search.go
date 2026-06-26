@@ -81,10 +81,13 @@ func (r *Repository) SearchCategories(ctx context.Context, query string, limit i
 
 func (r *Repository) SearchAccounts(ctx context.Context, query string, limit int) ([]domain.Account, error) {
 	q := `
-		SELECT id, name, type, currency, initial_balance, simplefin_id, created_at, updated_at
-		FROM accounts 
-		WHERE name ILIKE '%' || $1 || '%'
-		ORDER BY name <-> $1
+		SELECT a.id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
+		       COALESCE(SUM(t.amount), 0) + a.initial_balance as current_balance
+		FROM accounts a
+		LEFT JOIN transactions t ON a.id = t.account_id
+		WHERE a.name ILIKE '%' || $1 || '%'
+		GROUP BY a.id
+		ORDER BY a.name <-> $1
 		LIMIT $2
 	`
 	rows, err := r.pool.Query(ctx, q, query, limit)
@@ -96,13 +99,12 @@ func (r *Repository) SearchAccounts(ctx context.Context, query string, limit int
 	var accounts []domain.Account
 	for rows.Next() {
 		var a domain.Account
-		var bal int64
-		var sfID *string
-		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Currency, &bal, &sfID, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		var balance, currentBalance int64
+		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance); err != nil {
 			return nil, err
 		}
-		a.InitialBalance = money.Money(bal)
-		a.SimplefinID = sfID
+		a.InitialBalance = money.Money(balance)
+		a.CurrentBalance = money.Money(currentBalance)
 		accounts = append(accounts, a)
 	}
 	return accounts, nil

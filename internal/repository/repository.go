@@ -267,8 +267,12 @@ func (r *Repository) MarkReviewed(ctx context.Context, txnID string, categoryID 
 // ListAccounts fetches all accounts
 func (r *Repository) ListAccounts(ctx context.Context) ([]domain.Account, error) {
 	query := `
-		SELECT id, name, type, currency, initial_balance, simplefin_id, created_at, updated_at
-		FROM accounts ORDER BY name ASC
+		SELECT a.id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
+		       COALESCE(SUM(t.amount), 0) + a.initial_balance as current_balance
+		FROM accounts a
+		LEFT JOIN transactions t ON a.id = t.account_id
+		GROUP BY a.id
+		ORDER BY a.name ASC
 	`
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
@@ -279,12 +283,13 @@ func (r *Repository) ListAccounts(ctx context.Context) ([]domain.Account, error)
 	var accounts []domain.Account
 	for rows.Next() {
 		var a domain.Account
-		var balance int64
-		err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt)
+		var balance, currentBalance int64
+		err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance)
 		if err != nil {
 			return nil, err
 		}
 		a.InitialBalance = money.Money(balance)
+		a.CurrentBalance = money.Money(currentBalance)
 		accounts = append(accounts, a)
 	}
 	return accounts, nil
@@ -360,12 +365,16 @@ func (r *Repository) CreateAccount(ctx context.Context, name, accType, currency 
 
 func (r *Repository) GetAccount(ctx context.Context, id string) (*domain.Account, error) {
 	query := `
-		SELECT id, name, type, currency, initial_balance, simplefin_id, created_at, updated_at
-		FROM accounts WHERE id = $1
+		SELECT a.id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
+		       COALESCE(SUM(t.amount), 0) + a.initial_balance as current_balance
+		FROM accounts a
+		LEFT JOIN transactions t ON a.id = t.account_id
+		WHERE a.id = $1
+		GROUP BY a.id
 	`
 	var a domain.Account
-	var balance int64
-	err := r.pool.QueryRow(ctx, query, id).Scan(&a.ID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt)
+	var balance, currentBalance int64
+	err := r.pool.QueryRow(ctx, query, id).Scan(&a.ID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apperrors.ErrNotFound
@@ -373,6 +382,7 @@ func (r *Repository) GetAccount(ctx context.Context, id string) (*domain.Account
 		return nil, err
 	}
 	a.InitialBalance = money.Money(balance)
+	a.CurrentBalance = money.Money(currentBalance)
 	return &a, nil
 }
 

@@ -99,10 +99,10 @@ export default function AccountsPage() {
   const expenses = accounts?.filter((a) => a.type === "expense") || [];
   const incomes = accounts?.filter((a) => a.type === "income") || [];
 
-  const totalAssets = assets.reduce((sum, a) => sum + a.initial_balance, 0);
-  const totalLiabilities = liabilities.reduce((sum, a) => sum + a.initial_balance, 0);
-  const totalExpenses = expenses.reduce((sum, a) => sum + a.initial_balance, 0);
-  const totalIncomes = incomes.reduce((sum, a) => sum + a.initial_balance, 0);
+  const totalAssets = assets.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
+  const totalLiabilities = liabilities.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
+  const totalExpenses = expenses.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
+  const totalIncomes = incomes.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
 
   const AccountCard = ({ account, idx }: { account: Account; idx: number }) => {
     let colorClass = "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:bg-slate-800 dark:text-slate-400";
@@ -138,7 +138,7 @@ export default function AccountsPage() {
         <div>
           <h3 className="text-lg font-medium mb-2 text-slate-600 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{account.name}</h3>
           <p className={`text-3xl font-bold font-heading tracking-tight text-slate-900 dark:text-white`}>
-            {formatCurrency(account.initial_balance)}
+            {formatCurrency(account.current_balance ?? account.initial_balance)}
           </p>
         </div>
       </motion.div>

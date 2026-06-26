@@ -66,7 +66,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown, Repeat, Search, ListFilter, ArrowRightLeft, XCircle, ChevronDown, Wallet } from "lucide-react";
+import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown, Repeat, Search, ListFilter, ArrowRightLeft, XCircle, ChevronDown, Wallet, Unlink } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -408,6 +408,62 @@ export default function TransactionsPage() {
       queryClient.invalidateQueries({ queryKey: ["unreviewed"] });
     } catch (err: any) {
       toast.error(err.message || "Failed to update transactions");
+    }
+  };
+
+  const handleUnlinkCardPayment = async () => {
+    if (!selectedTxn || !selectedTxn.linked_transaction_id) return;
+
+    try {
+      // We must fetch the linked transaction first if it's not in the current list
+      let linkedTxn = transactions?.find((t) => t.id === selectedTxn.linked_transaction_id);
+      if (!linkedTxn) {
+        linkedTxn = await apiFetch<Transaction>(`/transactions/${selectedTxn.linked_transaction_id}`, {}, token);
+      }
+      
+      if (!linkedTxn) {
+        toast.error("Linked transaction not found");
+        return;
+      }
+
+      // Update current transaction
+      await apiFetch(`/transactions/${selectedTxn.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          account_id: selectedTxn.account_id,
+          amount: selectedTxn.amount,
+          date: selectedTxn.date.split("T")[0],
+          description: selectedTxn.description,
+          notes: selectedTxn.notes || null,
+          category_id: null,
+          subscription_id: selectedTxn.subscription_id || null,
+          linked_transaction_id: null,
+        }),
+      }, token);
+
+      // Update linked transaction
+      await apiFetch(`/transactions/${linkedTxn.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          account_id: linkedTxn.account_id,
+          amount: linkedTxn.amount,
+          date: linkedTxn.date.split("T")[0],
+          description: linkedTxn.description,
+          notes: linkedTxn.notes || null,
+          category_id: null,
+          subscription_id: linkedTxn.subscription_id || null,
+          linked_transaction_id: null,
+        }),
+      }, token);
+
+      toast.success("Successfully unlinked transactions");
+      setLinkedTxnId(null);
+      setIsEditOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["unreviewed"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to unlink transactions");
     }
   };
 
@@ -1013,7 +1069,7 @@ export default function TransactionsPage() {
                         </Command>
                       </PopoverContent>
                     </Popover>
-                    {linkedTxnId && categories?.some(c => c.name === "Card Payment") && (
+                    {linkedTxnId && categories?.some(c => c.name === "Card Payment") && selectedTxn?.linked_transaction_id !== linkedTxnId && (
                       <Button
                         type="button"
                         variant="secondary"
@@ -1021,6 +1077,16 @@ export default function TransactionsPage() {
                         className="mt-2 w-full justify-center bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 dark:text-indigo-400 font-medium"
                       >
                         <Repeat className="w-4 h-4 mr-2" /> Mark both as Card Payment Transfer
+                      </Button>
+                    )}
+                    {selectedTxn?.linked_transaction_id && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleUnlinkCardPayment}
+                        className="mt-2 w-full justify-center bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 dark:text-rose-400 font-medium"
+                      >
+                        <Unlink className="w-4 h-4 mr-2" /> Unlink Card Payment
                       </Button>
                     )}
                   </div>
