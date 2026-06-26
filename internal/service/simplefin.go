@@ -391,12 +391,16 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 	if len(txns) == 0 {
 		return
 	}
-	if s.cfg.SMTPHost == "" || s.cfg.NotificationEmail == "" {
-		s.logger.Info("smtp not configured, skipping email notification")
+	if s.cfg.NotificationEmail == "" {
+		s.logger.Info("notification email not configured, skipping")
+		return
+	}
+	if s.cfg.SMTPHost == "" && s.cfg.ResendAPIKey == "" {
+		s.logger.Info("neither Resend nor SMTP configured, skipping email notification")
 		return
 	}
 
-	auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
+
 
 	// Fetch account names for nicer email
 	accounts, _ := s.ListAccounts(ctx)
@@ -530,17 +534,48 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 	body.WriteString("<div class=\"footer\">Sent by PPBudget</div>")
 	body.WriteString("</body></html>")
 
-	msg := []byte("To: " + s.cfg.NotificationEmail + "\r\n" +
-		"Subject: PPBudget Import Completed\r\n" +
-		"MIME-version: 1.0;\r\n" +
-		"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" +
-		body.String())
+	if s.cfg.ResendAPIKey != "" {
+		// Use Resend HTTP API
+		resendBody := fmt.Sprintf(`{"from": "%s", "to": ["%s"], "subject": "PPBudget Import Completed", "html": %q}`, 
+			s.cfg.ResendFromEmail,
+			s.cfg.NotificationEmail, 
+			body.String(),
+		)
 
-	err := smtp.SendMail(s.cfg.SMTPHost+":"+s.cfg.SMTPPort, auth, s.cfg.SMTPUser, []string{s.cfg.NotificationEmail}, msg)
-	if err != nil {
-		s.logger.Error("failed to send import notification email", "error", err)
+		req, err := http.NewRequest("POST", "https://api.resend.com/emails", strings.NewReader(resendBody))
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+s.cfg.ResendAPIKey)
+			req.Header.Set("Content-Type", "application/json")
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				s.logger.Error("failed to send import notification via Resend", "error", err)
+			} else {
+				defer resp.Body.Close()
+				if resp.StatusCode >= 400 {
+					s.logger.Error("resend API returned error", "status", resp.StatusCode)
+				} else {
+					s.logger.Info("import notification email sent via Resend", "count", len(txns))
+				}
+			}
+		} else {
+			s.logger.Error("failed to create Resend request", "error", err)
+		}
 	} else {
-		s.logger.Info("import notification email sent", "count", len(txns))
+		// Use standard SMTP (works locally or if provider allows port 587)
+		auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
+		msg := []byte("To: " + s.cfg.NotificationEmail + "\r\n" +
+			"Subject: PPBudget Import Completed\r\n" +
+			"MIME-version: 1.0;\r\n" +
+			"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" +
+			body.String())
+
+		err := smtp.SendMail(s.cfg.SMTPHost+":"+s.cfg.SMTPPort, auth, s.cfg.SMTPUser, []string{s.cfg.NotificationEmail}, msg)
+		if err != nil {
+			s.logger.Error("failed to send import notification email via SMTP", "error", err)
+		} else {
+			s.logger.Info("import notification email sent via SMTP", "count", len(txns))
+		}
 	}
 }
 
