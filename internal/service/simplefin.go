@@ -405,24 +405,130 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 		accMap[a.ID] = a.Name
 	}
 
-	var body strings.Builder
-	body.WriteString("<html><body>")
-	if autoSync {
-		body.WriteString("<h2>Auto-Sync Import Successful</h2>")
-	} else {
-		body.WriteString("<h2>Manual Import Successful</h2>")
-	}
-	body.WriteString(fmt.Sprintf("<p>Imported %d new transactions:</p>", len(txns)))
-	body.WriteString("<ul>")
+	// Refresh txns from DB to pick up any category assignments from rules
+	var updatedTxns []domain.Transaction
 	for _, txn := range txns {
-		accName := accMap[txn.AccountID]
-		if accName == "" {
-			accName = "Unknown Account"
+		t, err := s.GetTransaction(ctx, txn.ID)
+		if err == nil {
+			updatedTxns = append(updatedTxns, *t)
+		} else {
+			updatedTxns = append(updatedTxns, txn)
 		}
-		link := fmt.Sprintf("%s/transactions?edit=%s", s.cfg.FrontendURL, txn.ID)
-		body.WriteString(fmt.Sprintf("<li><b>%s</b>: %s (%s) - %s <a href=\"%s\">View</a></li>", accName, txn.Description, txn.Amount.String(), txn.Date.Format("2006-01-02"), link))
 	}
-	body.WriteString("</ul></body></html>")
+	txns = updatedTxns
+
+	// Fetch categories for nicer email
+	categories, _ := s.ListCategories(ctx)
+	catMap := make(map[string]string)
+	for _, c := range categories {
+		catMap[c.ID] = c.Name
+	}
+
+	categorizedCount := 0
+	uncategorizedCount := 0
+	txnsByAccount := make(map[string][]domain.Transaction)
+
+	for _, txn := range txns {
+		if txn.CategoryID != nil && *txn.CategoryID != "" {
+			categorizedCount++
+		} else {
+			uncategorizedCount++
+		}
+		txnsByAccount[txn.AccountID] = append(txnsByAccount[txn.AccountID], txn)
+	}
+
+	var body strings.Builder
+	body.WriteString(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; padding: 20px; }
+  .header { background-color: #f8f9fa; padding: 24px; border-radius: 8px; text-align: center; margin-bottom: 24px; border: 1px solid #e9ecef; }
+  .header h2 { margin: 0; color: #212529; font-size: 24px; }
+  .header p { margin: 12px 0 0 0; color: #6c757d; font-size: 16px; }
+  .txn-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px; }
+  .txn-table th, .txn-table td { padding: 12px 8px; text-align: left; border-bottom: 1px solid #dee2e6; }
+  .txn-table th { background-color: #f8f9fa; font-weight: 600; color: #495057; }
+  .txn-table td { color: #212529; }
+  .amount { font-weight: 600; text-align: right; }
+  .amount.positive { color: #2b8a3e; }
+  .amount.negative { color: #c92a2a; }
+  .btn { display: inline-block; padding: 6px 12px; background-color: #e9ecef; color: #495057; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background-color 0.2s; }
+  .btn:hover { background-color: #dee2e6; }
+  .btn-primary { background-color: #18181b; color: #ffffff; padding: 10px 20px; font-size: 15px; border-radius: 8px; }
+  .btn-primary:hover { background-color: #27272a; }
+  .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #e9ecef; text-align: center; font-size: 13px; color: #adb5bd; }
+</style>
+</head>
+<body>
+`)
+
+	body.WriteString("<div class=\"header\">")
+	if autoSync {
+		body.WriteString("<h2>Auto-Sync Complete</h2>")
+	} else {
+		body.WriteString("<h2>Import Complete</h2>")
+	}
+	body.WriteString(fmt.Sprintf("<p>Successfully imported <strong>%d</strong> new transactions.</p>", len(txns)))
+	
+	body.WriteString("<div style=\"margin-top: 16px; font-size: 14px;\">")
+	body.WriteString(fmt.Sprintf("<span style=\"display: inline-block; margin: 0 8px; color: #2b8a3e; background-color: #ebfbee; padding: 4px 12px; border-radius: 12px; font-weight: 500;\">✓ %d Categorized</span>", categorizedCount))
+	if uncategorizedCount > 0 {
+		body.WriteString(fmt.Sprintf("<span style=\"display: inline-block; margin: 0 8px; color: #c92a2a; background-color: #fff5f5; padding: 4px 12px; border-radius: 12px; font-weight: 500;\">⚠ %d Need Review</span>", uncategorizedCount))
+	}
+	body.WriteString("</div>")
+	body.WriteString("</div>")
+
+	for accID, accTxns := range txnsByAccount {
+		accName := accMap[accID]
+		if accName == "" {
+			accName = "Unknown"
+		}
+		
+		body.WriteString(fmt.Sprintf("<h3 style=\"margin-top: 32px; color: #495057; border-bottom: 2px solid #e9ecef; padding-bottom: 8px;\">%s <span style=\"font-weight: normal; font-size: 14px; color: #868e96;\">(%d transactions)</span></h3>", accName, len(accTxns)))
+		
+		body.WriteString("<table class=\"txn-table\">")
+		body.WriteString("<thead><tr><th>Date</th><th>Description</th><th>Category</th><th style=\"text-align: right;\">Amount</th><th style=\"text-align: center;\">Action</th></tr></thead>")
+		body.WriteString("<tbody>")
+
+		for _, txn := range accTxns {
+			link := fmt.Sprintf("%s/transactions?edit=%s", s.cfg.FrontendURL, txn.ID)
+			
+			amountStr := txn.Amount.String()
+			amountClass := ""
+			if strings.HasPrefix(amountStr, "-") {
+				amountClass = "negative"
+			} else if txn.Amount.ToInt64() > 0 {
+				amountClass = "positive"
+			}
+
+			catName := ""
+			if txn.CategoryID != nil && *txn.CategoryID != "" {
+				catName = catMap[*txn.CategoryID]
+			}
+			if catName == "" {
+				catName = "<span style=\"color: #adb5bd; font-style: italic;\">Uncategorized</span>"
+			}
+
+			body.WriteString(fmt.Sprintf(
+				"<tr><td>%s</td><td>%s</td><td>%s</td><td class=\"amount %s\">%s</td><td style=\"text-align: center;\"><a class=\"btn\" href=\"%s\">View</a></td></tr>",
+				txn.Date.Format("Jan 02, 2006"),
+				txn.Description,
+				catName,
+				amountClass,
+				amountStr,
+				link,
+			))
+		}
+		body.WriteString("</tbody></table>")
+	}
+
+	allTxnsLink := fmt.Sprintf("%s/transactions", s.cfg.FrontendURL)
+	body.WriteString(fmt.Sprintf("<div style=\"text-align: center;\"><a href=\"%s\" class=\"btn btn-primary\">View All Transactions</a></div>", allTxnsLink))
+
+	body.WriteString("<div class=\"footer\">Sent by PPBudget</div>")
+	body.WriteString("</body></html>")
 
 	msg := []byte("To: " + s.cfg.NotificationEmail + "\r\n" +
 		"Subject: PPBudget Import Completed\r\n" +
