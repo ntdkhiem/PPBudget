@@ -51,7 +51,7 @@ export default function SimpleFinImporterWizard() {
   // Queries
   const { data: configData, isLoading: configLoading } = useQuery({
     queryKey: ["simplefin-config"],
-    queryFn: () => apiFetch<{ connected: boolean; access_token: string; account_mapping?: Record<string, string> }>("/import/simplefin/config", {}, token),
+    queryFn: () => apiFetch<{ connected: boolean; access_token: string; account_mapping?: Record<string, string>; import_pending?: boolean; apply_rules?: boolean; content_dedup?: boolean }>("/import/simplefin/config", {}, token),
   });
 
   const { data: localAccounts } = useQuery({
@@ -65,6 +65,14 @@ export default function SimpleFinImporterWizard() {
     refetchInterval: isExecuting ? 1000 : false,
     enabled: isExecuting,
   });
+
+  useEffect(() => {
+    if (configData) {
+      if (configData.import_pending !== undefined) setImportPending(configData.import_pending);
+      if (configData.apply_rules !== undefined) setApplyRules(configData.apply_rules);
+      if (configData.content_dedup !== undefined) setContentDedup(configData.content_dedup);
+    }
+  }, [configData]);
 
   useEffect(() => {
     if (configData) {
@@ -338,7 +346,7 @@ export default function SimpleFinImporterWizard() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="p-8 sm:p-10 flex flex-col h-[450px]"
+              className="p-8 sm:p-10 flex flex-col h-[600px] max-h-[85vh]"
             >
               <h2 className="text-2xl font-bold mb-2 text-slate-900 dark:text-white">2. Map Accounts</h2>
               <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
@@ -358,18 +366,18 @@ export default function SimpleFinImporterWizard() {
                           value={accountMapping[sfAcc.id] || "new"}
                           onValueChange={(val) => setAccountMapping(prev => ({ ...prev, [sfAcc.id]: val }))}
                         >
-                          <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 h-11 rounded-xl">
+                          <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 h-11 rounded-xl text-slate-900 dark:text-slate-100">
                             <SelectValue placeholder="Select mapping..." />
                           </SelectTrigger>
-                          <SelectContent className="rounded-xl">
-                            <SelectItem value="new" className="font-semibold text-indigo-600 dark:text-indigo-400 py-2.5">
+                          <SelectContent className="rounded-xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                            <SelectItem value="new" className="font-semibold text-indigo-600 dark:text-indigo-400 py-2.5 focus:bg-indigo-50 dark:focus:bg-indigo-900/30">
                               + Create New Account
                             </SelectItem>
-                            <SelectItem value="skip" className="text-slate-500 py-2.5">
+                            <SelectItem value="skip" className="text-slate-500 dark:text-slate-400 py-2.5 focus:bg-slate-100 dark:focus:bg-slate-800">
                               Skip importing this account
                             </SelectItem>
                             {localAccounts?.map(la => (
-                              <SelectItem key={la.id} value={la.id} className="py-2.5">
+                              <SelectItem key={la.id} value={la.id} className="py-2.5 text-slate-900 dark:text-slate-100 focus:bg-slate-100 dark:focus:bg-slate-800">
                                 Map to: {la.name}
                               </SelectItem>
                             ))}
@@ -438,12 +446,12 @@ export default function SimpleFinImporterWizard() {
                   </label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full md:w-[320px] justify-start text-left font-normal bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800 h-12 rounded-xl text-base">
+                      <Button variant="outline" className="w-full md:w-[320px] justify-start text-left font-normal bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800 h-12 rounded-xl text-base text-slate-900 dark:text-slate-100 hover:dark:bg-slate-900">
                         <CalendarIcon className="mr-3 h-5 w-5 text-slate-400" />
                         {startDate ? format(startDate, "PPP") : <span className="text-slate-400">Pick a date</span>}
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0 rounded-2xl shadow-xl">
+                    <PopoverContent className="w-auto p-0 rounded-2xl shadow-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
                       <Calendar
                         mode="single"
                         selected={startDate}

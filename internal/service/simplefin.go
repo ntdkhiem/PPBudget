@@ -57,8 +57,9 @@ type SimplefinExecuteRequest struct {
 	AccessURL      string            `json:"access_url"`
 	AccountMapping map[string]string `json:"account_mapping"`
 	StartDate      string            `json:"start_date"` // YYYY-MM-DD
-	IncludePending bool              `json:"include_pending"`
-	Deduplicate    bool              `json:"deduplicate"`
+	ImportPending  bool              `json:"import_pending"`
+	ApplyRules     bool              `json:"apply_rules"`
+	ContentDedup   bool              `json:"content_dedup"`
 }
 
 // 1. Claim
@@ -234,7 +235,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 		}
 		
 		for _, txn := range acc.Transactions {
-			if txn.Pending && !req.IncludePending {
+			if txn.Pending && !req.ImportPending {
 				continue
 			}
 
@@ -259,6 +260,9 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 		var config map[string]interface{}
 		if err := json.Unmarshal(b, &config); err == nil {
 			config["account_mapping"] = req.AccountMapping
+			config["import_pending"] = req.ImportPending
+			config["apply_rules"] = req.ApplyRules
+			config["content_dedup"] = req.ContentDedup
 			if out, err := json.MarshalIndent(config, "", "  "); err == nil {
 				_ = os.WriteFile("simplefin.json", out, 0644)
 			}
@@ -300,7 +304,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 			}
 
 			for _, txn := range acc.Transactions {
-				if txn.Pending && !req.IncludePending {
+				if txn.Pending && !req.ImportPending {
 					continue
 				}
 
@@ -317,7 +321,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 					continue
 				}
 
-				if req.Deduplicate {
+				if req.ContentDedup {
 					exists, err := s.repo.TransactionExistsByDetails(bgCtx, targetAccountID, amount.ToInt64(), date, txn.Description)
 					if err == nil && exists {
 						ImportProgress.Lock()
@@ -343,19 +347,21 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 		}
 
 		// Apply all active rules to imported transactions
-		rules, err := s.ListRulesDetailed(bgCtx)
-		if err == nil {
-			var sDate *time.Time
-			if !startTime.IsZero() {
-				sDate = &startTime
-			}
-			for _, r := range rules {
-				if !r.IsActive {
-					continue
+		if req.ApplyRules {
+			rules, err := s.ListRulesDetailed(bgCtx)
+			if err == nil {
+				var sDate *time.Time
+				if !startTime.IsZero() {
+					sDate = &startTime
 				}
-				_, err := s.ApplyRule(bgCtx, r.ID, false, sDate, nil)
-				if err != nil {
-					s.logger.Error("failed to apply rule during import", "error", err, "rule_id", r.ID)
+				for _, r := range rules {
+					if !r.IsActive {
+						continue
+					}
+					_, err := s.ApplyRule(bgCtx, r.ID, false, sDate, nil)
+					if err != nil {
+						s.logger.Error("failed to apply rule during import", "error", err, "rule_id", r.ID)
+					}
 				}
 			}
 		}

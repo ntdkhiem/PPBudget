@@ -92,6 +92,9 @@ func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
 	var config struct {
 		AccessToken    string            `json:"access_token"`
 		AccountMapping map[string]string `json:"account_mapping"`
+		ImportPending  bool              `json:"import_pending"`
+		ApplyRules     bool              `json:"apply_rules"`
+		ContentDedup   bool              `json:"content_dedup"`
 	}
 	if err := json.Unmarshal(b, &config); err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"connected": false})
@@ -107,6 +110,9 @@ func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
 		"connected":       true,
 		"access_token":    config.AccessToken,
 		"account_mapping": config.AccountMapping,
+		"import_pending":  config.ImportPending,
+		"apply_rules":     config.ApplyRules,
+		"content_dedup":   config.ContentDedup,
 	})
 }
 
