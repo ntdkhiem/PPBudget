@@ -836,19 +836,16 @@ export default function TransactionsPage() {
                     <div className="flex flex-col items-end gap-0.5">
                       {txn.linked_by && txn.linked_by.length > 0 ? (
                         <>
-                          <span className={txn.effective_amount! < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
-                            {formatCurrency(txn.effective_amount!)}
+                          <span className={txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
+                            {formatCurrency(txn.amount)}
                           </span>
-                          <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded" title={`Original: ${formatCurrency(txn.amount)}. Paid by ${txn.linked_by.length} transaction(s).`}>
-                            Remaining
+                          <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded" title={`Paid by ${txn.linked_by.length} transaction(s).`}>
+                            Effective: {formatCurrency(txn.effective_amount!)}
                           </span>
                         </>
                       ) : (
                         <>
-                          <span className={cn(
-                            txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400",
-                            txn.linked_transaction_id ? "line-through opacity-50 text-sm" : ""
-                          )}>
+                          <span className={txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
                             {formatCurrency(txn.amount)}
                           </span>
                           {txn.linked_transaction_id && (
