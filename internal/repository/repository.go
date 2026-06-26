@@ -51,8 +51,8 @@ func (r *Repository) GetAccountBySimplefinID(ctx context.Context, tx pgx.Tx, sim
 	return accountID, nil
 }
 
-// InsertIngestedTransaction inserts a transaction, returning true if created, false if it was a duplicate
-func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, accountID string, amount money.Money, date time.Time, description, simplefinTxID string, categoryID *string, subscriptionID *string, isReviewed bool) (bool, error) {
+// InsertIngestedTransaction inserts a transaction, returning the ID, and true if created, false if it was a duplicate
+func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, accountID string, amount money.Money, date time.Time, description, simplefinTxID string, categoryID *string, subscriptionID *string, isReviewed bool) (string, bool, error) {
 	query := `
         INSERT INTO transactions (account_id, amount, date, description, simplefin_id, category_id, subscription_id, is_reviewed)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -63,11 +63,11 @@ func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, a
 	err := tx.QueryRow(ctx, query, accountID, amount.ToInt64(), date, description, simplefinTxID, categoryID, subscriptionID, isReviewed).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil // Duplicate safely ignored
+			return "", false, nil // Duplicate safely ignored
 		}
-		return false, fmt.Errorf("failed to insert transaction: %w", err)
+		return "", false, fmt.Errorf("failed to insert transaction: %w", err)
 	}
-	return true, nil
+	return id, true, nil
 }
 
 // CreateTransfer creates two linked transactions

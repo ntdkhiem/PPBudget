@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
+	"ntdkhiem/ppbudget-go/internal/config"
 	"ntdkhiem/ppbudget-go/internal/domain"
 	"ntdkhiem/ppbudget-go/internal/repository"
 	"ntdkhiem/ppbudget-go/pkg/money"
@@ -17,10 +19,26 @@ import (
 type Service struct {
 	repo   *repository.Repository
 	logger *slog.Logger
+	cfg    *config.Config
+	
+	mu           sync.RWMutex
+	nextAutoSync time.Time
 }
 
-func New(repo *repository.Repository, logger *slog.Logger) *Service {
-	return &Service{repo: repo, logger: logger}
+func New(repo *repository.Repository, logger *slog.Logger, cfg *config.Config) *Service {
+	return &Service{repo: repo, logger: logger, cfg: cfg}
+}
+
+func (s *Service) SetNextAutoSync(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextAutoSync = t
+}
+
+func (s *Service) GetNextAutoSync() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.nextAutoSync
 }
 
 type IngestRequest struct {
@@ -137,7 +155,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 	}
 
 	// 4. Insert idempotently
-	created, err := s.repo.InsertIngestedTransaction(ctx, tx, accountID, amount, date, req.Description, req.SimplefinTxID, categoryID, subscriptionID, isReviewed)
+	_, created, err := s.repo.InsertIngestedTransaction(ctx, tx, accountID, amount, date, req.Description, req.SimplefinTxID, categoryID, subscriptionID, isReviewed)
 	if err != nil {
 		return err
 	}

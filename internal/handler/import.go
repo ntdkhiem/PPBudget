@@ -115,6 +115,7 @@ func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
 		"apply_rules":     config.ApplyRules,
 		"content_dedup":   config.ContentDedup,
 		"auto_sync":       config.AutoSync,
+		"next_sync_time":  h.svc.GetNextAutoSync(),
 	})
 }
 

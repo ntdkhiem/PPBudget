@@ -19,10 +19,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/joho/godotenv"
 	"github.com/robfig/cron/v3"
 )
 
 func main() {
+	_ = godotenv.Load() // Load .env if it exists
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
@@ -42,7 +45,7 @@ func main() {
 
 	// 2. Init layers
 	repo := repository.New(pool)
-	svc := service.New(repo, logger)
+	svc := service.New(repo, logger, cfg)
 	h := handler.New(svc, logger, cfg)
 
 	// 2.5 Init Cron Scheduler
@@ -53,10 +56,13 @@ func main() {
 		if err := svc.RunAutoSync(bgCtx); err != nil {
 			logger.Error("auto-sync job failed", "error", err)
 		}
+		// update next run time
+		svc.SetNextAutoSync(time.Now().Add(12 * time.Hour))
 	})
 	if err != nil {
 		logger.Error("failed to schedule auto-sync job", "error", err)
 	} else {
+		svc.SetNextAutoSync(time.Now().Add(12 * time.Hour))
 		c.Start()
 		defer c.Stop()
 	}

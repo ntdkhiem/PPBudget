@@ -53,7 +53,7 @@ export default function SimpleFinImporterWizard() {
   // Queries
   const { data: configData, isLoading: configLoading } = useQuery({
     queryKey: ["simplefin-config"],
-    queryFn: () => apiFetch<{ connected: boolean; access_token: string; account_mapping?: Record<string, string>; import_pending?: boolean; apply_rules?: boolean; content_dedup?: boolean; auto_sync?: boolean }>("/import/simplefin/config", {}, token),
+    queryFn: () => apiFetch<{ connected: boolean; access_token: string; account_mapping?: Record<string, string>; import_pending?: boolean; apply_rules?: boolean; content_dedup?: boolean; auto_sync?: boolean; next_sync_time?: string }>("/import/simplefin/config", {}, token),
   });
 
   const { data: localAccounts } = useQuery({
@@ -332,7 +332,14 @@ export default function SimpleFinImporterWizard() {
                         />
                       </div>
                       <div className="text-left">
-                        <div className="text-sm font-semibold text-slate-900 dark:text-white">Auto-Sync</div>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                          Auto-Sync
+                          {autoSync && configData?.next_sync_time && new Date(configData.next_sync_time).getFullYear() > 2000 && (
+                            <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full font-medium">
+                              Next: {format(new Date(configData.next_sync_time), "MMM d, h:mm a")}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-slate-500 dark:text-slate-400">Import last 30 days every 12 hours</div>
                       </div>
                     </label>
@@ -608,7 +615,7 @@ export default function SimpleFinImporterWizard() {
                 setStep(configData?.connected ? 0 : 1);
                 setSimpleFinAccounts([]);
                 setAccountMapping({});
-              }} variant="outline" className="h-12 px-8 rounded-xl">
+              }} variant="outline" className="h-12 px-8 rounded-xl border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white transition-colors">
                 Done
               </Button>
             </motion.div>

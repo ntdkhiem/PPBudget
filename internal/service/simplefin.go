@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"net/smtp"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
 	"ntdkhiem/ppbudget-go/pkg/money"
@@ -60,6 +61,7 @@ type SimplefinExecuteRequest struct {
 	ImportPending  bool              `json:"import_pending"`
 	ApplyRules     bool              `json:"apply_rules"`
 	ContentDedup   bool              `json:"content_dedup"`
+	IsAutoSync     bool              `json:"-"`
 }
 
 // 1. Claim
@@ -272,6 +274,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 	go func() {
 		// Use a background context for the goroutine since the request context might be cancelled
 		bgCtx := context.Background()
+		var importedTxns []domain.Transaction
 
 		for _, acc := range sfData.Accounts {
 			mappedAccountID, ok := req.AccountMapping[acc.ID]
@@ -331,9 +334,17 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 					}
 				}
 
-				_, err = s.repo.InsertIngestedTransaction(bgCtx, tx, targetAccountID, amount, date, txn.Description, txn.ID, nil, nil, false)
+				txnID, created, err := s.repo.InsertIngestedTransaction(bgCtx, tx, targetAccountID, amount, date, txn.Description, txn.ID, nil, nil, false)
 				if err != nil {
 					s.logger.Error("failed to insert transaction", "error", err, "sf_txn_id", txn.ID)
+				} else if created {
+					importedTxns = append(importedTxns, domain.Transaction{
+						ID: txnID,
+						AccountID: targetAccountID,
+						Amount: amount,
+						Date: date,
+						Description: txn.Description,
+					})
 				}
 
 				ImportProgress.Lock()
@@ -366,12 +377,65 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 			}
 		}
 
+		s.sendImportNotification(bgCtx, importedTxns, req.IsAutoSync)
+
 		ImportProgress.Lock()
 		ImportProgress.Status = "completed"
 		ImportProgress.Unlock()
 	}()
 
 	return nil
+}
+
+func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Transaction, autoSync bool) {
+	if len(txns) == 0 {
+		return
+	}
+	if s.cfg.SMTPHost == "" || s.cfg.NotificationEmail == "" {
+		s.logger.Info("smtp not configured, skipping email notification")
+		return
+	}
+
+	auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
+
+	// Fetch account names for nicer email
+	accounts, _ := s.ListAccounts(ctx)
+	accMap := make(map[string]string)
+	for _, a := range accounts {
+		accMap[a.ID] = a.Name
+	}
+
+	var body strings.Builder
+	body.WriteString("<html><body>")
+	if autoSync {
+		body.WriteString("<h2>Auto-Sync Import Successful</h2>")
+	} else {
+		body.WriteString("<h2>Manual Import Successful</h2>")
+	}
+	body.WriteString(fmt.Sprintf("<p>Imported %d new transactions:</p>", len(txns)))
+	body.WriteString("<ul>")
+	for _, txn := range txns {
+		accName := accMap[txn.AccountID]
+		if accName == "" {
+			accName = "Unknown Account"
+		}
+		link := fmt.Sprintf("%s/transactions?edit=%s", s.cfg.FrontendURL, txn.ID)
+		body.WriteString(fmt.Sprintf("<li><b>%s</b>: %s (%s) - %s <a href=\"%s\">View</a></li>", accName, txn.Description, txn.Amount.String(), txn.Date.Format("2006-01-02"), link))
+	}
+	body.WriteString("</ul></body></html>")
+
+	msg := []byte("To: " + s.cfg.NotificationEmail + "\r\n" +
+		"Subject: PPBudget Import Completed\r\n" +
+		"MIME-version: 1.0;\r\n" +
+		"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" +
+		body.String())
+
+	err := smtp.SendMail(s.cfg.SMTPHost+":"+s.cfg.SMTPPort, auth, s.cfg.SMTPUser, []string{s.cfg.NotificationEmail}, msg)
+	if err != nil {
+		s.logger.Error("failed to send import notification email", "error", err)
+	} else {
+		s.logger.Info("import notification email sent", "count", len(txns))
+	}
 }
 
 // 4. Auto-Sync Background Job
@@ -412,6 +476,7 @@ func (s *Service) RunAutoSync(ctx context.Context) error {
 		ImportPending:  config.ImportPending,
 		ApplyRules:     config.ApplyRules,
 		ContentDedup:   config.ContentDedup,
+		IsAutoSync:     true,
 	}
 
 	err = s.SimpleFinExecute(ctx, req)
