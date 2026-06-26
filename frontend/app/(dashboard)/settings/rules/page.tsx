@@ -238,7 +238,7 @@ function RulesContent() {
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-[90vw] h-[90vh] overflow-y-auto bg-white dark:bg-slate-900/95 backdrop-blur-xl border-slate-200 dark:border-slate-800 shadow-2xl p-0 flex flex-col">
-          <div className="p-6 border-b border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-800/50/50">
+          <div className="p-6 border-b border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-800/50">
             <DialogHeader>
               <DialogTitle className="text-2xl font-bold text-slate-800 dark:text-slate-100">
                 {editingRule ? "Edit Rule" : "Create New Rule"}
@@ -352,15 +352,16 @@ function RulesContent() {
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     key={idx} 
-                    className="flex flex-col sm:flex-row gap-3 bg-purple-50/30 p-3 rounded-xl border border-purple-100"
+                    className="flex flex-col sm:flex-row gap-3 bg-purple-50/30 dark:bg-purple-900/10 p-3 rounded-xl border border-purple-100 dark:border-purple-900/30"
                   >
                     <Select value={act.action_type} onValueChange={(v) => updateAction(idx, "action_type", v)}>
-                      <SelectTrigger className="w-full sm:w-[180px] bg-white dark:bg-slate-900"><SelectValue/></SelectTrigger>
+                      <SelectTrigger className="w-full sm:w-[220px] bg-white dark:bg-slate-900"><SelectValue/></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="set_category">Set Category</SelectItem>
                         <SelectItem value="link_to_subscription">Link to Subscription</SelectItem>
                         <SelectItem value="add_tag">Add Tag</SelectItem>
                         <SelectItem value="set_budget">Set Budget</SelectItem>
+                        <SelectItem value="link_as_card_payment">Link as Card Payment</SelectItem>
                       </SelectContent>
                     </Select>
 
@@ -397,7 +398,7 @@ function RulesContent() {
                   </motion.div>
                 ))}
               </div>
-              <Button variant="outline" size="sm" onClick={addAction} className="text-purple-600 border-purple-200 bg-purple-50 hover:bg-purple-100">
+              <Button variant="outline" size="sm" onClick={addAction} className="text-purple-600 border-purple-200 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:border-purple-800/50 dark:hover:bg-purple-900/50 dark:text-purple-400">
                 <PlusCircle size={14} className="mr-2" /> Add Action
               </Button>
             </div>
@@ -464,7 +465,7 @@ function RulesContent() {
               </AnimatePresence>
             </div>
 
-          <div className="p-6 border-t border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-800/50/50 flex justify-end gap-3 sticky bottom-0 mt-auto">
+          <div className="p-6 border-t border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-3 sticky bottom-0 mt-auto">
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
             <Button 
               onClick={() => saveMutation.mutate()} 
