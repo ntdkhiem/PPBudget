@@ -23,6 +23,38 @@ It securely connects to your bank accounts, imports your transactions automatica
 
 PPBudget uses a decoupled, serverless-friendly architecture tailored for free-tier cloud deployment:
 
+```mermaid
+graph TD
+    %% Define Node Styles
+    classDef frontend fill:#000,stroke:#fff,stroke-width:2px,color:#fff
+    classDef backend fill:#00ADD8,stroke:#fff,stroke-width:2px,color:#fff
+    classDef db fill:#3ECF8E,stroke:#fff,stroke-width:2px,color:#fff
+    classDef external fill:#F3F4F6,stroke:#6B7280,stroke-width:2px,color:#374151
+    classDef automation fill:#2088FF,stroke:#fff,stroke-width:2px,color:#fff
+
+    %% Nodes
+    User([User])
+    Vercel["Next.js Frontend\n(Vercel)"]:::frontend
+    Render["Go REST API\n(Render)"]:::backend
+    Supabase[("PostgreSQL DB\n(Supabase)")]:::db
+    
+    SimpleFin["SimpleFin API\n(Bank Aggregator)"]:::external
+    Resend["Resend API\n(Emails)"]:::external
+    
+    GitHub["GitHub Actions\n(Cron & Backups)"]:::automation
+
+    %% Connections
+    User -- "Views Dashboard" --> Vercel
+    Vercel -- "REST API Calls" --> Render
+    Render -- "Reads/Writes Data" --> Supabase
+    
+    GitHub -. "Triggers Sync Ping\n(Every 12h)" .-> Render
+    GitHub -. "pg_dump Backup\n(Nightly)" .-> Supabase
+    
+    Render -- "Fetches Transactions" --> SimpleFin
+    Render -- "Sends Sync Summary" --> Resend
+```
+
 - **Frontend:** Next.js (React) styled with modern TailwindCSS, deployed to **Vercel**.
 - **Backend API:** High-performance Go (Golang) REST API, containerized via Docker and deployed to **Render**.
 - **Database:** PostgreSQL (with `pgx` driver), hosted on **Supabase** leveraging their IPv4 Transaction Pooler for zero-downtime serverless connectivity.
