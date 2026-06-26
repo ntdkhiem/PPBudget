@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS app_settings (
+    key VARCHAR(255) PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

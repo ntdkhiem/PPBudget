@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 
 	"ntdkhiem/ppbudget-go/internal/service"
 )
@@ -82,9 +81,9 @@ func (h *Handler) SimpleFinStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
-	// Read from simplefin.json
-	b, err := os.ReadFile("simplefin.json")
-	if err != nil {
+	// Read from db
+	b, err := h.svc.GetSimplefinConfig(r.Context())
+	if err != nil || b == "" {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"connected": false})
 		return
 	}
@@ -97,7 +96,7 @@ func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
 		ContentDedup   bool              `json:"content_dedup"`
 		AutoSync       bool              `json:"auto_sync"`
 	}
-	if err := json.Unmarshal(b, &config); err != nil {
+	if err := json.Unmarshal([]byte(b), &config); err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"connected": false})
 		return
 	}
@@ -128,26 +127,32 @@ func (h *Handler) SimpleFinAutoSyncToggle(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	b, err := os.ReadFile("simplefin.json")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to read simplefin.json")
+	if err := h.svc.UpdateSimplefinAutoSync(r.Context(), req.Enabled); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update simplefin config")
 		return
-	}
-
-	var config map[string]interface{}
-	if err := json.Unmarshal(b, &config); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to parse simplefin.json")
-		return
-	}
-
-	config["auto_sync"] = req.Enabled
-	if out, err := json.MarshalIndent(config, "", "  "); err == nil {
-		_ = os.WriteFile("simplefin.json", out, 0644)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "ok",
 		"auto_sync": req.Enabled,
 	})
+}
+
+func (h *Handler) SimpleFinCronTrigger(w http.ResponseWriter, r *http.Request) {
+	// Verify API key
+	apiKey := r.Header.Get("X-API-Key")
+	if apiKey == "" || apiKey != h.cfg.IngestAPIKey {
+		writeError(w, http.StatusUnauthorized, "invalid API key")
+		return
+	}
+
+	err := h.svc.RunAutoSync(r.Context())
+	if err != nil {
+		h.logger.Error("cron triggered auto-sync failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "auto-sync failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
 }
 

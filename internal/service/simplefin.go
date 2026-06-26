@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -73,12 +72,14 @@ func (s *Service) SimpleFinClaim(ctx context.Context, req SimplefinClaimRequest)
 		return &SimplefinClaimResponse{AccessURL: token}, nil
 	}
 
-	// Check if it's a simplefin.json configuration
+	// Check if it's a simplefin configuration from DB
 	var config struct {
 		AccessToken string `json:"access_token"`
 	}
-	if err := json.Unmarshal([]byte(token), &config); err == nil && config.AccessToken != "" {
-		return &SimplefinClaimResponse{AccessURL: config.AccessToken}, nil
+	if b, err := s.repo.GetAppSetting(ctx, "simplefin_config"); err == nil && b != "" {
+		if err := json.Unmarshal([]byte(b), &config); err == nil && config.AccessToken != "" {
+			return &SimplefinClaimResponse{AccessURL: config.AccessToken}, nil
+		}
 	}
 
 	// Assume it's a base64 encoded claim URL
@@ -115,13 +116,13 @@ func (s *Service) SimpleFinClaim(ctx context.Context, req SimplefinClaimRequest)
 
 	accessURL := string(accessURLBytes)
 
-	// Save to simplefin.json
+	// Save to app_settings
 	configData := map[string]interface{}{
 		"access_token": accessURL,
 		"flow":         "simplefin",
 	}
 	if b, err := json.MarshalIndent(configData, "", "  "); err == nil {
-		_ = os.WriteFile("simplefin.json", b, 0644)
+		_ = s.repo.SetAppSetting(ctx, "simplefin_config", string(b))
 	}
 
 	return &SimplefinClaimResponse{AccessURL: accessURL}, nil
@@ -256,17 +257,16 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 	ImportProgress.Error = ""
 	ImportProgress.Unlock()
 
-	// Save account mapping to simplefin.json
-	b, err := os.ReadFile("simplefin.json")
-	if err == nil {
+	// Save account mapping to db
+	if b, err := s.repo.GetAppSetting(ctx, "simplefin_config"); err == nil && b != "" {
 		var config map[string]interface{}
-		if err := json.Unmarshal(b, &config); err == nil {
+		if err := json.Unmarshal([]byte(b), &config); err == nil {
 			config["account_mapping"] = req.AccountMapping
 			config["import_pending"] = req.ImportPending
 			config["apply_rules"] = req.ApplyRules
 			config["content_dedup"] = req.ContentDedup
 			if out, err := json.MarshalIndent(config, "", "  "); err == nil {
-				_ = os.WriteFile("simplefin.json", out, 0644)
+				_ = s.repo.SetAppSetting(ctx, "simplefin_config", string(out))
 			}
 		}
 	}
@@ -546,9 +546,9 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 
 // 4. Auto-Sync Background Job
 func (s *Service) RunAutoSync(ctx context.Context) error {
-	b, err := os.ReadFile("simplefin.json")
-	if err != nil {
-		s.logger.Info("auto-sync: no simplefin.json found, skipping")
+	b, err := s.repo.GetAppSetting(ctx, "simplefin_config")
+	if err != nil || b == "" {
+		s.logger.Info("auto-sync: no simplefin_config found, skipping")
 		return nil // Not set up yet
 	}
 
@@ -560,7 +560,7 @@ func (s *Service) RunAutoSync(ctx context.Context) error {
 		ContentDedup   bool              `json:"content_dedup"`
 		AutoSync       bool              `json:"auto_sync"`
 	}
-	if err := json.Unmarshal(b, &config); err != nil {
+	if err := json.Unmarshal([]byte(b), &config); err != nil {
 		return fmt.Errorf("auto-sync: failed to unmarshal config: %w", err)
 	}
 
@@ -592,4 +592,32 @@ func (s *Service) RunAutoSync(ctx context.Context) error {
 	}
 	s.logger.Info("auto-sync: successfully started import for last 30 days")
 	return nil
+}
+
+// GetSimplefinConfig returns the simplefin configuration string from the database.
+func (s *Service) GetSimplefinConfig(ctx context.Context) (string, error) {
+	return s.repo.GetAppSetting(ctx, "simplefin_config")
+}
+
+// UpdateSimplefinAutoSync toggles the auto_sync setting in the simplefin configuration.
+func (s *Service) UpdateSimplefinAutoSync(ctx context.Context, enabled bool) error {
+	b, err := s.repo.GetAppSetting(ctx, "simplefin_config")
+	if err != nil {
+		return err
+	}
+	if b == "" {
+		return fmt.Errorf("no simplefin_config found")
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal([]byte(b), &config); err != nil {
+		return err
+	}
+
+	config["auto_sync"] = enabled
+	if out, err := json.MarshalIndent(config, "", "  "); err == nil {
+		return s.repo.SetAppSetting(ctx, "simplefin_config", string(out))
+	} else {
+		return err
+	}
 }

@@ -1,9 +1,8 @@
 version: '3.8'
 
 services:
-  postgres:
+  db:
     image: postgres:15-alpine
-    container_name: ppbudget_postgres
     environment:
       POSTGRES_USER: ppbudget
       POSTGRES_PASSWORD: ppbudget_password
@@ -11,7 +10,29 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ppbudget"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgres://ppbudget:ppbudget_password@db:5432/ppbudget?sslmode=disable
+      - PORT=8080
+      - INGEST_API_KEY=super-secret-api-key
+      - JWT_SECRET=super-secret-jwt-key
+      - ADMIN_PASSWORD=adminpassword
+      - FRONTEND_URL=http://localhost:3000
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
-  pgdata:
+  postgres_data:

@@ -1,0 +1,17 @@
+name: SimpleFin Data Importer Cron
+
+on:
+  schedule:
+    # Runs every 12 hours
+    - cron: '0 */12 * * *'
+  workflow_dispatch: # Allows manual trigger from the UI
+
+jobs:
+  run-importer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Import Endpoint
+        run: |
+          curl -X POST "${{ secrets.BACKEND_API_URL }}/api/v1/import/simplefin/cron" \
+          -H "Content-Type: application/json" \
+          -H "X-API-Key: ${{ secrets.INGEST_API_KEY }}"

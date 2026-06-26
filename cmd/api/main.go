@@ -71,7 +71,7 @@ func main() {
 	r := chi.NewRouter()
 
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:3000"}, // Next.js dev server
+		AllowedOrigins:   []string{"http://localhost:3000", cfg.FrontendURL, "https://ppbudget.vercel.app"}, // allow Next.js dev server and prod URL
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-API-Key"},
 		ExposedHeaders:   []string{"Link"},
@@ -105,6 +105,7 @@ func main() {
 			r.Get("/import/simplefin/status", h.SimpleFinStatus)
 			r.Get("/import/simplefin/config", h.SimpleFinConfig)
 			r.Post("/import/simplefin/auto-sync/toggle", h.SimpleFinAutoSyncToggle)
+			r.Post("/import/simplefin/cron", h.SimpleFinCronTrigger)
 		})
 
 		// Secure user routes (Dashboard)
