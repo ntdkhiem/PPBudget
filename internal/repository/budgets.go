@@ -99,8 +99,8 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, month time.Time) ([]
 		var s domain.BudgetSummary
 		var amountCents int64
 		var spentTotal int64
-		var totalDays int
-		var elapsedDays int
+		var totalDays int32
+		var elapsedDays int32
 		
 		if err := rows.Scan(&s.ID, &s.Name, &s.CategoryID, &amountCents, &s.PeriodType, &s.StartDate, &s.EndDate, &s.CreatedAt, &s.UpdatedAt, &spentTotal, &totalDays, &elapsedDays); err != nil {
 			return nil, err

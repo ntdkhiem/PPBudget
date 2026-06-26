@@ -74,6 +74,9 @@ func (h *Handler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	accountID := r.URL.Query().Get("account_id")
+	if accountID == "all" {
+		accountID = ""
+	}
 
 	// Handle optional cursor pagination
 	var cursorDate *time.Time
@@ -82,8 +85,9 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 		t, err := time.Parse(time.RFC3339, dateStr)
 		if err == nil {
 			cursorDate = &t
-			id := r.URL.Query().Get("cursor_id")
-			cursorID = &id
+			if id := r.URL.Query().Get("cursor_id"); id != "" {
+				cursorID = &id
+			}
 		}
 	}
 
