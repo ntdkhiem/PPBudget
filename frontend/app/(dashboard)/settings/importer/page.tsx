@@ -51,7 +51,7 @@ export default function SimpleFinImporterWizard() {
   // Queries
   const { data: configData, isLoading: configLoading } = useQuery({
     queryKey: ["simplefin-config"],
-    queryFn: () => apiFetch<{ connected: boolean; access_token: string }>("/import/simplefin/config", {}, token),
+    queryFn: () => apiFetch<{ connected: boolean; access_token: string; account_mapping?: Record<string, string> }>("/import/simplefin/config", {}, token),
   });
 
   const { data: localAccounts } = useQuery({
@@ -128,9 +128,11 @@ export default function SimpleFinImporterWizard() {
       const accountsRes = await fetchAccountsMutation.mutateAsync(accessUrl);
       setSimpleFinAccounts(accountsRes.sf_accounts || []);
       
+      const savedMapping = configData?.account_mapping || {};
+
       const initMap: Record<string, string> = {};
       (accountsRes.sf_accounts || []).forEach(acc => {
-        initMap[acc.id] = "new";
+        initMap[acc.id] = savedMapping[acc.id] || "new";
       });
       setAccountMapping(initMap);
       
@@ -154,9 +156,11 @@ export default function SimpleFinImporterWizard() {
       const accountsRes = await fetchAccountsMutation.mutateAsync(claimRes.access_url);
       setSimpleFinAccounts(accountsRes.sf_accounts || []);
       
+      const savedMapping = configData?.account_mapping || {};
+
       const initMap: Record<string, string> = {};
       (accountsRes.sf_accounts || []).forEach(acc => {
-        initMap[acc.id] = "new";
+        initMap[acc.id] = savedMapping[acc.id] || "new";
       });
       setAccountMapping(initMap);
       

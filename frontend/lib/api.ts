@@ -21,6 +21,10 @@ export async function apiFetch<T>(
   });
 
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== "undefined") {
+      localStorage.removeItem("ppbudget_token");
+      window.location.href = "/login";
+    }
     const errorBody = await res.json().catch(() => ({}));
     throw new Error(errorBody.error || "API request failed");
   }

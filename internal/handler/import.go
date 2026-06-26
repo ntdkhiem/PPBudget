@@ -90,7 +90,8 @@ func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var config struct {
-		AccessToken string `json:"access_token"`
+		AccessToken    string            `json:"access_token"`
+		AccountMapping map[string]string `json:"account_mapping"`
 	}
 	if err := json.Unmarshal(b, &config); err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"connected": false})
@@ -103,8 +104,9 @@ func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"connected":    true,
-		"access_token": config.AccessToken,
+		"connected":       true,
+		"access_token":    config.AccessToken,
+		"account_mapping": config.AccountMapping,
 	})
 }
 

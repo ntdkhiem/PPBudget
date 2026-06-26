@@ -253,6 +253,18 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 	ImportProgress.Error = ""
 	ImportProgress.Unlock()
 
+	// Save account mapping to simplefin.json
+	b, err := os.ReadFile("simplefin.json")
+	if err == nil {
+		var config map[string]interface{}
+		if err := json.Unmarshal(b, &config); err == nil {
+			config["account_mapping"] = req.AccountMapping
+			if out, err := json.MarshalIndent(config, "", "  "); err == nil {
+				_ = os.WriteFile("simplefin.json", out, 0644)
+			}
+		}
+	}
+
 	go func() {
 		// Use a background context for the goroutine since the request context might be cancelled
 		bgCtx := context.Background()
