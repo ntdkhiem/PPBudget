@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Database, Loader2, CheckCircle2, ChevronRight, ChevronLeft, Calendar as CalendarIcon, Check, RefreshCw } from "lucide-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, Account } from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ interface SimpleFinAccount {
 }
 
 export default function SimpleFinImporterWizard() {
+  const queryClient = useQueryClient();
   const [step, setStep] = useState(0); // 0: loading/dashboard, 1: setup
   const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
 
@@ -44,6 +45,7 @@ export default function SimpleFinImporterWizard() {
     d.setMonth(d.getMonth() - 1);
     return d;
   });
+  const [autoSync, setAutoSync] = useState(false);
 
   // Step 4 State
   const [isExecuting, setIsExecuting] = useState(false);
@@ -51,7 +53,7 @@ export default function SimpleFinImporterWizard() {
   // Queries
   const { data: configData, isLoading: configLoading } = useQuery({
     queryKey: ["simplefin-config"],
-    queryFn: () => apiFetch<{ connected: boolean; access_token: string; account_mapping?: Record<string, string>; import_pending?: boolean; apply_rules?: boolean; content_dedup?: boolean }>("/import/simplefin/config", {}, token),
+    queryFn: () => apiFetch<{ connected: boolean; access_token: string; account_mapping?: Record<string, string>; import_pending?: boolean; apply_rules?: boolean; content_dedup?: boolean; auto_sync?: boolean }>("/import/simplefin/config", {}, token),
   });
 
   const { data: localAccounts } = useQuery({
@@ -71,6 +73,7 @@ export default function SimpleFinImporterWizard() {
       if (configData.import_pending !== undefined) setImportPending(configData.import_pending);
       if (configData.apply_rules !== undefined) setApplyRules(configData.apply_rules);
       if (configData.content_dedup !== undefined) setContentDedup(configData.content_dedup);
+      if (configData.auto_sync !== undefined) setAutoSync(configData.auto_sync);
     }
   }, [configData]);
 
@@ -115,6 +118,26 @@ export default function SimpleFinImporterWizard() {
         },
         token
       ),
+  });
+
+  const toggleAutoSyncMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiFetch(
+        "/import/simplefin/auto-sync/toggle",
+        {
+          method: "POST",
+          body: JSON.stringify({ enabled }),
+        },
+        token
+      ),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["simplefin-config"] });
+      if (data.auto_sync) {
+        toast.success("Auto-sync enabled (Every 12 hours)");
+      } else {
+        toast.success("Auto-sync disabled");
+      }
+    }
   });
 
   const executeMutation = useMutation({
@@ -282,17 +305,38 @@ export default function SimpleFinImporterWizard() {
                   <p className="text-slate-500 dark:text-slate-400 max-w-md mb-8 text-lg">
                     Your SimpleFin account is linked and ready to import data. Click the button below to start syncing.
                   </p>
-                  <Button 
-                    onClick={handleSyncNow} 
-                    disabled={fetchAccountsMutation.isPending}
-                    className="h-12 px-8 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/25 border-0 font-medium text-base transition-all"
-                  >
-                    {fetchAccountsMutation.isPending ? (
-                      <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Fetching Accounts...</>
-                    ) : (
-                      <><RefreshCw className="w-5 h-5 mr-2" /> Sync Now</>
-                    )}
-                  </Button>
+                  <div className="flex flex-col items-center gap-6">
+                    <Button 
+                      onClick={handleSyncNow} 
+                      disabled={fetchAccountsMutation.isPending}
+                      className="h-12 px-8 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/25 border-0 font-medium text-base transition-all"
+                    >
+                      {fetchAccountsMutation.isPending ? (
+                        <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Fetching Accounts...</>
+                      ) : (
+                        <><RefreshCw className="w-5 h-5 mr-2" /> Sync Now</>
+                      )}
+                    </Button>
+                    <label className="flex items-center gap-3 cursor-pointer group p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/50 dark:hover:bg-slate-800 transition-colors">
+                      <div className={`flex-shrink-0 w-11 h-6 rounded-full transition-colors relative ${autoSync ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${autoSync ? 'translate-x-5' : 'translate-x-0'}`} />
+                        <input 
+                          type="checkbox" 
+                          className="hidden" 
+                          checked={autoSync} 
+                          onChange={(e) => {
+                            setAutoSync(e.target.checked);
+                            toggleAutoSyncMutation.mutate(e.target.checked);
+                          }}
+                          disabled={toggleAutoSyncMutation.isPending}
+                        />
+                      </div>
+                      <div className="text-left">
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white">Auto-Sync</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">Import last 30 days every 12 hours</div>
+                      </div>
+                    </label>
+                  </div>
                 </>
               ) : null}
             </motion.div>

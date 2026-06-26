@@ -95,6 +95,7 @@ func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
 		ImportPending  bool              `json:"import_pending"`
 		ApplyRules     bool              `json:"apply_rules"`
 		ContentDedup   bool              `json:"content_dedup"`
+		AutoSync       bool              `json:"auto_sync"`
 	}
 	if err := json.Unmarshal(b, &config); err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"connected": false})
@@ -113,6 +114,39 @@ func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
 		"import_pending":  config.ImportPending,
 		"apply_rules":     config.ApplyRules,
 		"content_dedup":   config.ContentDedup,
+		"auto_sync":       config.AutoSync,
+	})
+}
+
+func (h *Handler) SimpleFinAutoSyncToggle(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload")
+		return
+	}
+
+	b, err := os.ReadFile("simplefin.json")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read simplefin.json")
+		return
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(b, &config); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to parse simplefin.json")
+		return
+	}
+
+	config["auto_sync"] = req.Enabled
+	if out, err := json.MarshalIndent(config, "", "  "); err == nil {
+		_ = os.WriteFile("simplefin.json", out, 0644)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "ok",
+		"auto_sync": req.Enabled,
 	})
 }
 

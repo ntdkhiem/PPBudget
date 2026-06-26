@@ -373,3 +373,52 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 
 	return nil
 }
+
+// 4. Auto-Sync Background Job
+func (s *Service) RunAutoSync(ctx context.Context) error {
+	b, err := os.ReadFile("simplefin.json")
+	if err != nil {
+		s.logger.Info("auto-sync: no simplefin.json found, skipping")
+		return nil // Not set up yet
+	}
+
+	var config struct {
+		AccessToken    string            `json:"access_token"`
+		AccountMapping map[string]string `json:"account_mapping"`
+		ImportPending  bool              `json:"import_pending"`
+		ApplyRules     bool              `json:"apply_rules"`
+		ContentDedup   bool              `json:"content_dedup"`
+		AutoSync       bool              `json:"auto_sync"`
+	}
+	if err := json.Unmarshal(b, &config); err != nil {
+		return fmt.Errorf("auto-sync: failed to unmarshal config: %w", err)
+	}
+
+	if !config.AutoSync {
+		s.logger.Info("auto-sync: disabled in config")
+		return nil
+	}
+	if config.AccessToken == "" {
+		return fmt.Errorf("auto-sync: missing access token")
+	}
+
+	// Calculate start date: 30 days ago
+	startDate := time.Now().Add(-30 * 24 * time.Hour).Format("2006-01-02")
+
+	req := SimplefinExecuteRequest{
+		AccessURL:      config.AccessToken,
+		AccountMapping: config.AccountMapping,
+		StartDate:      startDate,
+		ImportPending:  config.ImportPending,
+		ApplyRules:     config.ApplyRules,
+		ContentDedup:   config.ContentDedup,
+	}
+
+	err = s.SimpleFinExecute(ctx, req)
+	if err != nil {
+		s.logger.Error("auto-sync: failed to execute simplefin import", "error", err)
+		return err
+	}
+	s.logger.Info("auto-sync: successfully started import for last 30 days")
+	return nil
+}

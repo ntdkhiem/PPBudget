@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/robfig/cron/v3"
 )
 
 func main() {
@@ -43,6 +44,22 @@ func main() {
 	repo := repository.New(pool)
 	svc := service.New(repo, logger)
 	h := handler.New(svc, logger, cfg)
+
+	// 2.5 Init Cron Scheduler
+	c := cron.New()
+	_, err = c.AddFunc("@every 12h", func() {
+		logger.Info("running auto-sync background job")
+		bgCtx := context.Background()
+		if err := svc.RunAutoSync(bgCtx); err != nil {
+			logger.Error("auto-sync job failed", "error", err)
+		}
+	})
+	if err != nil {
+		logger.Error("failed to schedule auto-sync job", "error", err)
+	} else {
+		c.Start()
+		defer c.Stop()
+	}
 
 	// 3. Setup Router
 	r := chi.NewRouter()
@@ -81,6 +98,7 @@ func main() {
 			r.Post("/import/simplefin/execute", h.SimpleFinExecute)
 			r.Get("/import/simplefin/status", h.SimpleFinStatus)
 			r.Get("/import/simplefin/config", h.SimpleFinConfig)
+			r.Post("/import/simplefin/auto-sync/toggle", h.SimpleFinAutoSyncToggle)
 		})
 
 		// Secure user routes (Dashboard)
