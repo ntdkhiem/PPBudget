@@ -9,6 +9,7 @@ import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { GlobalSearch } from "@/components/global-search";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ImportStatusIndicator } from "@/components/import-status-indicator";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 
@@ -137,7 +138,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </div>
           <h2 className="text-xl font-bold font-heading bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-600 dark:from-slate-100 dark:to-slate-300">PPBudget</h2>
         </div>
-        <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
+        <div className="flex items-center gap-3">
+          <ImportStatusIndicator />
+          <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon" className="text-slate-600 dark:text-slate-300">
               <Menu className="h-6 w-6" />
@@ -148,6 +151,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
              <SidebarContent pathname={pathname} date={date} setDate={setDate} handleLogout={handleLogout} navItems={navItems} />
           </SheetContent>
         </Sheet>
+        </div>
       </div>
 
       {/* Desktop Sidebar */}
@@ -156,6 +160,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main Content Area */}
+      <div className="hidden md:block fixed top-6 right-8 z-50">
+        <ImportStatusIndicator />
+      </div>
       <main className="flex-1 md:ml-64 p-4 md:p-6 lg:p-8 overflow-y-auto bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-50/40 via-transparent to-transparent">
         <div className="max-w-7xl mx-auto w-full">
           {children}

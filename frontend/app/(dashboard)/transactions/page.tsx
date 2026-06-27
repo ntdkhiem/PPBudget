@@ -70,7 +70,67 @@ import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLin
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 
+
+function LinkedTransactionCombobox({ linkedTxnId, setLinkedTxnId, transactions }: { linkedTxnId: string | null, setLinkedTxnId: (id: string | null) => void, transactions: Transaction[] | undefined }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="justify-between rounded-xl border-slate-200 dark:border-slate-700 h-14 text-lg font-normal bg-white dark:bg-slate-900 overflow-hidden"
+        >
+          <span className="truncate">
+            {linkedTxnId
+              ? transactions?.find((t) => t.id === linkedTxnId)?.description || `ID: ${linkedTxnId}`
+              : "Select recent transaction..."}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[500px] p-0 rounded-xl max-w-[90vw]" align="start">
+        <Command>
+          <CommandInput placeholder="Search recent transactions..." />
+          <CommandList className="max-h-[300px]">
+            <CommandEmpty>No recent transaction found.</CommandEmpty>
+            <CommandGroup>
+              {transactions?.slice(0, 50).map((txn) => (
+                <CommandItem
+                  key={txn.id}
+                  value={`${txn.description} ${txn.amount} ${txn.date} ${txn.id}`}
+                  onSelect={() => {
+                    setLinkedTxnId(txn.id === linkedTxnId ? null : txn.id);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4 shrink-0",
+                      linkedTxnId === txn.id ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  <div className="flex w-full justify-between items-center pr-2 gap-2 overflow-hidden">
+                    <div className="flex flex-col overflow-hidden">
+                      <span className="font-medium text-base truncate">{txn.description.replace(/\s+/g, ' ').trim()}</span>
+                      <span className="text-xs text-muted-foreground">{formatDate(txn.date)}</span>
+                    </div>
+                    <span className="font-semibold text-right whitespace-nowrap">{formatCurrency(txn.amount)}</span>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export default function TransactionsPage() {
+
   const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
   const queryClient = useQueryClient();
 
@@ -86,8 +146,7 @@ export default function TransactionsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const [isLinkedTxnOpen, setIsLinkedTxnOpen] = useState(false);
-  const [linkedTxnId, setLinkedTxnId] = useState<string | null>(null);
+    const [linkedTxnId, setLinkedTxnId] = useState<string | null>(null);
 
   // Smart Filtering States
   const [searchQuery, setSearchQuery] = useState('');
@@ -1015,57 +1074,7 @@ export default function TransactionsPage() {
                   <div className="space-y-2 md:col-span-2 flex flex-col">
                     <Label className="text-slate-700 dark:text-slate-300 text-lg">Pays for (Link to Transaction)</Label>
                     <input type="hidden" name="linkedTransactionId" value={linkedTxnId || ""} />
-                    <Popover open={isLinkedTxnOpen} onOpenChange={setIsLinkedTxnOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={isLinkedTxnOpen}
-                          className="justify-between rounded-xl border-slate-200 dark:border-slate-700 h-14 text-lg font-normal bg-white dark:bg-slate-900 overflow-hidden"
-                        >
-                          <span className="truncate">
-                            {linkedTxnId
-                              ? transactions?.find((t) => t.id === linkedTxnId)?.description || `ID: ${linkedTxnId}`
-                              : "Select recent transaction..."}
-                          </span>
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[500px] p-0 rounded-xl max-w-[90vw]" align="start">
-                        <Command>
-                          <CommandInput placeholder="Search recent transactions..." />
-                          <CommandList className="max-h-[300px]">
-                            <CommandEmpty>No recent transaction found.</CommandEmpty>
-                            <CommandGroup>
-                              {transactions?.slice(0, 50).map((txn) => (
-                                <CommandItem
-                                  key={txn.id}
-                                  value={`${txn.description} ${txn.amount} ${txn.date} ${txn.id}`}
-                                  onSelect={() => {
-                                    setLinkedTxnId(txn.id === linkedTxnId ? null : txn.id);
-                                    setIsLinkedTxnOpen(false);
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4 shrink-0",
-                                      linkedTxnId === txn.id ? "opacity-100" : "opacity-0"
-                                    )}
-                                  />
-                                  <div className="flex w-full justify-between items-center pr-2 gap-2 overflow-hidden">
-                                    <div className="flex flex-col overflow-hidden">
-                                      <span className="font-medium text-base truncate">{txn.description.replace(/\s+/g, ' ').trim()}</span>
-                                      <span className="text-xs text-muted-foreground">{formatDate(txn.date)}</span>
-                                    </div>
-                                    <span className="font-semibold text-right whitespace-nowrap">{formatCurrency(txn.amount)}</span>
-                                  </div>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                    <LinkedTransactionCombobox linkedTxnId={linkedTxnId} setLinkedTxnId={setLinkedTxnId} transactions={transactions} />
                     {linkedTxnId && categories?.some(c => c.name === "Card Payment") && selectedTxn?.linked_transaction_id !== linkedTxnId && (
                       <Button
                         type="button"
