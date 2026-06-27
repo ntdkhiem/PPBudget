@@ -89,18 +89,18 @@ func main() {
 		// Public route
 		r.Post("/auth/login", h.Login)
 
+		// Cron webhook (Protected by X-API-Key natively in handler)
+		r.Post("/import/simplefin/cron", h.SimpleFinCronTrigger)
+
 		// Secure ingestion endpoint (Machine-to-Machine)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAPIKey(cfg.IngestAPIKey))
 			r.Post("/ingest", h.Ingest)
 		})
 		
-			// Importer endpoints
+		// Importer endpoints
 		r.Group(func(r chi.Router) {
-			// Cron webhook (Protected by X-API-Key)
-		r.Post("/import/simplefin/cron", h.SimpleFinCronTrigger)
-
-		// This could be JWT protected, but the prompt didn't specify. We'll protect it with JWT for now.
+			// This could be JWT protected, but the prompt didn't specify. We'll protect it with JWT for now.
 			r.Use(middleware.RequireJWT(cfg.JWTSecret))
 			r.Post("/import/simplefin/claim", h.SimpleFinClaim)
 			r.Post("/import/simplefin/fetch-accounts", h.SimpleFinFetchAccounts)
