@@ -1,9 +1,9 @@
-name: Daily Database Backup
+name: Monthly Database Backup
 
 on:
   schedule:
-    # Runs at 3:00 AM UTC daily
-    - cron: '0 3 * * *'
+    # Runs at midnight on the first day of every month
+    - cron: '0 0 1 * *'
   workflow_dispatch: # Allows manual trigger
 
 jobs:
@@ -15,8 +15,10 @@ jobs:
 
       - name: Create Backup
         run: |
-          # Dump the database
-          pg_dump "${{ secrets.DATABASE_URL }}" -F c > backup.dump
+          # Strip the '?default_query_exec_mode=exec' pgx parameter which pg_dump doesn't understand
+          # We also swap port 6543 (Transaction pooler) to 5432 (Session pooler) to prevent pg_dump from poisoning the app's connection pool
+          CLEAN_URL=$(echo "${{ secrets.DATABASE_URL }}" | cut -d'?' -f1 | sed 's/:6543/:5432/')
+          pg_dump "$CLEAN_URL" -F c > backup.dump
           
           # Encrypt the backup with symmetric GPG encryption to prevent unauthorized access
           gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase "${{ secrets.BACKUP_PASSWORD }}" -o backup.dump.gpg backup.dump
