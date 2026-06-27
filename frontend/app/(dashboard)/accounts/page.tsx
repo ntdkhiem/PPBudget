@@ -104,46 +104,46 @@ export default function AccountsPage() {
   const totalExpenses = expenses.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
   const totalIncomes = incomes.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
 
-  const AccountCard = ({ account, idx }: { account: Account; idx: number }) => {
-    let colorClass = "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:bg-slate-800 dark:text-slate-400";
-    let Icon = Wallet;
-    if (account.type === 'asset') {
-      colorClass = "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400";
-      Icon = Wallet;
-    } else if (account.type === 'liability') {
-      colorClass = "bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400";
-      Icon = CreditCard;
-    } else if (account.type === 'expense') {
-      colorClass = "bg-orange-100 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400";
-      Icon = ReceiptText;
-    } else if (account.type === 'income') {
-      colorClass = "bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400";
-      Icon = ArrowUpRight;
-    }
+const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number; onClick: () => void }) => {
+  let colorClass = "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:bg-slate-800 dark:text-slate-400";
+  let Icon = Wallet;
+  if (account.type === 'asset') {
+    colorClass = "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400";
+    Icon = Wallet;
+  } else if (account.type === 'liability') {
+    colorClass = "bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400";
+    Icon = CreditCard;
+  } else if (account.type === 'expense') {
+    colorClass = "bg-orange-100 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400";
+    Icon = ReceiptText;
+  } else if (account.type === 'income') {
+    colorClass = "bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400";
+    Icon = ArrowUpRight;
+  }
 
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: idx * 0.05 }}
-        onClick={() => setSelectedAccount(account)}
-        className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 group flex flex-col justify-between cursor-pointer"
-      >
-        <div className="flex justify-between items-start mb-4">
-          <div className={`p-3 rounded-2xl ${colorClass}`}>
-            <Icon className="h-6 w-6" />
-          </div>
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">{account.type}</span>
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: idx * 0.05 }}
+      onClick={onClick}
+      className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 group flex flex-col justify-between cursor-pointer"
+    >
+      <div className="flex justify-between items-start mb-4">
+        <div className={`p-3 rounded-2xl ${colorClass}`}>
+          <Icon className="h-6 w-6" />
         </div>
-        <div>
-          <h3 className="text-lg font-medium mb-2 text-slate-600 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{account.name}</h3>
-          <p className={`text-3xl font-bold font-heading tracking-tight text-slate-900 dark:text-white`}>
-            {formatCurrency(account.current_balance ?? account.initial_balance)}
-          </p>
-        </div>
-      </motion.div>
-    );
-  };
+        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">{account.type}</span>
+      </div>
+      <div>
+        <h3 className="text-lg font-medium mb-2 text-slate-600 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{account.name}</h3>
+        <p className={`text-3xl font-bold font-heading tracking-tight text-slate-900 dark:text-white`}>
+          {formatCurrency(account.current_balance ?? account.initial_balance)}
+        </p>
+      </div>
+    </motion.div>
+  );
+};
 
   if (isLoading) return <div className="flex h-[50vh] items-center justify-center text-slate-500">Loading accounts...</div>;
 
@@ -260,7 +260,7 @@ export default function AccountsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {assets.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} />
               ))}
             </div>
           )}
@@ -285,7 +285,7 @@ export default function AccountsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {liabilities.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} />
               ))}
             </div>
           )}
@@ -310,7 +310,7 @@ export default function AccountsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {incomes.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} />
               ))}
             </div>
           )}
@@ -335,7 +335,7 @@ export default function AccountsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {expenses.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} />
               ))}
             </div>
           )}
