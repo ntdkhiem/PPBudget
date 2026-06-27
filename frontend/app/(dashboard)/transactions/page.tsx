@@ -687,8 +687,8 @@ export default function TransactionsPage() {
           <div className="flex w-full md:w-auto items-center gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-hide">
             
             {/* Category Multiselect */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <Popover>
+              <PopoverTrigger asChild>
                 <Button 
                   variant="outline" 
                   size="sm"
@@ -706,26 +706,29 @@ export default function TransactionsPage() {
                     </Badge>
                   )}
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl overflow-y-auto max-h-[300px]">
-                <DropdownMenuLabel>Filter Categories</DropdownMenuLabel>
-                <DropdownMenuSeparator />
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-56 p-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl">
+                <div className="px-2 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100">Filter Categories</div>
+                <div className="h-px bg-slate-200 dark:bg-slate-800 my-1" />
+                <div className="max-h-[300px] overflow-y-auto space-y-0.5">
                 {categories?.map(category => (
-                  <DropdownMenuCheckboxItem
-                    key={category.id}
-                    checked={selectedCategories.includes(category.id)}
-                    onCheckedChange={() => toggleCategory(category.id)}
-                    className="cursor-pointer"
-                  >
-                    {category.name}
-                  </DropdownMenuCheckboxItem>
+                  <label key={category.id} className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer"
+                      checked={selectedCategories.includes(category.id)}
+                      onChange={() => toggleCategory(category.id)}
+                    />
+                    <span className="truncate text-slate-700 dark:text-slate-300">{category.name}</span>
+                  </label>
                 ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </div>
+              </PopoverContent>
+            </Popover>
 
             {/* Account Multiselect */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <Popover>
+              <PopoverTrigger asChild>
                 <Button 
                   variant="outline" 
                   size="sm"
@@ -743,22 +746,25 @@ export default function TransactionsPage() {
                     </Badge>
                   )}
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl overflow-y-auto max-h-[300px]">
-                <DropdownMenuLabel>Filter Accounts</DropdownMenuLabel>
-                <DropdownMenuSeparator />
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-56 p-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl">
+                <div className="px-2 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100">Filter Accounts</div>
+                <div className="h-px bg-slate-200 dark:bg-slate-800 my-1" />
+                <div className="max-h-[300px] overflow-y-auto space-y-0.5">
                 {accounts?.map(account => (
-                  <DropdownMenuCheckboxItem
-                    key={account.id}
-                    checked={selectedAccounts.includes(account.id)}
-                    onCheckedChange={() => toggleAccount(account.id)}
-                    className="cursor-pointer"
-                  >
-                    {account.name}
-                  </DropdownMenuCheckboxItem>
+                  <label key={account.id} className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer"
+                      checked={selectedAccounts.includes(account.id)}
+                      onChange={() => toggleAccount(account.id)}
+                    />
+                    <span className="truncate text-slate-700 dark:text-slate-300">{account.name}</span>
+                  </label>
                 ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </div>
+              </PopoverContent>
+            </Popover>
 
             {/* Type Filter */}
             <DropdownMenu>
