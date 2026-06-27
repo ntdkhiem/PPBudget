@@ -10,15 +10,14 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - name: Install PostgreSQL Client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
 
       - name: Create Backup
         run: |
           # Strip the '?default_query_exec_mode=exec' pgx parameter which pg_dump doesn't understand
           # We also swap port 6543 (Transaction pooler) to 5432 (Session pooler) to prevent pg_dump from poisoning the app's connection pool
           CLEAN_URL=$(echo "${{ secrets.DATABASE_URL }}" | cut -d'?' -f1 | sed 's/:6543/:5432/')
-          pg_dump "$CLEAN_URL" -F c > backup.dump
+          docker run --rm postgres:17 pg_dump "$CLEAN_URL" -F c > backup.dump
           
           # Encrypt the backup with symmetric GPG encryption to prevent unauthorized access
           gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase "${{ secrets.BACKUP_PASSWORD }}" -o backup.dump.gpg backup.dump
