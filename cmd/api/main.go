@@ -97,7 +97,10 @@ func main() {
 		
 			// Importer endpoints
 		r.Group(func(r chi.Router) {
-			// This could be JWT protected, but the prompt didn't specify. We'll protect it with JWT for now.
+			// Cron webhook (Protected by X-API-Key)
+		r.Post("/import/simplefin/cron", h.SimpleFinCronTrigger)
+
+		// This could be JWT protected, but the prompt didn't specify. We'll protect it with JWT for now.
 			r.Use(middleware.RequireJWT(cfg.JWTSecret))
 			r.Post("/import/simplefin/claim", h.SimpleFinClaim)
 			r.Post("/import/simplefin/fetch-accounts", h.SimpleFinFetchAccounts)
@@ -105,7 +108,6 @@ func main() {
 			r.Get("/import/simplefin/status", h.SimpleFinStatus)
 			r.Get("/import/simplefin/config", h.SimpleFinConfig)
 			r.Post("/import/simplefin/auto-sync/toggle", h.SimpleFinAutoSyncToggle)
-			r.Post("/import/simplefin/cron", h.SimpleFinCronTrigger)
 		})
 
 		// Secure user routes (Dashboard)
