@@ -50,9 +50,9 @@ export interface Transaction {
   is_reviewed: boolean;
   running_balance?: number; // cents
   category_id?: string | null;
-  linked_transaction_id?: string | null;
   effective_amount?: number;
-  linked_by?: string[];
+  pays_for?: { transaction_id: string; amount: number }[];
+  paid_by?: { transaction_id: string; amount: number }[];
   category?: { id: string; name: string };
   subscription_id?: string;
 }

@@ -133,7 +133,7 @@ func (h *Handler) SimpleFinAutoSyncToggle(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status": "ok",
+		"status":    "ok",
 		"auto_sync": req.Enabled,
 	})
 }
@@ -155,4 +155,3 @@ func (h *Handler) SimpleFinCronTrigger(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
 }
-

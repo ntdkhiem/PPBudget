@@ -53,7 +53,7 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, month time.Time) ([]
 	// Wait, the requirement says "aggregates spent_total, spent_per_day, left_total, and left_per_day dynamically via SQL".
 	// Let's look at the query:
 	// A budget has start_date and end_date. For the summary, we calculate spent_total by joining transactions within start_date and end_date.
-	
+
 	query := `
 		WITH effective_transactions AS (
 			SELECT 
@@ -101,15 +101,15 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, month time.Time) ([]
 		var spentTotal int64
 		var totalDays int32
 		var elapsedDays int32
-		
+
 		if err := rows.Scan(&s.ID, &s.Name, &s.CategoryID, &amountCents, &s.PeriodType, &s.StartDate, &s.EndDate, &s.CreatedAt, &s.UpdatedAt, &spentTotal, &totalDays, &elapsedDays); err != nil {
 			return nil, err
 		}
-		
+
 		s.Amount = money.Money(amountCents)
 		s.SpentTotal = money.Money(spentTotal)
 		s.LeftTotal = money.Money(amountCents - spentTotal)
-		
+
 		if elapsedDays > 0 {
 			s.SpentPerDay = money.Money(spentTotal / int64(elapsedDays))
 		} else {
@@ -122,7 +122,7 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, month time.Time) ([]
 		} else {
 			s.LeftPerDay = money.Money(0)
 		}
-		
+
 		summaries = append(summaries, s)
 	}
 	return summaries, nil

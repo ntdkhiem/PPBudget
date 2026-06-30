@@ -66,66 +66,179 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown, Repeat, Search, ListFilter, ArrowRightLeft, XCircle, ChevronDown, Wallet, Unlink } from "lucide-react";
+import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown, Repeat, Search, ListFilter, ArrowRightLeft, XCircle, ChevronDown, Wallet, Unlink, Link, X } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 
+function AllocationAmountInput({ amount, maxAllowed, onChange }: { amount: number, maxAllowed?: number, onChange: (amount: number) => void }) {
+  const [inputValue, setInputValue] = useState(amount ? (amount / 100).toString() : '');
 
-function LinkedTransactionCombobox({ linkedTxnId, setLinkedTxnId, transactions }: { linkedTxnId: string | null, setLinkedTxnId: (id: string | null) => void, transactions: Transaction[] | undefined }) {
-  const [open, setOpen] = useState(false);
+  // Keep string state in sync with external amount changes, 
+  // but only if mathematically different to avoid cursor jumping while typing decimals
+  useEffect(() => {
+    const parsed = parseFloat(inputValue || '0');
+    if (Math.round(parsed * 100) !== amount) {
+      setInputValue(amount ? (amount / 100).toString() : '');
+    }
+  }, [amount, inputValue]);
+
+  const hasError = maxAllowed !== undefined && amount > maxAllowed;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="justify-between rounded-xl border-slate-200 dark:border-slate-700 h-14 text-lg font-normal bg-white dark:bg-slate-900 overflow-hidden"
-        >
-          <span className="truncate">
-            {linkedTxnId
-              ? transactions?.find((t) => t.id === linkedTxnId)?.description || `ID: ${linkedTxnId}`
-              : "Select recent transaction..."}
-          </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[500px] p-0 rounded-xl max-w-[90vw]" align="start">
-        <Command>
-          <CommandInput placeholder="Search recent transactions..." />
-          <CommandList className="max-h-[300px]">
-            <CommandEmpty>No recent transaction found.</CommandEmpty>
-            <CommandGroup>
-              {transactions?.slice(0, 50).map((txn) => (
-                <CommandItem
-                  key={txn.id}
-                  value={`${txn.description} ${txn.amount} ${txn.date} ${txn.id}`}
-                  onSelect={() => {
-                    setLinkedTxnId(txn.id === linkedTxnId ? null : txn.id);
-                    setOpen(false);
-                  }}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4 shrink-0",
-                      linkedTxnId === txn.id ? "opacity-100" : "opacity-0"
-                    )}
+    <div className="relative flex flex-col items-end">
+      <Input 
+        type="number" 
+        step="0.01" 
+        min="0"
+        className={cn("w-24 h-8 text-right", hasError && "border-rose-500 text-rose-500 focus-visible:ring-rose-500")}
+        value={inputValue}
+        onChange={(e) => {
+          setInputValue(e.target.value);
+          const parsed = parseFloat(e.target.value);
+          if (!isNaN(parsed)) {
+            onChange(Math.round(parsed * 100));
+          } else if (e.target.value === '') {
+            onChange(0);
+          }
+        }}
+        onBlur={() => {
+          const parsed = parseFloat(inputValue);
+          if (!isNaN(parsed)) {
+            setInputValue(parsed.toFixed(2));
+          }
+        }}
+      />
+      {hasError && (
+        <div className="absolute top-9 right-0 text-[10px] text-rose-500 font-medium whitespace-nowrap bg-white dark:bg-slate-950 px-1 rounded shadow-sm border border-rose-100 dark:border-rose-900/50 z-10 flex items-center gap-1">
+          Max: {formatCurrency(maxAllowed)}
+          <button 
+            type="button" 
+            onClick={() => {
+              setInputValue((maxAllowed / 100).toString());
+              onChange(maxAllowed);
+            }}
+            className="text-indigo-600 dark:text-indigo-400 underline hover:text-indigo-700 ml-1"
+          >
+            Fix
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function TransactionAllocationList({ 
+  allocations, 
+  setAllocations, 
+  transactions,
+  parentAmount
+}: { 
+  allocations: {transaction_id: string, amount: number}[], 
+  setAllocations: (val: {transaction_id: string, amount: number}[]) => void,
+  transactions: Transaction[] | undefined,
+  parentAmount?: number
+}) {
+  const [open, setOpen] = useState(false);
+
+  // Parent available is the absolute total of the parent minus the sum of ALL allocations
+  const totalAllocated = allocations.reduce((sum, a) => sum + a.amount, 0);
+  const parentRemaining = parentAmount !== undefined ? Math.abs(parentAmount) - totalAllocated : Infinity;
+
+  return (
+    <div className="space-y-3">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className="w-full justify-between rounded-xl border-slate-200 dark:border-slate-700 h-12 text-base font-normal bg-white dark:bg-slate-900"
+          >
+            <span className="truncate text-slate-500">
+              Select transaction to link...
+            </span>
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[500px] p-0 rounded-xl max-w-[90vw]" align="start">
+          <Command>
+            <CommandInput placeholder="Search transactions..." />
+            <CommandList className="max-h-[300px]">
+              <CommandEmpty>No transaction found.</CommandEmpty>
+              <CommandGroup>
+                {transactions?.slice(0, 50).map((txn) => {
+                  const isSelected = allocations.some(a => a.transaction_id === txn.id);
+                  return (
+                    <CommandItem
+                      key={txn.id}
+                      value={`${txn.description} ${txn.amount} ${txn.date} ${txn.id}`}
+                      onSelect={() => {
+                        if (!isSelected) {
+                          setAllocations([...allocations, { transaction_id: txn.id, amount: Math.abs(txn.amount) }]);
+                        }
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4 shrink-0",
+                          isSelected ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                      <div className="flex w-full justify-between items-center pr-2 gap-2 overflow-hidden">
+                        <div className="flex flex-col overflow-hidden">
+                          <span className="font-medium text-base truncate">{txn.description.replace(/\s+/g, ' ').trim()}</span>
+                          <span className="text-xs text-muted-foreground">{formatDate(txn.date)}</span>
+                        </div>
+                        <span className="font-semibold text-right whitespace-nowrap">{formatCurrency(txn.amount)}</span>
+                      </div>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      
+      {allocations.length > 0 && (
+        <div className="space-y-2">
+          {allocations.map((alloc, idx) => {
+            const txn = transactions?.find(t => t.id === alloc.transaction_id);
+            return (
+              <div key={alloc.transaction_id} className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+                <div className="flex-1 overflow-hidden">
+                  <div className="font-medium text-sm truncate">{txn?.description || 'Unknown Transaction'}</div>
+                  <div className="text-xs text-slate-500">{txn ? formatDate(txn.date) : ''}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-500">$</span>
+                  <AllocationAmountInput 
+                    amount={alloc.amount} 
+                    maxAllowed={parentAmount !== undefined ? parentRemaining + alloc.amount : undefined}
+                    onChange={(newAmount) => {
+                      const newAllocs = [...allocations];
+                      newAllocs[idx] = { ...newAllocs[idx], amount: newAmount };
+                      setAllocations(newAllocs);
+                    }}
                   />
-                  <div className="flex w-full justify-between items-center pr-2 gap-2 overflow-hidden">
-                    <div className="flex flex-col overflow-hidden">
-                      <span className="font-medium text-base truncate">{txn.description.replace(/\s+/g, ' ').trim()}</span>
-                      <span className="text-xs text-muted-foreground">{formatDate(txn.date)}</span>
-                    </div>
-                    <span className="font-semibold text-right whitespace-nowrap">{formatCurrency(txn.amount)}</span>
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+                  <Button 
+                    type="button" 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 shrink-0"
+                    onClick={() => setAllocations(allocations.filter(a => a.transaction_id !== alloc.transaction_id))}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -146,7 +259,8 @@ export default function TransactionsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-    const [linkedTxnId, setLinkedTxnId] = useState<string | null>(null);
+    const [paidBy, setPaidBy] = useState<{transaction_id: string, amount: number}[]>([]);
+  const [paysFor, setPaysFor] = useState<{transaction_id: string, amount: number}[]>([]);
 
   // Smart Filtering States
   const [searchQuery, setSearchQuery] = useState('');
@@ -156,7 +270,8 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     if (selectedTxn) {
-      setLinkedTxnId(selectedTxn.linked_transaction_id || null);
+      setPaidBy(selectedTxn.paid_by || []);
+      setPaysFor(selectedTxn.pays_for || []);
     }
   }, [selectedTxn]);
 
@@ -412,118 +527,9 @@ export default function TransactionsPage() {
       notes: formData.get("notes") || null,
       category_id: formData.get("categoryId") || null,
       subscription_id: formData.get("subscriptionId") === "none" ? null : formData.get("subscriptionId") || null,
-      linked_transaction_id: formData.get("linkedTransactionId") || null,
+      pays_for: paysFor,
+      paid_by: paidBy,
     });
-  };
-
-  const handleMarkAsCardPayment = async () => {
-    if (!selectedTxn || !linkedTxnId) return;
-    const cardCat = categories?.find((c) => c.name === "Card Payment");
-    if (!cardCat) {
-      toast.error("Category 'Card Payment' not found. Please create it first.");
-      return;
-    }
-    const linkedTxn = transactions?.find((t) => t.id === linkedTxnId);
-    if (!linkedTxn) {
-      toast.error("Linked transaction not found");
-      return;
-    }
-
-    try {
-      // Update current transaction
-      await apiFetch(`/transactions/${selectedTxn.id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          account_id: selectedTxn.account_id,
-          amount: selectedTxn.amount,
-          date: selectedTxn.date.split("T")[0],
-          description: selectedTxn.description,
-          notes: selectedTxn.notes || null,
-          category_id: cardCat.id,
-          subscription_id: selectedTxn.subscription_id || null,
-          linked_transaction_id: linkedTxn.id,
-        }),
-      }, token);
-
-      // Update linked transaction
-      await apiFetch(`/transactions/${linkedTxn.id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          account_id: linkedTxn.account_id,
-          amount: linkedTxn.amount,
-          date: linkedTxn.date.split("T")[0],
-          description: linkedTxn.description,
-          notes: linkedTxn.notes || null,
-          category_id: cardCat.id,
-          subscription_id: linkedTxn.subscription_id || null,
-          linked_transaction_id: selectedTxn.id,
-        }),
-      }, token);
-
-      toast.success("Successfully linked and categorized as Card Payment");
-      setIsEditOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
-      queryClient.invalidateQueries({ queryKey: ["unreviewed"] });
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update transactions");
-    }
-  };
-
-  const handleUnlinkCardPayment = async () => {
-    if (!selectedTxn || !selectedTxn.linked_transaction_id) return;
-
-    try {
-      // We must fetch the linked transaction first if it's not in the current list
-      let linkedTxn = transactions?.find((t) => t.id === selectedTxn.linked_transaction_id);
-      if (!linkedTxn) {
-        linkedTxn = await apiFetch<Transaction>(`/transactions/${selectedTxn.linked_transaction_id}`, {}, token);
-      }
-      
-      if (!linkedTxn) {
-        toast.error("Linked transaction not found");
-        return;
-      }
-
-      // Update current transaction
-      await apiFetch(`/transactions/${selectedTxn.id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          account_id: selectedTxn.account_id,
-          amount: selectedTxn.amount,
-          date: selectedTxn.date.split("T")[0],
-          description: selectedTxn.description,
-          notes: selectedTxn.notes || null,
-          category_id: null,
-          subscription_id: selectedTxn.subscription_id || null,
-          linked_transaction_id: null,
-        }),
-      }, token);
-
-      // Update linked transaction
-      await apiFetch(`/transactions/${linkedTxn.id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          account_id: linkedTxn.account_id,
-          amount: linkedTxn.amount,
-          date: linkedTxn.date.split("T")[0],
-          description: linkedTxn.description,
-          notes: linkedTxn.notes || null,
-          category_id: null,
-          subscription_id: linkedTxn.subscription_id || null,
-          linked_transaction_id: null,
-        }),
-      }, token);
-
-      toast.success("Successfully unlinked transactions");
-      setLinkedTxnId(null);
-      setIsEditOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
-      queryClient.invalidateQueries({ queryKey: ["unreviewed"] });
-    } catch (err: any) {
-      toast.error(err.message || "Failed to unlink transactions");
-    }
   };
 
   const handleUpdateSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -539,7 +545,7 @@ export default function TransactionsPage() {
       notes: formData.get("notes") || null,
       category_id: formData.get("categoryId") || null,
       subscription_id: formData.get("subscriptionId") === "none" ? null : formData.get("subscriptionId") || null,
-      linked_transaction_id: formData.get("linkedTransactionId") || null,
+      pays_for: paysFor, paid_by: paidBy,
     });
   };
 
@@ -899,26 +905,18 @@ export default function TransactionsPage() {
                   </TableCell>
                   <TableCell className="text-right py-4 font-semibold">
                     <div className="flex flex-col items-end gap-0.5">
-                      {txn.linked_by && txn.linked_by.length > 0 ? (
-                        <>
-                          <span className={txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
-                            {formatCurrency(txn.amount)}
-                          </span>
-                          <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded" title={`Paid by ${txn.linked_by.length} transaction(s).`}>
-                            Effective: {formatCurrency(txn.effective_amount!)}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <span className={txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
-                            {formatCurrency(txn.amount)}
-                          </span>
-                          {txn.linked_transaction_id && (
-                            <span className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded" title={`Pays for ID: ${txn.linked_transaction_id}`}>
-                              Effective: $0.00
-                            </span>
-                          )}
-                        </>
+                      <span className={txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
+                        {formatCurrency(txn.amount)}
+                      </span>
+                      {txn.pays_for && txn.pays_for.length > 0 && (
+                        <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded flex items-center gap-1" title={`Pays for ${txn.pays_for.length} transaction(s).`}>
+                          <Link size={12} /> Pays for {txn.pays_for.length} txn{txn.pays_for.length !== 1 ? 's' : ''} (Effective: {formatCurrency(txn.effective_amount!)})
+                        </span>
+                      )}
+                      {txn.paid_by && txn.paid_by.length > 0 && (
+                        <span className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded flex items-center gap-1" title={`Paid by ${txn.paid_by.length} transaction(s).`}>
+                          <Link size={12} /> Paid by {txn.paid_by.length} txn{txn.paid_by.length !== 1 ? 's' : ''} (Effective: {formatCurrency(txn.effective_amount!)})
+                        </span>
                       )}
                     </div>
                   </TableCell>
@@ -1077,37 +1075,32 @@ export default function TransactionsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2 md:col-span-2 flex flex-col">
-                    <Label className="text-slate-700 dark:text-slate-300 text-lg">Pays for (Link to Transaction)</Label>
-                    <input type="hidden" name="linkedTransactionId" value={linkedTxnId || ""} />
-                    <LinkedTransactionCombobox linkedTxnId={linkedTxnId} setLinkedTxnId={setLinkedTxnId} transactions={transactions} />
-                    {linkedTxnId && categories?.some(c => c.name === "Card Payment") && selectedTxn?.linked_transaction_id !== linkedTxnId && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={handleMarkAsCardPayment}
-                        className="mt-2 w-full justify-center bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 dark:text-indigo-400 font-medium"
-                      >
-                        <Repeat className="w-4 h-4 mr-2" /> Mark both as Card Payment Transfer
-                      </Button>
-                    )}
-                    {selectedTxn?.linked_transaction_id && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={handleUnlinkCardPayment}
-                        className="mt-2 w-full justify-center bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 dark:text-rose-400 font-medium"
-                      >
-                        <Unlink className="w-4 h-4 mr-2" /> Unlink Card Payment
-                      </Button>
-                    )}
+                  <div className="space-y-4 md:col-span-2 mt-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-4 flex items-center gap-2">
+                      <Link className="w-5 h-5 text-indigo-500" />
+                      Transaction Links
+                    </h3>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-slate-700 dark:text-slate-300 font-medium">(Partially) Pays for (Expenses this covered)</Label>
+                      <TransactionAllocationList allocations={paysFor} setAllocations={setPaysFor} transactions={transactions} parentAmount={selectedTxn?.amount} />
+                    </div>
+
+                    <div className="space-y-2 mt-6">
+                      <Label className="text-slate-700 dark:text-slate-300 font-medium">(Partially) Paid by (Revenues that covered this)</Label>
+                      <TransactionAllocationList allocations={paidBy} setAllocations={setPaidBy} transactions={transactions} parentAmount={selectedTxn?.amount} />
+                    </div>
                   </div>
                 </div>
                 <div className="pt-8 flex gap-4 shrink-0">
                   <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)} className="flex-1 rounded-xl py-8 text-xl border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800">
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={updateMutation.isPending} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-8 text-xl shadow-md shadow-indigo-500/20">
+                  <Button 
+                    type="submit" 
+                    disabled={updateMutation.isPending || (selectedTxn ? paysFor.reduce((s, a) => s + a.amount, 0) > Math.abs(selectedTxn.amount) || paidBy.reduce((s, a) => s + a.amount, 0) > Math.abs(selectedTxn.amount) : false)} 
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-8 text-xl shadow-md shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
                     {updateMutation.isPending ? <Loader2 className="h-6 w-6 animate-spin mx-auto" /> : "Save Changes"}
                   </Button>
                 </div>

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"ntdkhiem/ppbudget-go/internal/domain"
+	"strings"
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/config"
@@ -552,13 +553,13 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		AccountID   string  `json:"account_id"`
-		Amount      int64   `json:"amount"`
-		Date        string  `json:"date"`
-		Description string  `json:"description"`
-		Notes          *string `json:"notes"`
-		CategoryID     *string `json:"category_id"`
-		SubscriptionID *string `json:"subscription_id"`
+		AccountID           string  `json:"account_id"`
+		Amount              int64   `json:"amount"`
+		Date                string  `json:"date"`
+		Description         string  `json:"description"`
+		Notes               *string `json:"notes"`
+		CategoryID          *string `json:"category_id"`
+		SubscriptionID      *string `json:"subscription_id"`
 		LinkedTransactionID *string `json:"linked_transaction_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -640,14 +641,15 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		AccountID   string  `json:"account_id"`
-		Amount      int64   `json:"amount"`
-		Date        string  `json:"date"`
-		Description string  `json:"description"`
-		Notes          *string `json:"notes"`
-		CategoryID     *string `json:"category_id"`
-		SubscriptionID *string `json:"subscription_id"`
-		LinkedTransactionID *string `json:"linked_transaction_id"`
+		AccountID      string                   `json:"account_id"`
+		Amount         int64                    `json:"amount"`
+		Date           string                   `json:"date"`
+		Description    string                   `json:"description"`
+		Notes          *string                  `json:"notes"`
+		CategoryID     *string                  `json:"category_id"`
+		SubscriptionID *string                  `json:"subscription_id"`
+		PaysFor        []domain.TransactionLink `json:"pays_for"`
+		PaidBy         []domain.TransactionLink `json:"paid_by"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
@@ -660,10 +662,14 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.UpdateTransaction(r.Context(), id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID, body.LinkedTransactionID)
+	err = h.svc.UpdateTransaction(r.Context(), id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID, body.PaysFor, body.PaidBy)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")
+			return
+		}
+		if strings.Contains(err.Error(), "exceeds available") {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update transaction")

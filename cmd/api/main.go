@@ -97,7 +97,7 @@ func main() {
 			r.Use(middleware.RequireAPIKey(cfg.IngestAPIKey))
 			r.Post("/ingest", h.Ingest)
 		})
-		
+
 		// Importer endpoints
 		r.Group(func(r chi.Router) {
 			// This could be JWT protected, but the prompt didn't specify. We'll protect it with JWT for now.
@@ -113,7 +113,7 @@ func main() {
 		// Secure user routes (Dashboard)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireJWT(cfg.JWTSecret))
-			
+
 			// Accounts
 			r.Get("/accounts", h.ListAccounts)
 			r.Post("/accounts", h.CreateAccount)

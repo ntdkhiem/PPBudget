@@ -19,21 +19,26 @@ type Account struct {
 }
 
 type Transaction struct {
-	ID           string      `json:"id"`
-	AccountID    string      `json:"account_id"`
-	CategoryID   *string     `json:"category_id,omitempty"`
-	Amount       money.Money `json:"amount"`
-	Date         time.Time   `json:"date"`
-	Description  string      `json:"description"`
-	Notes        *string     `json:"notes,omitempty"`
-	IsReviewed   bool        `json:"is_reviewed"`
-	IsReconciled bool        `json:"is_reconciled"`
-	TransferID   *string     `json:"transfer_id,omitempty"`
-	SimplefinAccountID *string `json:"simplefin_account_id,omitempty"`
-	SubscriptionID *string   `json:"subscription_id,omitempty"`
-	LinkedTransactionID *string `json:"linked_transaction_id,omitempty"`
-	EffectiveAmount     money.Money `json:"effective_amount"`
-	LinkedBy            []string    `json:"linked_by,omitempty"`
+	ID                 string            `json:"id"`
+	AccountID          string            `json:"account_id"`
+	CategoryID         *string           `json:"category_id,omitempty"`
+	Amount             money.Money       `json:"amount"`
+	Date               time.Time         `json:"date"`
+	Description        string            `json:"description"`
+	Notes              *string           `json:"notes,omitempty"`
+	IsReviewed         bool              `json:"is_reviewed"`
+	IsReconciled       bool              `json:"is_reconciled"`
+	TransferID         *string           `json:"transfer_id,omitempty"`
+	SimplefinAccountID *string           `json:"simplefin_account_id,omitempty"`
+	SubscriptionID     *string           `json:"subscription_id,omitempty"`
+	PaysFor            []TransactionLink `json:"pays_for,omitempty"`
+	PaidBy             []TransactionLink `json:"paid_by,omitempty"`
+	EffectiveAmount    money.Money       `json:"effective_amount"`
+}
+
+type TransactionLink struct {
+	TransactionID string      `json:"transaction_id"`
+	Amount        money.Money `json:"amount"`
 }
 
 type TransactionWithBalance struct {
@@ -92,12 +97,11 @@ type Budget struct {
 
 type BudgetSummary struct {
 	Budget
-	SpentTotal   money.Money `json:"spent_total"`
-	SpentPerDay  money.Money `json:"spent_per_day"`
-	LeftTotal    money.Money `json:"left_total"`
-	LeftPerDay   money.Money `json:"left_per_day"`
+	SpentTotal  money.Money `json:"spent_total"`
+	SpentPerDay money.Money `json:"spent_per_day"`
+	LeftTotal   money.Money `json:"left_total"`
+	LeftPerDay  money.Money `json:"left_per_day"`
 }
-
 
 type CategorySpend struct {
 	CategoryID string      `json:"category_id"`

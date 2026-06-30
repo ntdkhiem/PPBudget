@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -101,19 +102,20 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 	query := `
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, t.linked_transaction_id,
+            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id,
             (a.initial_balance + SUM(t.amount) OVER (PARTITION BY t.account_id ORDER BY t.date, t.id)) as running_balance,
-            (CASE 
-                WHEN t.linked_transaction_id IS NOT NULL THEN 0
-                ELSE t.amount + COALESCE((
-                    SELECT SUM(amount) FROM transactions child 
-                    WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
-                ), 0)
-            END) as effective_amount,
+            (t.amount 
+             - COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
+             + COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0)
+            ) as effective_amount,
             COALESCE((
-                SELECT array_agg(child.id::text) FROM transactions child 
-                WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
-            ), '{}'::text[]) as linked_by
+                SELECT json_agg(json_build_object('transaction_id', target_transaction_id, 'amount', amount))
+                FROM transaction_links WHERE source_transaction_id = t.id
+            ), '[]'::json) as pays_for,
+            COALESCE((
+                SELECT json_agg(json_build_object('transaction_id', source_transaction_id, 'amount', amount))
+                FROM transaction_links WHERE target_transaction_id = t.id
+            ), '[]'::json) as paid_by
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE ($1 = '' OR t.account_id = NULLIF($1, '')::uuid) AND t.deleted_at IS NULL
@@ -140,14 +142,14 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		var notes *string
 		var transferID *string
 		var subID *string
-		var linkedTxnID *string
 		var effectiveAmount int64
-		var linkedBy []string
+		var paysForJson []byte
+		var paidByJson []byte
 
 		err := rows.Scan(
 			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &linkedTxnID,
-			&balance, &effectiveAmount, &linkedBy,
+			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID,
+			&balance, &effectiveAmount, &paysForJson, &paidByJson,
 		)
 		if err != nil {
 			return nil, err
@@ -159,9 +161,9 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		t.Notes = notes
 		t.TransferID = transferID
 		t.SubscriptionID = subID
-		t.LinkedTransactionID = linkedTxnID
 		t.EffectiveAmount = money.Money(effectiveAmount)
-		t.LinkedBy = linkedBy
+		json.Unmarshal(paysForJson, &t.PaysFor)
+		json.Unmarshal(paidByJson, &t.PaidBy)
 		txns = append(txns, t)
 	}
 	return txns, nil
@@ -172,18 +174,19 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 	query := `
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, t.linked_transaction_id, a.simplefin_id as simplefin_account_id,
-            (CASE 
-                WHEN t.linked_transaction_id IS NOT NULL THEN 0
-                ELSE t.amount + COALESCE((
-                    SELECT SUM(amount) FROM transactions child 
-                    WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
-                ), 0)
-            END) as effective_amount,
+            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, a.simplefin_id as simplefin_account_id,
+            (t.amount 
+             - COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
+             + COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0)
+            ) as effective_amount,
             COALESCE((
-                SELECT array_agg(child.id::text) FROM transactions child 
-                WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
-            ), '{}'::text[]) as linked_by
+                SELECT json_agg(json_build_object('transaction_id', target_transaction_id, 'amount', amount))
+                FROM transaction_links WHERE source_transaction_id = t.id
+            ), '[]'::json) as pays_for,
+            COALESCE((
+                SELECT json_agg(json_build_object('transaction_id', source_transaction_id, 'amount', amount))
+                FROM transaction_links WHERE target_transaction_id = t.id
+            ), '[]'::json) as paid_by
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE t.deleted_at IS NULL
@@ -206,14 +209,14 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 		var transferID *string
 		var sfAccountID *string
 		var subID *string
-		var linkedTxnID *string
 		var effectiveAmount int64
-		var linkedBy []string
+		var paysForJson []byte
+		var paidByJson []byte
 
 		err := rows.Scan(
 			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &linkedTxnID, &sfAccountID,
-			&effectiveAmount, &linkedBy,
+			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &sfAccountID,
+			&effectiveAmount, &paysForJson, &paidByJson,
 		)
 		if err != nil {
 			return nil, err
@@ -225,9 +228,9 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 		t.TransferID = transferID
 		t.SimplefinAccountID = sfAccountID
 		t.SubscriptionID = subID
-		t.LinkedTransactionID = linkedTxnID
 		t.EffectiveAmount = money.Money(effectiveAmount)
-		t.LinkedBy = linkedBy
+		json.Unmarshal(paysForJson, &t.PaysFor)
+		json.Unmarshal(paidByJson, &t.PaidBy)
 		txns = append(txns, t)
 	}
 	return txns, nil
@@ -237,7 +240,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 func (r *Repository) MarkReviewed(ctx context.Context, txnID string, categoryID *string) error {
 	var query string
 	var args []interface{}
-	
+
 	if categoryID != nil {
 		query = `
 			UPDATE transactions 
@@ -253,7 +256,7 @@ func (r *Repository) MarkReviewed(ctx context.Context, txnID string, categoryID 
 		`
 		args = []interface{}{txnID}
 	}
-	
+
 	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return err
@@ -460,7 +463,7 @@ func (r *Repository) BulkUpdateTransactionsCategory(ctx context.Context, ids []s
 	return err
 }
 
-func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, linkedTransactionID *string) error {
+func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -469,15 +472,43 @@ func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string
 
 	query := `
 		UPDATE transactions 
-		SET account_id = $1, amount = $2, date = $3, description = $4, notes = $5, category_id = $6, subscription_id = $7, linked_transaction_id = $8, updated_at = NOW()
-		WHERE id = $9 AND deleted_at IS NULL
+		SET account_id = $1, amount = $2, date = $3, description = $4, notes = $5, category_id = $6, subscription_id = $7, updated_at = NOW()
+		WHERE id = $8 AND deleted_at IS NULL
 	`
-	tag, err := tx.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID, linkedTransactionID, id)
+	tag, err := tx.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID, id)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return apperrors.ErrNotFound
+	}
+
+	if paysFor != nil {
+		clearQuery := `DELETE FROM transaction_links WHERE source_transaction_id = $1`
+		if _, err := tx.Exec(ctx, clearQuery, id); err != nil {
+			return err
+		}
+
+		for _, link := range paysFor {
+			setQuery := `INSERT INTO transaction_links (source_transaction_id, target_transaction_id, amount) VALUES ($1, $2, $3)`
+			if _, err := tx.Exec(ctx, setQuery, id, link.TransactionID, link.Amount.ToInt64()); err != nil {
+				return err
+			}
+		}
+	}
+
+	if paidBy != nil {
+		clearQuery := `DELETE FROM transaction_links WHERE target_transaction_id = $1`
+		if _, err := tx.Exec(ctx, clearQuery, id); err != nil {
+			return err
+		}
+
+		for _, link := range paidBy {
+			setQuery := `INSERT INTO transaction_links (source_transaction_id, target_transaction_id, amount) VALUES ($1, $2, $3)`
+			if _, err := tx.Exec(ctx, setQuery, link.TransactionID, id, link.Amount.ToInt64()); err != nil {
+				return err
+			}
+		}
 	}
 
 	return tx.Commit(ctx)

@@ -20,7 +20,7 @@ type Service struct {
 	repo   *repository.Repository
 	logger *slog.Logger
 	cfg    *config.Config
-	
+
 	mu           sync.RWMutex
 	nextAutoSync time.Time
 }
@@ -91,7 +91,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 		if !rule.IsActive {
 			continue
 		}
-		
+
 		match := false
 		if rule.Strictness == "all" || len(rule.Conditions) == 0 {
 			match = true
@@ -308,8 +308,8 @@ func (s *Service) BulkUpdateTransactionsCategory(ctx context.Context, ids []stri
 	return s.repo.BulkUpdateTransactionsCategory(ctx, ids, categoryID)
 }
 
-func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, linkedTransactionID *string) error {
-	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, notes, categoryID, subscriptionID, linkedTransactionID)
+func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink) error {
+	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, notes, categoryID, subscriptionID, paysFor, paidBy)
 }
 
 func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, startDate, endDate *time.Time) (int, error) {
@@ -317,7 +317,7 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 	if err != nil {
 		return 0, err
 	}
-	
+
 	var sDate, eDate *time.Time
 	if !runAll {
 		sDate = startDate
@@ -418,7 +418,7 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 			}
 
 			if needsUpdate {
-				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID, newSubID, t.LinkedTransactionID)
+				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID, newSubID, t.PaysFor, t.PaidBy)
 				if err != nil {
 					continue
 				}

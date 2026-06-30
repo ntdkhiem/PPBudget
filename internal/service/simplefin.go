@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/smtp"
 	"strings"
 	"sync"
 	"time"
-	"net/smtp"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
 	"ntdkhiem/ppbudget-go/pkg/money"
@@ -236,7 +236,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 		if !ok || mappedAccountID == "" {
 			continue // Skip unmapped accounts
 		}
-		
+
 		for _, txn := range acc.Transactions {
 			if txn.Pending && !req.ImportPending {
 				continue
@@ -339,10 +339,10 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 					s.logger.Error("failed to insert transaction", "error", err, "sf_txn_id", txn.ID)
 				} else if created {
 					importedTxns = append(importedTxns, domain.Transaction{
-						ID: txnID,
-						AccountID: targetAccountID,
-						Amount: amount,
-						Date: date,
+						ID:          txnID,
+						AccountID:   targetAccountID,
+						Amount:      amount,
+						Date:        date,
 						Description: txn.Description,
 					})
 				}
@@ -399,8 +399,6 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 		s.logger.Info("neither Resend nor SMTP configured, skipping email notification")
 		return
 	}
-
-
 
 	// Fetch account names for nicer email
 	accounts, _ := s.ListAccounts(ctx)
@@ -475,7 +473,7 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 		body.WriteString("<h2>Import Complete</h2>")
 	}
 	body.WriteString(fmt.Sprintf("<p>Successfully imported <strong>%d</strong> new transactions.</p>", len(txns)))
-	
+
 	body.WriteString("<div style=\"margin-top: 16px; font-size: 14px;\">")
 	body.WriteString(fmt.Sprintf("<span style=\"display: inline-block; margin: 0 8px; color: #2b8a3e; background-color: #ebfbee; padding: 4px 12px; border-radius: 12px; font-weight: 500;\">✓ %d Categorized</span>", categorizedCount))
 	if uncategorizedCount > 0 {
@@ -489,16 +487,16 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 		if accName == "" {
 			accName = "Unknown"
 		}
-		
+
 		body.WriteString(fmt.Sprintf("<h3 style=\"margin-top: 32px; color: #495057; border-bottom: 2px solid #e9ecef; padding-bottom: 8px;\">%s <span style=\"font-weight: normal; font-size: 14px; color: #868e96;\">(%d transactions)</span></h3>", accName, len(accTxns)))
-		
+
 		body.WriteString("<table class=\"txn-table\">")
 		body.WriteString("<thead><tr><th>Date</th><th>Description</th><th>Category</th><th style=\"text-align: right;\">Amount</th><th style=\"text-align: center;\">Action</th></tr></thead>")
 		body.WriteString("<tbody>")
 
 		for _, txn := range accTxns {
 			link := fmt.Sprintf("%s/transactions?edit=%s", s.cfg.FrontendURL, txn.ID)
-			
+
 			amountStr := txn.Amount.String()
 			amountClass := ""
 			if strings.HasPrefix(amountStr, "-") {
@@ -536,9 +534,9 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 
 	if s.cfg.ResendAPIKey != "" {
 		// Use Resend HTTP API
-		resendBody := fmt.Sprintf(`{"from": "%s", "to": ["%s"], "subject": "PPBudget Import Completed", "html": %q}`, 
+		resendBody := fmt.Sprintf(`{"from": "%s", "to": ["%s"], "subject": "PPBudget Import Completed", "html": %q}`,
 			s.cfg.ResendFromEmail,
-			s.cfg.NotificationEmail, 
+			s.cfg.NotificationEmail,
 			body.String(),
 		)
 
