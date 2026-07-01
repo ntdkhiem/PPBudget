@@ -48,6 +48,14 @@ func (r *Repository) DeleteBudget(ctx context.Context, id string) error {
 }
 
 func (r *Repository) GetBudgetsSummary(ctx context.Context, month time.Time) ([]domain.BudgetSummary, error) {
+	// Auto-rollover budgets if none exist for this month
+	var count int
+	targetStart := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+	err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM budgets WHERE start_date = $1", targetStart).Scan(&count)
+	if err == nil && count == 0 {
+		_ = r.rolloverBudgets(ctx, month)
+	}
+
 	// The month passed in is used to filter budgets that overlap with the month
 	// And transactions are summed up during that budget's period, but capped to the month if we want monthly?
 	// Wait, the requirement says "aggregates spent_total, spent_per_day, left_total, and left_per_day dynamically via SQL".
@@ -60,13 +68,9 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, month time.Time) ([]
 				t.id,
 				t.category_id,
 				t.date,
-				CASE 
-					WHEN t.linked_transaction_id IS NOT NULL THEN 0
-					ELSE t.amount + COALESCE((
-						SELECT SUM(amount) FROM transactions child 
-						WHERE child.linked_transaction_id = t.id AND child.deleted_at IS NULL
-					), 0)
-				END as eff_amount
+				t.amount 
+				+ COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
+				- COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0) as eff_amount
 			FROM transactions t
 			WHERE t.deleted_at IS NULL
 		),
@@ -126,4 +130,29 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, month time.Time) ([]
 		summaries = append(summaries, s)
 	}
 	return summaries, nil
+}
+
+func (r *Repository) rolloverBudgets(ctx context.Context, targetMonth time.Time) error {
+	targetStart := time.Date(targetMonth.Year(), targetMonth.Month(), 1, 0, 0, 0, 0, time.UTC)
+	targetEnd := targetStart.AddDate(0, 1, -1)
+
+	queryLatestMonth := `
+		SELECT MAX(start_date)
+		FROM budgets
+		WHERE start_date < $1
+	`
+	var latestStart *time.Time
+	err := r.pool.QueryRow(ctx, queryLatestMonth, targetStart).Scan(&latestStart)
+	if err != nil || latestStart == nil {
+		return nil
+	}
+
+	queryCopy := `
+		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, created_at, updated_at)
+		SELECT name, category_id, amount, period_type, $1, $2, NOW(), NOW()
+		FROM budgets
+		WHERE start_date = $3
+	`
+	_, err = r.pool.Exec(ctx, queryCopy, targetStart, targetEnd, *latestStart)
+	return err
 }

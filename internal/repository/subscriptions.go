@@ -19,6 +19,8 @@ func (r *Repository) CreateSubscription(ctx context.Context, name string, amount
 }
 
 func (r *Repository) ListSubscriptions(ctx context.Context) ([]domain.Subscription, error) {
+	r.RolloverSubscriptions(ctx)
+
 	query := `
 		SELECT id, name, amount, billing_cycle, next_billing_date, category_id, created_at, updated_at
 		FROM subscriptions
@@ -70,3 +72,25 @@ func (r *Repository) UpdateSubscription(ctx context.Context, id string, name str
 	}
 	return nil
 }
+
+func (r *Repository) RolloverSubscriptions(ctx context.Context) {
+	// Advance monthly subscriptions that are in the past to the current month (or future)
+	queryMonthly := `
+		UPDATE subscriptions 
+		SET next_billing_date = next_billing_date + 
+			((EXTRACT(year FROM age(CURRENT_DATE, next_billing_date)) * 12) + 
+			EXTRACT(month FROM age(CURRENT_DATE, next_billing_date)) + 1) * INTERVAL '1 month'
+		WHERE billing_cycle = 'monthly' AND next_billing_date < date_trunc('month', CURRENT_DATE);
+	`
+	_, _ = r.pool.Exec(ctx, queryMonthly)
+
+	// Advance yearly subscriptions
+	queryYearly := `
+		UPDATE subscriptions 
+		SET next_billing_date = next_billing_date + 
+			(EXTRACT(year FROM age(CURRENT_DATE, next_billing_date)) + 1) * INTERVAL '1 year'
+		WHERE billing_cycle = 'yearly' AND next_billing_date < date_trunc('month', CURRENT_DATE);
+	`
+	_, _ = r.pool.Exec(ctx, queryYearly)
+}
+

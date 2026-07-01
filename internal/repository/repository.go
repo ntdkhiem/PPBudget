@@ -593,6 +593,9 @@ func (r *Repository) GetSpendingByCategory(ctx context.Context, startDate, endDa
 }
 
 func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate time.Time) (*domain.ReportsSummary, error) {
+	// Auto-rollover past due subscriptions
+	r.RolloverSubscriptions(ctx)
+
 	var summary domain.ReportsSummary
 
 	queryInOut := `
