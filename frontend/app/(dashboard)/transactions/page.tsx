@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback, memo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, Transaction, Category, Account, Subscription } from "@/lib/api";
@@ -8,6 +8,12 @@ import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import { format, parseISO } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
+import dynamic from "next/dynamic";
+import TransactionFilters from "./TransactionFilters";
+
+const AddTransactionDialog = dynamic(() => import('./AddTransactionDialog'), { ssr: false });
+const EditTransactionDialog = dynamic(() => import('./EditTransactionDialog'), { ssr: false });
+
 import { motion } from "framer-motion";
 import {
   Table,
@@ -71,177 +77,146 @@ import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLin
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 
-function AllocationAmountInput({ amount, maxAllowed, onChange }: { amount: number, maxAllowed?: number, onChange: (amount: number) => void }) {
-  const [inputValue, setInputValue] = useState(amount ? (amount / 100).toString() : '');
 
-  // Keep string state in sync with external amount changes, 
-  // but only if mathematically different to avoid cursor jumping while typing decimals
-  useEffect(() => {
-    const parsed = parseFloat(inputValue || '0');
-    if (Math.round(parsed * 100) !== amount) {
-      setInputValue(amount ? (amount / 100).toString() : '');
-    }
-  }, [amount, inputValue]);
 
-  const hasError = maxAllowed !== undefined && amount > maxAllowed;
 
-  return (
-    <div className="relative flex flex-col items-end">
-      <Input 
-        type="number" 
-        step="0.01" 
-        min="0"
-        className={cn("w-24 h-8 text-right", hasError && "border-rose-500 text-rose-500 focus-visible:ring-rose-500")}
-        value={inputValue}
-        onChange={(e) => {
-          setInputValue(e.target.value);
-          const parsed = parseFloat(e.target.value);
-          if (!isNaN(parsed)) {
-            onChange(Math.round(parsed * 100));
-          } else if (e.target.value === '') {
-            onChange(0);
-          }
-        }}
-        onBlur={() => {
-          const parsed = parseFloat(inputValue);
-          if (!isNaN(parsed)) {
-            setInputValue(parsed.toFixed(2));
-          }
-        }}
-      />
-      {hasError && (
-        <div className="absolute top-9 right-0 text-[10px] text-rose-500 font-medium whitespace-nowrap bg-white dark:bg-slate-950 px-1 rounded shadow-sm border border-rose-100 dark:border-rose-900/50 z-10 flex items-center gap-1">
-          Max: {formatCurrency(maxAllowed)}
-          <button 
-            type="button" 
-            onClick={() => {
-              setInputValue((maxAllowed / 100).toString());
-              onChange(maxAllowed);
-            }}
-            className="text-indigo-600 dark:text-indigo-400 underline hover:text-indigo-700 ml-1"
-          >
-            Fix
-          </button>
-        </div>
-      )}
-    </div>
-  );
+const truncateText = (text: string, maxLength: number = 100) => {
+    if (!text) return "";
+    const cleaned = text.replace(/\s+/g, ' ').trim();
+    return cleaned.length > maxLength ? cleaned.substring(0, maxLength) + "..." : cleaned;
+  };
+
+
+interface TransactionRowProps {
+  txn: Transaction;
+  isSelected: boolean;
+  accounts: Account[] | undefined;
+  categories: Category[] | undefined;
+  quickEditTxnId: string | null;
+  onQuickEditTxnIdChange: (id: string | null) => void;
+  onSelectRow: (id: string, checked: boolean) => void;
+  onRowClick: (txn: Transaction) => void;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onReview: (id: string, categoryId: string) => void;
+  isDeleting: boolean;
 }
 
-
-function TransactionAllocationList({ 
-  allocations, 
-  setAllocations, 
-  transactions,
-  parentAmount
-}: { 
-  allocations: {transaction_id: string, amount: number}[], 
-  setAllocations: (val: {transaction_id: string, amount: number}[]) => void,
-  transactions: Transaction[] | undefined,
-  parentAmount?: number
-}) {
-  const [open, setOpen] = useState(false);
-
-  // Parent available is the absolute total of the parent minus the sum of ALL allocations
-  const totalAllocated = allocations.reduce((sum, a) => sum + a.amount, 0);
-  const parentRemaining = parentAmount !== undefined ? Math.abs(parentAmount) - totalAllocated : Infinity;
-
+const TransactionRow = memo(function TransactionRow({
+  txn,
+  isSelected,
+  accounts,
+  categories,
+  quickEditTxnId,
+  onQuickEditTxnIdChange,
+  onSelectRow,
+  onRowClick,
+  onDelete,
+  onReview,
+  isDeleting,
+}: TransactionRowProps) {
   return (
-    <div className="space-y-3">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            className="w-full justify-between rounded-xl border-slate-200 dark:border-slate-700 h-12 text-base font-normal bg-white dark:bg-slate-900"
-          >
-            <span className="truncate text-slate-500">
-              Select transaction to link...
+    <TableRow 
+      className={`group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}
+      onClick={() => onRowClick(txn)}
+    >
+      <TableCell className="w-12 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+        <input 
+          type="checkbox" 
+          className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
+          checked={isSelected}
+          onChange={(e) => onSelectRow(txn.id, e.target.checked)}
+        />
+      </TableCell>
+      <TableCell className="py-4 font-medium text-slate-900 dark:text-slate-100 max-w-xs" title={txn.description}>
+        <div className="line-clamp-3 whitespace-pre-wrap break-words">{truncateText(txn.description)}</div>
+        <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+          {!txn.is_reviewed && (
+            <span className="inline-flex items-center rounded-full bg-amber-100/80 dark:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+              Needs Review
             </span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[500px] p-0 rounded-xl max-w-[90vw]" align="start">
-          <Command>
-            <CommandInput placeholder="Search transactions..." />
-            <CommandList className="max-h-[300px]">
-              <CommandEmpty>No transaction found.</CommandEmpty>
-              <CommandGroup>
-                {transactions?.slice(0, 50).map((txn) => {
-                  const isSelected = allocations.some(a => a.transaction_id === txn.id);
-                  return (
-                    <CommandItem
-                      key={txn.id}
-                      value={`${txn.description} ${txn.amount} ${txn.date} ${txn.id}`}
-                      onSelect={() => {
-                        if (!isSelected) {
-                          setAllocations([...allocations, { transaction_id: txn.id, amount: Math.abs(txn.amount) }]);
-                        }
-                        setOpen(false);
-                      }}
-                    >
-                      <Check
-                        className={cn(
-                          "mr-2 h-4 w-4 shrink-0",
-                          isSelected ? "opacity-100" : "opacity-0"
-                        )}
-                      />
-                      <div className="flex w-full justify-between items-center pr-2 gap-2 overflow-hidden">
-                        <div className="flex flex-col overflow-hidden">
-                          <span className="font-medium text-base truncate">{txn.description.replace(/\s+/g, ' ').trim()}</span>
-                          <span className="text-xs text-muted-foreground">{formatDate(txn.date)}</span>
-                        </div>
-                        <span className="font-semibold text-right whitespace-nowrap">{formatCurrency(txn.amount)}</span>
-                      </div>
-                    </CommandItem>
-                  );
-                })}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
-      
-      {allocations.length > 0 && (
-        <div className="space-y-2">
-          {allocations.map((alloc, idx) => {
-            const txn = transactions?.find(t => t.id === alloc.transaction_id);
-            return (
-              <div key={alloc.transaction_id} className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
-                <div className="flex-1 overflow-hidden">
-                  <div className="font-medium text-sm truncate">{txn?.description || 'Unknown Transaction'}</div>
-                  <div className="text-xs text-slate-500">{txn ? formatDate(txn.date) : ''}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-500">$</span>
-                  <AllocationAmountInput 
-                    amount={alloc.amount} 
-                    maxAllowed={parentAmount !== undefined ? parentRemaining + alloc.amount : undefined}
-                    onChange={(newAmount) => {
-                      const newAllocs = [...allocations];
-                      newAllocs[idx] = { ...newAllocs[idx], amount: newAmount };
-                      setAllocations(newAllocs);
-                    }}
-                  />
-                  <Button 
-                    type="button" 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 shrink-0"
-                    onClick={() => setAllocations(allocations.filter(a => a.transaction_id !== alloc.transaction_id))}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
+          )}
+          {txn.subscription_id && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100/80 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/30 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:text-indigo-400" title="Subscription Payment">
+              <Repeat size={12} /> Subscription
+            </span>
+          )}
         </div>
-      )}
-    </div>
+      </TableCell>
+      <TableCell className="text-right py-4 font-semibold">
+        <div className="flex flex-col items-end gap-0.5">
+          <span className={txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
+            {formatCurrency(txn.amount)}
+          </span>
+          {txn.pays_for && txn.pays_for.length > 0 && (
+            <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded flex items-center gap-1" title={`Pays for ${txn.pays_for.length} transaction(s).`}>
+              <Link size={12} /> Pays for {txn.pays_for.length} txn{txn.pays_for.length !== 1 ? 's' : ''} (Effective: {formatCurrency(txn.effective_amount!)})
+            </span>
+          )}
+          {txn.paid_by && txn.paid_by.length > 0 && (
+            <span className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded flex items-center gap-1" title={`Paid by ${txn.paid_by.length} transaction(s).`}>
+              <Link size={12} /> Paid by {txn.paid_by.length} txn{txn.paid_by.length !== 1 ? 's' : ''} (Effective: {formatCurrency(txn.effective_amount!)})
+            </span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="py-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
+        {formatDate(txn.date)}
+      </TableCell>
+      <TableCell className="py-4 text-slate-600 dark:text-slate-300 max-w-[150px]" title={accounts?.find(a => a.id === txn.account_id)?.name || "Unknown"}>
+        <div className="line-clamp-3 whitespace-pre-wrap break-words">{truncateText(accounts?.find(a => a.id === txn.account_id)?.name || "Unknown")}</div>
+      </TableCell>
+      <TableCell className="py-4" onClick={(e) => e.stopPropagation()}>
+        <Popover open={quickEditTxnId === txn.id} onOpenChange={(open) => onQuickEditTxnIdChange(open ? txn.id : null)}>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" className={`h-8 px-3 rounded-lg text-sm font-medium ${txn.category_id ? 'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700' : 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:text-indigo-400 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20'}`}>
+              {categories?.find((c) => c.id === txn.category_id)?.name || "Uncategorized"}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-2 rounded-xl" align="start">
+            <div className="space-y-1">
+              <h4 className="font-medium text-sm px-2 py-1.5 text-slate-500">Quick Edit Category</h4>
+              <div className="max-h-60 overflow-y-auto">
+                {categories?.map((cat) => (
+                  <div
+                    key={cat.id}
+                    className={`px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800 flex items-center justify-between ${txn.category_id === cat.id ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : ''}`}
+                    onClick={() => onReview(txn.id, cat.id)}
+                  >
+                    {cat.name}
+                    {txn.category_id === cat.id && <CheckCircle2 className="h-4 w-4" />}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </TableCell>
+      <TableCell className="text-right py-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Edit transaction"
+            className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/10 h-8 w-8 rounded-lg"
+            onClick={(e) => { e.stopPropagation(); onRowClick(txn); }}
+          >
+            <Edit2 className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Delete transaction"
+            className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-500/10 h-8 w-8 rounded-lg"
+            onClick={(e) => onDelete(txn.id, e)}
+            disabled={isDeleting}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
   );
-}
+});
 
 export default function TransactionsPage() {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -294,11 +269,6 @@ export default function TransactionsPage() {
     }
   }, [searchParams, router, token]);
 
-  const truncateText = (text: string, maxLength: number = 100) => {
-    if (!text) return "";
-    const cleaned = text.replace(/\s+/g, ' ').trim();
-    return cleaned.length > maxLength ? cleaned.substring(0, maxLength) + "..." : cleaned;
-  };
 
   const { date } = useDateRange();
 
@@ -437,13 +407,13 @@ export default function TransactionsPage() {
     }
   };
 
-  const handleSelectRow = (id: string, checked: boolean) => {
+  const handleSelectRow = useCallback((id: string, checked: boolean) => {
     if (checked) {
       setSelectedIds(prev => [...prev, id]);
     } else {
       setSelectedIds(prev => prev.filter(x => x !== id));
     }
-  };
+  }, []);
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) =>
@@ -481,6 +451,10 @@ export default function TransactionsPage() {
     },
   });
 
+  const handleReview = useCallback((id: string, categoryId: string) => {
+    reviewMutation.mutate({ id, categoryId });
+  }, [reviewMutation]);
+
   // Removed unused approveMutation as it's now handled in /review page
 
   const createMutation = useMutation({
@@ -511,12 +485,12 @@ export default function TransactionsPage() {
     },
   });
 
-  const handleDelete = (id: string, e?: React.MouseEvent) => {
+  const handleDelete = useCallback((id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (confirm("Are you sure you want to delete this transaction?")) {
       deleteMutation.mutate(id);
     }
-  };
+  }, [deleteMutation]);
 
   const handleCreateSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -551,10 +525,10 @@ export default function TransactionsPage() {
     });
   };
 
-  const handleRowClick = (txn: Transaction) => {
+  const handleRowClick = useCallback((txn: Transaction) => {
     setSelectedTxn(txn);
     setIsEditOpen(true);
-  };
+  }, []);
 
   const handleNextPage = () => {
     if (transactions && transactions.length === 50) {
@@ -595,237 +569,32 @@ export default function TransactionsPage() {
             </a>
           </Button>
 
-          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-md shadow-indigo-500/20 flex items-center gap-2">
-                <Plus className="h-4 w-4" /> Add Transaction
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 backdrop-blur-xl bg-white dark:bg-slate-900/90 dark:bg-slate-900/90 shadow-2xl">
-            <DialogHeader>
-              <DialogTitle className="text-2xl font-bold font-heading text-slate-900 dark:text-white">Add Transaction</DialogTitle>
-              <DialogDescription>Create a new manual transaction.</DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleCreateSubmit} className="space-y-4 mt-4">
-              <div className="space-y-2">
-                <Label htmlFor="accountId" className="text-slate-700 dark:text-slate-300">Account</Label>
-                <Select name="accountId" required>
-                  <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700">
-                    <SelectValue placeholder="Select an account" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                    {accounts?.map((acc) => (
-                      <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="date" className="text-slate-700 dark:text-slate-300">Date</Label>
-                <Input id="date" name="date" type="date" required className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="description" className="text-slate-700 dark:text-slate-300">Description</Label>
-                <Input id="description" name="description" required className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="amount" className="text-slate-700 dark:text-slate-300">Amount ($)</Label>
-                <Input id="amount" name="amount" type="number" step="0.01" required className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="notes" className="text-slate-700 dark:text-slate-300">Notes (Optional)</Label>
-                <Input id="notes" name="notes" className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="categoryId" className="text-slate-700 dark:text-slate-300">Category</Label>
-                <Select name="categoryId">
-                  <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700">
-                    <SelectValue placeholder="Select a category" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                    {categories?.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="subscriptionId" className="text-slate-700 dark:text-slate-300">Subscription</Label>
-                <Select name="subscriptionId" defaultValue="none">
-                  <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700">
-                    <SelectValue placeholder="Select a subscription" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                    <SelectItem value="none">None</SelectItem>
-                    {subscriptions?.map((sub) => (
-                      <SelectItem key={sub.id} value={sub.id}>{sub.name} ({formatCurrency(sub.amount)})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="pt-4">
-                <Button type="submit" disabled={createMutation.isPending} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-6 text-lg font-medium shadow-md shadow-indigo-500/20">
-                  {createMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : "Save"}
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+          <AddTransactionDialog
+          isOpen={isAddOpen}
+          onOpenChange={setIsAddOpen}
+          onSubmit={handleCreateSubmit}
+          isPending={createMutation.isPending}
+          accounts={accounts}
+          categories={categories}
+          subscriptions={subscriptions}
+        />
         </div>
       </div>
 
-      {/* Smart Filter Bar */}
-      <div className="w-full relative group mb-6">
-        {/* Subtle ambient glow behind the bar */}
-        <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500/10 to-transparent rounded-xl blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
-        
-        {/* Main Glassmorphic Container */}
-        <div className="relative flex flex-col md:flex-row items-center gap-3 p-2 bg-white/60 dark:bg-slate-900/40 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 shadow-sm rounded-xl transition-all duration-300">
-          
-          {/* Search Field */}
-          <div className="relative w-full md:w-80 flex-shrink-0">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 dark:text-slate-500" />
-            <Input
-              type="text"
-              placeholder="Search by description or amount..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-4 h-10 w-full bg-transparent border-none shadow-none focus-visible:ring-1 focus-visible:ring-indigo-500/50 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
-            />
-          </div>
-
-          {/* Separator (Desktop only) */}
-          <div className="hidden md:block w-px h-6 bg-slate-200 dark:bg-slate-800 mx-1"></div>
-
-          {/* Filters Group */}
-          <div className="flex w-full md:w-auto items-center gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-hide">
-            
-            {/* Category Multiselect */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  className={`h-9 border-slate-200 dark:border-slate-800 transition-all duration-200 ${
-                    selectedCategories.length > 0 
-                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/40' 
-                      : 'bg-transparent text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <ListFilter className="h-4 w-4 mr-2" />
-                  Category
-                  {selectedCategories.length > 0 && (
-                    <Badge variant="secondary" className="ml-2 h-5 px-1.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800">
-                      {selectedCategories.length}
-                    </Badge>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-56 p-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl">
-                <div className="px-2 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100">Filter Categories</div>
-                <div className="h-px bg-slate-200 dark:bg-slate-800 my-1" />
-                <div className="max-h-[300px] overflow-y-auto space-y-0.5">
-                {categories?.map(category => (
-                  <label key={category.id} className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer"
-                      checked={selectedCategories.includes(category.id)}
-                      onChange={() => toggleCategory(category.id)}
-                    />
-                    <span className="truncate text-slate-700 dark:text-slate-300">{category.name}</span>
-                  </label>
-                ))}
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            {/* Account Multiselect */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  className={`h-9 border-slate-200 dark:border-slate-800 transition-all duration-200 ${
-                    selectedAccounts.length > 0 
-                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/40' 
-                      : 'bg-transparent text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <Wallet className="h-4 w-4 mr-2" />
-                  Account
-                  {selectedAccounts.length > 0 && (
-                    <Badge variant="secondary" className="ml-2 h-5 px-1.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800">
-                      {selectedAccounts.length}
-                    </Badge>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-56 p-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl">
-                <div className="px-2 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100">Filter Accounts</div>
-                <div className="h-px bg-slate-200 dark:bg-slate-800 my-1" />
-                <div className="max-h-[300px] overflow-y-auto space-y-0.5">
-                {accounts?.map(account => (
-                  <label key={account.id} className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer"
-                      checked={selectedAccounts.includes(account.id)}
-                      onChange={() => toggleAccount(account.id)}
-                    />
-                    <span className="truncate text-slate-700 dark:text-slate-300">{account.name}</span>
-                  </label>
-                ))}
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            {/* Type Filter */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  className={`h-9 border-slate-200 dark:border-slate-800 transition-all duration-200 ${
-                    selectedType !== 'All' 
-                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/40' 
-                      : 'bg-transparent text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <ArrowRightLeft className="h-4 w-4 mr-2" />
-                  {selectedType === 'All' ? 'Type' : selectedType}
-                  <ChevronDown className="h-3 w-3 ml-2 opacity-50" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl">
-                <DropdownMenuRadioGroup value={selectedType} onValueChange={setSelectedType}>
-                  {['All', 'Income', 'Expense', 'Transfer'].map(type => (
-                    <DropdownMenuRadioItem key={type} value={type} className="cursor-pointer">
-                      {type}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {/* Spacer */}
-            <div className="flex-grow"></div>
-
-            {/* Clear Filters Action */}
-            {hasActiveFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearFilters}
-                className="h-9 px-3 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20 transition-colors"
-              >
-                <XCircle className="h-4 w-4 mr-2" />
-                Clear
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
+      <TransactionFilters 
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        selectedCategories={selectedCategories}
+        toggleCategory={toggleCategory}
+        selectedAccounts={selectedAccounts}
+        toggleAccount={toggleAccount}
+        selectedType={selectedType}
+        setSelectedType={setSelectedType}
+        hasActiveFilters={hasActiveFilters}
+        clearFilters={clearFilters}
+        categories={categories}
+        accounts={accounts}
+      />
 
       <div ref={parentRef} className="h-[600px] overflow-auto relative rounded-3xl border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm">
         <Table className="relative w-full">
@@ -892,107 +661,20 @@ export default function TransactionsPage() {
                 {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                   const txn = filteredTransactions[virtualRow.index];
                   return (
-                  <TableRow 
-                    key={virtualRow.key} 
-                    className={`group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 ${selectedIds.includes(txn.id) ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}
-                    onClick={() => handleRowClick(txn)}
-                  >
-                  <TableCell className="w-12 py-4 text-center" onClick={(e) => e.stopPropagation()}>
-                    <input 
-                      type="checkbox" 
-                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer"
-                      checked={selectedIds.includes(txn.id)}
-                      onChange={(e) => handleSelectRow(txn.id, e.target.checked)}
-                    />
-                  </TableCell>
-                  <TableCell className="py-4 font-medium text-slate-900 dark:text-slate-100 max-w-xs" title={txn.description}>
-                    <div className="line-clamp-3 whitespace-pre-wrap break-words">{truncateText(txn.description)}</div>
-                    <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-                      {!txn.is_reviewed && (
-                        <span className="inline-flex items-center rounded-full bg-amber-100/80 dark:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
-                          Needs Review
-                        </span>
-                      )}
-                      {txn.subscription_id && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100/80 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/30 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:text-indigo-400" title="Subscription Payment">
-                          <Repeat size={12} /> Subscription
-                        </span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right py-4 font-semibold">
-                    <div className="flex flex-col items-end gap-0.5">
-                      <span className={txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}>
-                        {formatCurrency(txn.amount)}
-                      </span>
-                      {txn.pays_for && txn.pays_for.length > 0 && (
-                        <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded flex items-center gap-1" title={`Pays for ${txn.pays_for.length} transaction(s).`}>
-                          <Link size={12} /> Pays for {txn.pays_for.length} txn{txn.pays_for.length !== 1 ? 's' : ''} (Effective: {formatCurrency(txn.effective_amount!)})
-                        </span>
-                      )}
-                      {txn.paid_by && txn.paid_by.length > 0 && (
-                        <span className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded flex items-center gap-1" title={`Paid by ${txn.paid_by.length} transaction(s).`}>
-                          <Link size={12} /> Paid by {txn.paid_by.length} txn{txn.paid_by.length !== 1 ? 's' : ''} (Effective: {formatCurrency(txn.effective_amount!)})
-                        </span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="py-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                    {formatDate(txn.date)}
-                  </TableCell>
-                  <TableCell className="py-4 text-slate-600 dark:text-slate-300 max-w-[150px]" title={accounts?.find(a => a.id === txn.account_id)?.name || "Unknown"}>
-                    <div className="line-clamp-3 whitespace-pre-wrap break-words">{truncateText(accounts?.find(a => a.id === txn.account_id)?.name || "Unknown")}</div>
-                  </TableCell>
-                  <TableCell className="py-4" onClick={(e) => e.stopPropagation()}>
-                    <Popover open={quickEditTxnId === txn.id} onOpenChange={(open) => setQuickEditTxnId(open ? txn.id : null)}>
-                      <PopoverTrigger asChild>
-                        <Button variant="ghost" className={`h-8 px-3 rounded-lg text-sm font-medium ${txn.category_id ? 'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700' : 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:text-indigo-400 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20'}`}>
-                          {categories?.find((c) => c.id === txn.category_id)?.name || "Uncategorized"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-56 p-2 rounded-xl" align="start">
-                        <div className="space-y-1">
-                          <h4 className="font-medium text-sm px-2 py-1.5 text-slate-500">Quick Edit Category</h4>
-                          <div className="max-h-60 overflow-y-auto">
-                            {categories?.map((cat) => (
-                              <div
-                                key={cat.id}
-                                className={`px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800 flex items-center justify-between ${txn.category_id === cat.id ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : ''}`}
-                                onClick={() => reviewMutation.mutate({ id: txn.id, categoryId: cat.id })}
-                              >
-                                {cat.name}
-                                {txn.category_id === cat.id && <CheckCircle2 className="h-4 w-4" />}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  </TableCell>
-                  <TableCell className="text-right py-4" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="Edit transaction"
-                        className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:text-indigo-400 dark:hover:bg-indigo-500/10 h-8 w-8 rounded-lg"
-                        onClick={(e) => { e.stopPropagation(); handleRowClick(txn); }}
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="Delete transaction"
-                        className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-500/10 h-8 w-8 rounded-lg"
-                        onClick={(e) => handleDelete(txn.id, e)}
-                        disabled={deleteMutation.isPending}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+                  <TransactionRow 
+                    key={virtualRow.key}
+                    txn={txn}
+                    isSelected={selectedIds.includes(txn.id)}
+                    accounts={accounts}
+                    categories={categories}
+                    quickEditTxnId={quickEditTxnId}
+                    onQuickEditTxnIdChange={setQuickEditTxnId}
+                    onSelectRow={handleSelectRow}
+                    onRowClick={handleRowClick}
+                    onDelete={handleDelete}
+                    onReview={handleReview}
+                    isDeleting={deleteMutation.isPending}
+                  />
                 );
               })}
               {rowVirtualizer.getVirtualItems().length > 0 && (
@@ -1033,106 +715,21 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="max-w-[95vw] w-full h-[95vh] sm:max-w-5xl rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-white dark:bg-slate-900/95 dark:bg-slate-900/95 backdrop-blur-xl flex flex-col p-8 overflow-hidden">
-          <DialogHeader className="mb-6 shrink-0">
-            <DialogTitle className="text-3xl font-bold font-heading text-slate-900 dark:text-white">Edit Transaction</DialogTitle>
-            <DialogDescription className="text-lg">Update the details of this transaction.</DialogDescription>
-          </DialogHeader>
-          {selectedTxn && (
-            <div className="flex-1 overflow-y-auto pr-4 custom-scrollbar">
-              <form onSubmit={handleUpdateSubmit} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="editAccountId" className="text-slate-700 dark:text-slate-300 text-lg">Account</Label>
-                    <Select name="accountId" required defaultValue={selectedTxn.account_id}>
-                      <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700 h-14 text-lg">
-                        <SelectValue placeholder="Select an account" />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                        {accounts?.map((acc) => (
-                          <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="editDate" className="text-slate-700 dark:text-slate-300 text-lg">Date</Label>
-                    <Input id="editDate" name="date" type="date" required defaultValue={selectedTxn.date.split("T")[0]} className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg" />
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="editDescription" className="text-slate-700 dark:text-slate-300 text-lg">Description</Label>
-                    <Input id="editDescription" name="description" required defaultValue={selectedTxn.description} className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="editAmount" className="text-slate-700 dark:text-slate-300 text-lg">Amount ($)</Label>
-                    <Input id="editAmount" name="amount" type="number" step="0.01" required defaultValue={(selectedTxn.amount / 100).toFixed(2)} className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="editNotes" className="text-slate-700 dark:text-slate-300 text-lg">Notes (Optional)</Label>
-                    <Input id="editNotes" name="notes" defaultValue={selectedTxn.notes || ""} className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg" />
-                  </div>
-                  <div className="space-y-2 md:col-span-1">
-                    <Label htmlFor="editCategoryId" className="text-slate-700 dark:text-slate-300 text-lg">Category</Label>
-                    <Select name="categoryId" defaultValue={selectedTxn.category_id || undefined}>
-                      <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700 h-14 text-lg">
-                        <SelectValue placeholder="Select a category" />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                        {categories?.map((cat) => (
-                          <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2 md:col-span-1">
-                    <Label htmlFor="editSubscriptionId" className="text-slate-700 dark:text-slate-300 text-lg">Subscription</Label>
-                    <Select name="subscriptionId" defaultValue={selectedTxn.subscription_id || "none"}>
-                      <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700 h-14 text-lg">
-                        <SelectValue placeholder="Select a subscription" />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                        <SelectItem value="none">None</SelectItem>
-                        {subscriptions?.map((sub) => (
-                          <SelectItem key={sub.id} value={sub.id}>{sub.name} ({formatCurrency(sub.amount)})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-4 md:col-span-2 mt-4 pt-4 border-t border-slate-200 dark:border-slate-800">
-                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-4 flex items-center gap-2">
-                      <Link className="w-5 h-5 text-indigo-500" />
-                      Transaction Links
-                    </h3>
-                    
-                    <div className="space-y-2">
-                      <Label className="text-slate-700 dark:text-slate-300 font-medium">(Partially) Pays for (Expenses this covered)</Label>
-                      <TransactionAllocationList allocations={paysFor} setAllocations={setPaysFor} transactions={transactions} parentAmount={selectedTxn?.amount} />
-                    </div>
-
-                    <div className="space-y-2 mt-6">
-                      <Label className="text-slate-700 dark:text-slate-300 font-medium">(Partially) Paid by (Revenues that covered this)</Label>
-                      <TransactionAllocationList allocations={paidBy} setAllocations={setPaidBy} transactions={transactions} parentAmount={selectedTxn?.amount} />
-                    </div>
-                  </div>
-                </div>
-                <div className="pt-8 flex gap-4 shrink-0">
-                  <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)} className="flex-1 rounded-xl py-8 text-xl border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800">
-                    Cancel
-                  </Button>
-                  <Button 
-                    type="submit" 
-                    disabled={updateMutation.isPending || (selectedTxn ? paysFor.reduce((s, a) => s + a.amount, 0) > Math.abs(selectedTxn.amount) || paidBy.reduce((s, a) => s + a.amount, 0) > Math.abs(selectedTxn.amount) : false)} 
-                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-8 text-xl shadow-md shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {updateMutation.isPending ? <Loader2 className="h-6 w-6 animate-spin mx-auto" /> : "Save Changes"}
-                  </Button>
-                </div>
-              </form>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <EditTransactionDialog
+        isOpen={isEditOpen}
+        onOpenChange={setIsEditOpen}
+        selectedTxn={selectedTxn}
+        onSubmit={handleUpdateSubmit}
+        isPending={updateMutation.isPending}
+        accounts={accounts}
+        categories={categories}
+        subscriptions={subscriptions}
+        paysFor={paysFor}
+        setPaysFor={setPaysFor}
+        paidBy={paidBy}
+        setPaidBy={setPaidBy}
+        transactions={transactions}
+      />
 
       {selectedIds.length > 0 && (
         <motion.div
