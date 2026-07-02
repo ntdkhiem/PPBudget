@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, Transaction, Category, Account, Subscription } from "@/lib/api";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import { format, parseISO } from "date-fns";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { motion } from "framer-motion";
 import {
@@ -243,6 +244,7 @@ function TransactionAllocationList({
 }
 
 export default function TransactionsPage() {
+  const parentRef = useRef<HTMLDivElement>(null);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
   const queryClient = useQueryClient();
@@ -566,6 +568,12 @@ export default function TransactionsPage() {
       setCursorStack(cursorStack.slice(0, -1));
     }
   };
+  const rowVirtualizer = useVirtualizer({
+    count: filteredTransactions.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 64, // Approximate row height
+    overscan: 10,
+  });
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="space-y-6 pb-10">
@@ -819,8 +827,8 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm overflow-hidden">
-        <Table>
+      <div ref={parentRef} className="h-[600px] overflow-auto relative rounded-3xl border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm">
+        <Table className="relative w-full">
           <TableHeader>
             <TableRow className="hover:bg-transparent border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
               <TableHead className="w-12 py-4 text-center">
@@ -874,12 +882,21 @@ export default function TransactionsPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredTransactions.map((txn) => (
-                <TableRow 
-                  key={txn.id} 
-                  className={`group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 ${selectedIds.includes(txn.id) ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}
-                  onClick={() => handleRowClick(txn)}
-                >
+              
+              <>
+                {rowVirtualizer.getVirtualItems().length > 0 && (
+                  <TableRow style={{ height: `${rowVirtualizer.getVirtualItems()[0]?.start || 0}px` }} className="hover:bg-transparent pointer-events-none border-none">
+                    <TableCell colSpan={7} className="p-0 border-none" />
+                  </TableRow>
+                )}
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const txn = filteredTransactions[virtualRow.index];
+                  return (
+                  <TableRow 
+                    key={virtualRow.key} 
+                    className={`group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 ${selectedIds.includes(txn.id) ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}
+                    onClick={() => handleRowClick(txn)}
+                  >
                   <TableCell className="w-12 py-4 text-center" onClick={(e) => e.stopPropagation()}>
                     <input 
                       type="checkbox" 
@@ -976,7 +993,14 @@ export default function TransactionsPage() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))
+                );
+              })}
+              {rowVirtualizer.getVirtualItems().length > 0 && (
+                <TableRow style={{ height: `${rowVirtualizer.getTotalSize() - (rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end || 0)}px` }} className="hover:bg-transparent pointer-events-none border-none">
+                  <TableCell colSpan={7} className="p-0 border-none" />
+                </TableRow>
+              )}
+            </>
             )}
           </TableBody>
         </Table>
