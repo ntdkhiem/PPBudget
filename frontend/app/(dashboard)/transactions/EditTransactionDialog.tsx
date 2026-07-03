@@ -74,7 +74,7 @@ function TransactionAllocationList({
   transactions,
   parentAmount
 }: { 
-  allocations: {transaction_id: string, amount: number}[], 
+  allocations: {transaction_id: string, amount: number, description?: string, date?: string}[], 
   setAllocations: (val: {transaction_id: string, amount: number}[]) => void,
   transactions: Transaction[] | undefined,
   parentAmount?: number
@@ -115,7 +115,7 @@ function TransactionAllocationList({
                       value={`${txn.description} ${txn.amount} ${txn.date} ${txn.id}`}
                       onSelect={() => {
                         if (!isSelected) {
-                          setAllocations([...allocations, { transaction_id: txn.id, amount: Math.abs(txn.amount) }]);
+                          setAllocations([...allocations, { transaction_id: txn.id, amount: Math.abs(txn.amount), description: txn.description, date: txn.date }]);
                         }
                         setOpen(false);
                       }}
@@ -149,8 +149,8 @@ function TransactionAllocationList({
             return (
               <div key={alloc.transaction_id} className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
                 <div className="flex-1 overflow-hidden">
-                  <div className="font-medium text-sm truncate">{txn?.description || 'Unknown Transaction'}</div>
-                  <div className="text-xs text-slate-500">{txn ? formatDate(txn.date) : ''}</div>
+                  <div className="font-medium text-sm truncate">{alloc.description || txn?.description || 'Unknown Transaction'}</div>
+                  <div className="text-xs text-slate-500">{alloc.date ? formatDate(alloc.date) : (txn ? formatDate(txn.date) : '')}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-slate-500">$</span>

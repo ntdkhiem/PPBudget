@@ -236,8 +236,8 @@ export default function TransactionsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-    const [paidBy, setPaidBy] = useState<{transaction_id: string, amount: number}[]>([]);
-  const [paysFor, setPaysFor] = useState<{transaction_id: string, amount: number}[]>([]);
+    const [paidBy, setPaidBy] = useState<{transaction_id: string, amount: number, description?: string, date?: string}[]>([]);
+  const [paysFor, setPaysFor] = useState<{transaction_id: string, amount: number, description?: string, date?: string}[]>([]);
 
   // Smart Filtering States
   const [searchQuery, setSearchQuery] = useState('');

@@ -109,12 +109,26 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
              + COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0)
             ) as effective_amount,
             COALESCE((
-                SELECT json_agg(json_build_object('transaction_id', target_transaction_id, 'amount', amount))
-                FROM transaction_links WHERE source_transaction_id = t.id
+                SELECT json_agg(json_build_object(
+                    'transaction_id', l.target_transaction_id, 
+                    'amount', l.amount,
+                    'description', tt.description,
+                    'date', tt.date
+                ))
+                FROM transaction_links l
+                JOIN transactions tt ON l.target_transaction_id = tt.id
+                WHERE l.source_transaction_id = t.id
             ), '[]'::json) as pays_for,
             COALESCE((
-                SELECT json_agg(json_build_object('transaction_id', source_transaction_id, 'amount', amount))
-                FROM transaction_links WHERE target_transaction_id = t.id
+                SELECT json_agg(json_build_object(
+                    'transaction_id', l.source_transaction_id, 
+                    'amount', l.amount,
+                    'description', st.description,
+                    'date', st.date
+                ))
+                FROM transaction_links l
+                JOIN transactions st ON l.source_transaction_id = st.id
+                WHERE l.target_transaction_id = t.id
             ), '[]'::json) as paid_by
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
@@ -180,12 +194,26 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
              + COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0)
             ) as effective_amount,
             COALESCE((
-                SELECT json_agg(json_build_object('transaction_id', target_transaction_id, 'amount', amount))
-                FROM transaction_links WHERE source_transaction_id = t.id
+                SELECT json_agg(json_build_object(
+                    'transaction_id', l.target_transaction_id, 
+                    'amount', l.amount,
+                    'description', tt.description,
+                    'date', tt.date
+                ))
+                FROM transaction_links l
+                JOIN transactions tt ON l.target_transaction_id = tt.id
+                WHERE l.source_transaction_id = t.id
             ), '[]'::json) as pays_for,
             COALESCE((
-                SELECT json_agg(json_build_object('transaction_id', source_transaction_id, 'amount', amount))
-                FROM transaction_links WHERE target_transaction_id = t.id
+                SELECT json_agg(json_build_object(
+                    'transaction_id', l.source_transaction_id, 
+                    'amount', l.amount,
+                    'description', st.description,
+                    'date', st.date
+                ))
+                FROM transaction_links l
+                JOIN transactions st ON l.source_transaction_id = st.id
+                WHERE l.target_transaction_id = t.id
             ), '[]'::json) as paid_by
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id

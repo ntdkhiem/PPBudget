@@ -39,6 +39,8 @@ type Transaction struct {
 type TransactionLink struct {
 	TransactionID string      `json:"transaction_id"`
 	Amount        money.Money `json:"amount"`
+	Description   string      `json:"description,omitempty"`
+	Date          time.Time   `json:"date,omitempty"`
 }
 
 type TransactionWithBalance struct {

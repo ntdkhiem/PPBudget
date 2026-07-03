@@ -207,7 +207,7 @@ function SubscriptionsContent() {
                     {isPaid ? (
                       <div className="flex flex-wrap gap-2">
                         {paidTxns.map(txn => (
-                          <Link key={txn.id} href={`/transactions?edit_id=${txn.id}`} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-medium border border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors">
+                          <Link key={txn.id} href={`/transactions?edit=${txn.id}`} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-medium border border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors">
                             <CheckCircle2 size={14} />
                             {formatDate(txn.date)}
                           </Link>
