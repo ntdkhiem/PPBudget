@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTransactionSearch } from "@/hooks/useTransactionSearch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -80,6 +81,9 @@ function TransactionAllocationList({
   parentAmount?: number
 }) {
   const [open, setOpen] = useState(false);
+  
+  // Use centralized transaction search hook
+  const { searchQuery, setSearchQuery, transactions: searchResults, isLoading } = useTransactionSearch();
 
   // Parent available is the absolute total of the parent minus the sum of ALL allocations
   const totalAllocated = allocations.reduce((sum, a) => sum + a.amount, 0);
@@ -102,12 +106,16 @@ function TransactionAllocationList({
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-[500px] p-0 rounded-xl max-w-[90vw]" align="start">
-          <Command>
-            <CommandInput placeholder="Search transactions..." />
+          <Command shouldFilter={false}>
+            <CommandInput 
+              placeholder="Search transactions..." 
+              value={searchQuery}
+              onValueChange={setSearchQuery}
+            />
             <CommandList className="max-h-[300px]">
-              <CommandEmpty>No transaction found.</CommandEmpty>
+              <CommandEmpty>{isLoading ? 'Searching...' : 'No transaction found.'}</CommandEmpty>
               <CommandGroup>
-                {transactions?.slice(0, 50)?.map((txn) => {
+                {searchResults?.slice(0, 50)?.map((txn) => {
                   const isSelected = allocations.some(a => a.transaction_id === txn.id);
                   return (
                     <CommandItem
