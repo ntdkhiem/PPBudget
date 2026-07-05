@@ -658,7 +658,7 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 		WITH sub_payments AS (
 			SELECT DISTINCT t.id, ABS(t.amount) as amount
 			FROM transactions t
-			JOIN subscriptions s ON ABS(t.amount) = s.amount AND t.deleted_at IS NULL
+			JOIN subscriptions s ON t.subscription_id = s.id AND t.deleted_at IS NULL
 			WHERE t.date >= $1 AND t.date <= $2 AND t.amount < 0
 		)
 		SELECT COALESCE(SUM(amount), 0) FROM sub_payments
