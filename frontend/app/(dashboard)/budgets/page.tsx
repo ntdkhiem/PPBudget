@@ -291,7 +291,7 @@ export default function BudgetsPage() {
                           size="icon-sm"
                           variant="ghost"
                           onClick={() => setEditingId(null)} 
-                          className="text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800 dark:bg-slate-800 h-8 w-8"
+                          className="text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 h-8 w-8"
                         >
                           <X size={16} />
                         </Button>
@@ -339,7 +339,7 @@ export default function BudgetsPage() {
                             type="number" 
                             value={editLimit} 
                             onChange={e => setEditLimit(e.target.value)}
-                            className="w-24 h-8 px-2 text-right font-semibold"
+                            className="w-24 h-8 px-2 text-right font-semibold text-slate-900 dark:text-slate-100"
                             autoFocus
                           />
                         </motion.div>
