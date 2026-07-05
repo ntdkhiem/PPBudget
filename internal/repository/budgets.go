@@ -69,8 +69,8 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, month time.Time) ([]
 				t.category_id,
 				t.date,
 				t.amount 
-				+ COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
-				- COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0) as eff_amount
+				- COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
+				+ COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0) as eff_amount
 			FROM transactions t
 			WHERE t.deleted_at IS NULL
 		),

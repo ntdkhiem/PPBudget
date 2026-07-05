@@ -8,6 +8,7 @@ import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import { format, parseISO } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
+import { useDebounce } from "use-debounce";
 import dynamic from "next/dynamic";
 import TransactionFilters from "./TransactionFilters";
 
@@ -241,6 +242,7 @@ export default function TransactionsPage() {
 
   // Smart Filtering States
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery] = useDebounce(searchQuery, 300);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState('All');
@@ -280,14 +282,18 @@ export default function TransactionsPage() {
 
   const queryParams = useMemo(() => {
     const params = new URLSearchParams();
-    if (date?.from) params.append("start_date", format(date.from, "yyyy-MM-dd"));
-    if (date?.to) params.append("end_date", format(date.to, "yyyy-MM-dd"));
+    if (debouncedSearchQuery) {
+      params.append("search", debouncedSearchQuery);
+    } else {
+      if (date?.from) params.append("start_date", format(date.from, "yyyy-MM-dd"));
+      if (date?.to) params.append("end_date", format(date.to, "yyyy-MM-dd"));
+    }
     if (currentCursor) {
       params.append("cursor_date", currentCursor.date);
       params.append("cursor_id", currentCursor.id);
     }
     return params.toString();
-  }, [date, currentCursor]);
+  }, [date, currentCursor, debouncedSearchQuery]);
 
   const { data: unreviewedTransactions } = useQuery<Transaction[]>({
     queryKey: ["unreviewed"],

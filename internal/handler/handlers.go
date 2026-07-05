@@ -110,7 +110,9 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	unreviewedStr := r.URL.Query().Get("unreviewed")
 	unreviewedOnly := unreviewedStr == "true"
 
-	txns, err := h.svc.ListTransactions(r.Context(), accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate)
+	search := r.URL.Query().Get("search")
+
+	txns, err := h.svc.ListTransactions(r.Context(), accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch transactions")
 		return

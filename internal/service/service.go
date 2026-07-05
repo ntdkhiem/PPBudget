@@ -202,8 +202,8 @@ func (s *Service) CreateTransfer(ctx context.Context, req TransferRequest) error
 	return s.repo.CreateTransfer(ctx, req.FromAccountID, req.ToAccountID, amount, date, req.Description)
 }
 
-func (s *Service) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time) ([]domain.TransactionWithBalance, error) {
-	return s.repo.ListTransactions(ctx, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate)
+func (s *Service) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time, search string) ([]domain.TransactionWithBalance, error) {
+	return s.repo.ListTransactions(ctx, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
 }
 
 func (s *Service) ReviewTransaction(ctx context.Context, txnID string, categoryID *string) error {

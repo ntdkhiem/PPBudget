@@ -12,6 +12,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { apiFetch } from "@/lib/api";
 
 interface SearchResult {
   transactions?: any[];
@@ -49,18 +50,11 @@ export function GlobalSearch() {
     const fetchResults = async () => {
       setLoading(true);
       try {
-        const token = localStorage.getItem("ppbudget_token");
-        const res = await fetch(`http://localhost:8080/api/v1/search?q=${encodeURIComponent(debouncedQuery)}`, {
-          headers: {
-            "Authorization": `Bearer ${token}`
-          }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setResults(data.results);
-        }
-      } catch (err) {
-        console.error("Failed to fetch search results", err);
+        const token = localStorage.getItem("ppbudget_token") || undefined;
+        const data = await apiFetch<any>(`/search?q=${encodeURIComponent(debouncedQuery)}`, {}, token);
+        setResults(data.results);
+      } catch (error) {
+        console.error("Search error:", error);
       } finally {
         setLoading(false);
       }

@@ -98,7 +98,7 @@ func (r *Repository) CreateTransfer(ctx context.Context, fromAccountID, toAccoun
 }
 
 // ListTransactions fetches transactions for an account with running balances and cursor pagination
-func (r *Repository) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time) ([]domain.TransactionWithBalance, error) {
+func (r *Repository) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time, search string) ([]domain.TransactionWithBalance, error) {
 	query := `
         SELECT 
             t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
@@ -137,11 +137,12 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
           AND ($4::boolean = false OR t.is_reviewed = false)
           AND ($5::date IS NULL OR t.date >= $5::date)
           AND ($6::date IS NULL OR t.date <= $6::date)
+          AND ($7 = '' OR t.search_vector @@ websearch_to_tsquery('english', $7) OR t.description ILIKE '%' || $7 || '%' OR t.notes ILIKE '%' || $7 || '%' OR t.amount::text ILIKE '%' || $7 || '%')
         ORDER BY t.date DESC, t.id DESC
         LIMIT 50;
     `
 
-	rows, err := r.pool.Query(ctx, query, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate)
+	rows, err := r.pool.Query(ctx, query, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
 	if err != nil {
 		return nil, err
 	}
