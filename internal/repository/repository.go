@@ -105,33 +105,37 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
             t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id,
             (a.initial_balance + SUM(t.amount) OVER (PARTITION BY t.account_id ORDER BY t.date, t.id)) as running_balance,
             (t.amount 
-             - COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
-             + COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0)
+             - COALESCE(pays_for_agg.total_amount, 0)
+             + COALESCE(paid_by_agg.total_amount, 0)
             ) as effective_amount,
-            COALESCE((
-                SELECT json_agg(json_build_object(
-                    'transaction_id', l.target_transaction_id, 
-                    'amount', l.amount,
-                    'description', tt.description,
-                    'date', tt.date
-                ))
-                FROM transaction_links l
-                JOIN transactions tt ON l.target_transaction_id = tt.id
-                WHERE l.source_transaction_id = t.id
-            ), '[]'::json) as pays_for,
-            COALESCE((
-                SELECT json_agg(json_build_object(
-                    'transaction_id', l.source_transaction_id, 
-                    'amount', l.amount,
-                    'description', st.description,
-                    'date', st.date
-                ))
-                FROM transaction_links l
-                JOIN transactions st ON l.source_transaction_id = st.id
-                WHERE l.target_transaction_id = t.id
-            ), '[]'::json) as paid_by
+            COALESCE(pays_for_agg.json_data, '[]'::json) as pays_for,
+            COALESCE(paid_by_agg.json_data, '[]'::json) as paid_by
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
+        LEFT JOIN LATERAL (
+            SELECT SUM(l.amount) as total_amount,
+                   json_agg(json_build_object(
+                       'transaction_id', l.target_transaction_id, 
+                       'amount', l.amount,
+                       'description', tt.description,
+                       'date', to_char(tt.date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                   )) as json_data
+            FROM transaction_links l
+            JOIN transactions tt ON l.target_transaction_id = tt.id
+            WHERE l.source_transaction_id = t.id
+        ) pays_for_agg ON true
+        LEFT JOIN LATERAL (
+            SELECT SUM(l.amount) as total_amount,
+                   json_agg(json_build_object(
+                       'transaction_id', l.source_transaction_id, 
+                       'amount', l.amount,
+                       'description', st.description,
+                       'date', to_char(st.date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                   )) as json_data
+            FROM transaction_links l
+            JOIN transactions st ON l.source_transaction_id = st.id
+            WHERE l.target_transaction_id = t.id
+        ) paid_by_agg ON true
         WHERE ($1 = '' OR t.account_id = NULLIF($1, '')::uuid) AND t.deleted_at IS NULL
           AND ($2::timestamptz IS NULL OR (t.date, t.id) < ($2::timestamptz, $3::uuid))
           AND ($4::boolean = false OR t.is_reviewed = false)
@@ -177,8 +181,12 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		t.TransferID = transferID
 		t.SubscriptionID = subID
 		t.EffectiveAmount = money.Money(effectiveAmount)
-		json.Unmarshal(paysForJson, &t.PaysFor)
-		json.Unmarshal(paidByJson, &t.PaidBy)
+		if err := json.Unmarshal(paysForJson, &t.PaysFor); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal pays_for: %w", err)
+		}
+		if err := json.Unmarshal(paidByJson, &t.PaidBy); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal paid_by: %w", err)
+		}
 		txns = append(txns, t)
 	}
 	return txns, nil
@@ -199,7 +207,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
                     'transaction_id', l.target_transaction_id, 
                     'amount', l.amount,
                     'description', tt.description,
-                    'date', tt.date
+                    'date', to_char(tt.date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 ))
                 FROM transaction_links l
                 JOIN transactions tt ON l.target_transaction_id = tt.id
@@ -210,7 +218,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
                     'transaction_id', l.source_transaction_id, 
                     'amount', l.amount,
                     'description', st.description,
-                    'date', st.date
+                    'date', to_char(st.date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 ))
                 FROM transaction_links l
                 JOIN transactions st ON l.source_transaction_id = st.id
@@ -258,8 +266,12 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 		t.SimplefinAccountID = sfAccountID
 		t.SubscriptionID = subID
 		t.EffectiveAmount = money.Money(effectiveAmount)
-		json.Unmarshal(paysForJson, &t.PaysFor)
-		json.Unmarshal(paidByJson, &t.PaidBy)
+		if err := json.Unmarshal(paysForJson, &t.PaysFor); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal pays_for: %w", err)
+		}
+		if err := json.Unmarshal(paidByJson, &t.PaidBy); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal paid_by: %w", err)
+		}
 		txns = append(txns, t)
 	}
 	return txns, nil
@@ -724,24 +736,70 @@ func (r *Repository) GetTransaction(ctx context.Context, id string) (*domain.Tra
 		SELECT t.id, t.account_id, t.category_id, t.amount, t.date, t.description,
 		       t.transfer_id, t.is_reviewed, 
 		       t.is_reconciled, t.notes, t.subscription_id,
-		       a.simplefin_id as simplefin_account_id
+		       a.simplefin_id as simplefin_account_id,
+		       (t.amount 
+		        - COALESCE(pays_for_agg.total_amount, 0)
+		        + COALESCE(paid_by_agg.total_amount, 0)
+		       ) as effective_amount,
+		       COALESCE(pays_for_agg.json_data, '[]'::json) as pays_for,
+		       COALESCE(paid_by_agg.json_data, '[]'::json) as paid_by
 		FROM transactions t
 		JOIN accounts a ON t.account_id = a.id
+		LEFT JOIN LATERAL (
+		    SELECT SUM(l.amount) as total_amount,
+		           json_agg(json_build_object(
+		               'transaction_id', l.target_transaction_id, 
+		               'amount', l.amount,
+		               'description', tt.description,
+		               'date', to_char(tt.date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		           )) as json_data
+		    FROM transaction_links l
+		    JOIN transactions tt ON l.target_transaction_id = tt.id
+		    WHERE l.source_transaction_id = t.id
+		) pays_for_agg ON true
+		LEFT JOIN LATERAL (
+		    SELECT SUM(l.amount) as total_amount,
+		           json_agg(json_build_object(
+		               'transaction_id', l.source_transaction_id, 
+		               'amount', l.amount,
+		               'description', st.description,
+		               'date', to_char(st.date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		           )) as json_data
+		    FROM transaction_links l
+		    JOIN transactions st ON l.source_transaction_id = st.id
+		    WHERE l.target_transaction_id = t.id
+		) paid_by_agg ON true
 		WHERE t.id = $1 AND t.deleted_at IS NULL
 	`
 	row := r.pool.QueryRow(ctx, q, id)
 	var t domain.Transaction
 	var amount int64
+	var effectiveAmount int64
+	var paysForJSON, paidByJSON []byte
 	var catID, transferID, notes, sfAccountID, subID *string
 	err := row.Scan(
 		&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
 		&transferID, &t.IsReviewed, &t.IsReconciled,
 		&notes, &subID, &sfAccountID,
+		&effectiveAmount, &paysForJSON, &paidByJSON,
 	)
 	if err != nil {
 		return nil, err
 	}
 	t.Amount = money.Money(amount)
+	t.EffectiveAmount = money.Money(effectiveAmount)
+	
+	if len(paysForJSON) > 0 {
+		if err := json.Unmarshal(paysForJSON, &t.PaysFor); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal pays_for: %w", err)
+		}
+	}
+	if len(paidByJSON) > 0 {
+		if err := json.Unmarshal(paidByJSON, &t.PaidBy); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal paid_by: %w", err)
+		}
+	}
+
 	t.CategoryID = catID
 	t.TransferID = transferID
 	t.Notes = notes
