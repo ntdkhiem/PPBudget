@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PPBudget Guide - Overview</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="sidebar">
+        <h2>PPBudget Guide</h2>
+        <ul>
+            <li><a href="index.html" class="active" aria-current="page">Overview</a></li>
+            <li><a href="getting-started.html">Getting Started</a></li>
+            <li><a href="simplefin-importer.html">SimpleFin Importer</a></li>
+            <li><a href="rules-engine.html">Rules Engine</a></li>
+        </ul>
+    </nav>
+    <main class="content">
+        <header class="page-header">
+            <span class="badge">Documentation</span>
+            <h1>PPBudget Overview</h1>
+            <p class="subtitle">A privacy-focused, multi-tenant personal budget tracker with automated bank syncing and smart categorization.</p>
+        </header>
+
+        <!-- Purpose Section -->
+        <section class="section-card">
+            <h2>🎯 Purpose</h2>
+            <p>
+                <strong>PPBudget</strong> is a personal budget tracker designed from the ground up for <strong>multi-user isolation</strong>.
+                Whether you are managing your personal finances, organizing household expenses with family members, or hosting the application for multiple independent users, PPBudget ensures complete data segregation and privacy.
+            </p>
+            <p>
+                Every registered user receives their own isolated environment. Your financial accounts, balances, transaction logs, category schemes, and automation rules are strictly scoped to your account and never shared or exposed to others.
+            </p>
+        </section>
+
+        <!-- Features Section -->
+        <section class="section-card">
+            <h2>✨ Core Features</h2>
+            <p>PPBudget combines essential personal finance tools with powerful automation to make tracking your money effortless:</p>
+            
+            <div class="feature-grid">
+                <div class="feature-item">
+                    <span class="feature-icon">🛡️</span>
+                    <h3>Multi-Tenant Isolation</h3>
+                    <p>Strict user separation guarantees complete privacy for accounts, transactions, and custom settings across all users.</p>
+                </div>
+
+                <div class="feature-item">
+                    <span class="feature-icon">🔄</span>
+                    <h3>Automated SimpleFin Importing</h3>
+                    <p>Connect your financial institutions via SimpleFin Bridge to automatically sync bank accounts and recent transactions.</p>
+                </div>
+
+                <div class="feature-item">
+                    <span class="feature-icon">⚡</span>
+                    <h3>Rule-Based Categorization</h3>
+                    <p>Define flexible rules to automatically categorize transactions, clean merchant descriptions, and streamline imports.</p>
+                </div>
+
+                <div class="feature-item">
+                    <span class="feature-icon">📊</span>
+                    <h3>Flexible Budgeting</h3>
+                    <p>Establish category-level budgets, monitor your spending limits in real-time, and stay on top of your financial targets.</p>
+                </div>
+
+                <div class="feature-item">
+                    <span class="feature-icon">📅</span>
+                    <h3>Subscription Tracking</h3>
+                    <p>Identify and manage recurring subscriptions, track billing intervals, and avoid unexpected renewal charges.</p>
+                </div>
+
+                <div class="feature-item">
+                    <span class="feature-icon">🔍</span>
+                    <h3>Transaction Review Workflow</h3>
+                    <p>Review incoming transactions, mark them verified, and maintain accurate financial records with ease.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Caveats Section -->
+        <section class="section-card">
+            <h2>⚠️ Caveats & Considerations</h2>
+            <div class="callout callout-warning">
+                <span class="callout-icon">💡</span>
+                <div class="callout-body">
+                    <div class="callout-title">SimpleFin Account Required for Automated Sync</div>
+                    <p class="callout-text">
+                        To use the automated bank synchronization features, an active <strong>SimpleFin Bridge</strong> account is required. 
+                        SimpleFin serves as the secure conduit connecting your banking institutions to PPBudget.
+                        If you do not use SimpleFin, transactions can still be managed manually within the application.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Requirements Section -->
+        <section class="section-card">
+            <h2>💻 System Requirements</h2>
+            <p>PPBudget is built with modern web technologies and has minimal client-side requirements:</p>
+            <ul class="checklist">
+                <li>
+                    <span class="checklist-icon">✓</span>
+                    <span><strong>Any Modern Web Browser:</strong> Google Chrome, Mozilla Firefox, Apple Safari, Microsoft Edge, or Chromium-based browsers.</span>
+                </li>
+                <li>
+                    <span class="checklist-icon">✓</span>
+                    <span><strong>Responsive Cross-Platform Support:</strong> Accessible from desktop computers, laptops, tablets, and smartphones.</span>
+                </li>
+                <li>
+                    <span class="checklist-icon">✓</span>
+                    <span><strong>JavaScript Enabled:</strong> Required for interactive dashboard features, real-time charts, and data management.</span>
+                </li>
+            </ul>
+        </section>
+
+        <!-- Next Steps / Footer Navigation -->
+        <div class="guide-footer">
+            <span>Next Guide: Setup and configuration walkthrough</span>
+            <a href="getting-started.html" class="guide-btn">Get Started &rarr;</a>
+        </div>
+    </main>
+</body>
+</html>

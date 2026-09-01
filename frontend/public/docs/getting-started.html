@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PPBudget Guide - Getting Started</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="sidebar">
+        <h2>PPBudget Guide</h2>
+        <ul>
+            <li><a href="index.html">Overview</a></li>
+            <li><a href="getting-started.html" class="active">Getting Started</a></li>
+            <li><a href="simplefin-importer.html">SimpleFin Importer</a></li>
+            <li><a href="rules-engine.html">Rules Engine</a></li>
+        </ul>
+    </nav>
+    <main class="content">
+        <header class="page-header">
+            <div class="badge">Tutorial</div>
+            <h1>Getting Started with PPBudget</h1>
+            <p class="lead">Follow this beginner-friendly, step-by-step onboarding tutorial to set up your account, configure categories, build your monthly budget, organize accounts, and track recurring subscriptions.</p>
+        </header>
+
+        <section class="overview-cards">
+            <h2>Onboarding Checklist</h2>
+            <div class="steps-progress-grid">
+                <div class="progress-step-item">
+                    <span class="step-number">1</span>
+                    <strong>Create Account</strong>
+                    <p>Register your credentials</p>
+                </div>
+                <div class="progress-step-item">
+                    <span class="step-number">2</span>
+                    <strong>Set Categories</strong>
+                    <p>Classify spending & income</p>
+                </div>
+                <div class="progress-step-item">
+                    <span class="step-number">3</span>
+                    <strong>Build Budgets</strong>
+                    <p>Assign monthly spending caps</p>
+                </div>
+                <div class="progress-step-item">
+                    <span class="step-number">4</span>
+                    <strong>Add Accounts</strong>
+                    <p>Set up assets & liabilities</p>
+                </div>
+                <div class="progress-step-item">
+                    <span class="step-number">5</span>
+                    <strong>Track Subscriptions</strong>
+                    <p>Monitor recurring charges</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- STEP 1 -->
+        <section class="guide-section" id="step-1">
+            <div class="section-title-wrap">
+                <span class="section-step-pill">Step 1</span>
+                <h2>Setting up a New Account</h2>
+            </div>
+            <p>To begin tracking your finances with PPBudget, create your personal user account.</p>
+            
+            <div class="instruction-block">
+                <h3>How to Register:</h3>
+                <ol class="step-list">
+                    <li>Open PPBudget in your web browser and navigate to the <strong>Register</strong> page (or click <strong>Create an Account</strong> from the login screen).</li>
+                    <li>Enter your email address in the <strong>Email Address</strong> field (e.g., <code>you@example.com</code>).</li>
+                    <li>Enter a secure password in the <strong>Password</strong> field. <em>(Must be at least 6 characters long)</em>.</li>
+                    <li>Re-type your password in the <strong>Confirm Password</strong> field to prevent typos.</li>
+                    <li>Click the <strong>Create Account</strong> button.</li>
+                </ol>
+            </div>
+
+            <div class="callout callout-tip">
+                <div class="callout-icon">💡</div>
+                <div class="callout-content">
+                    <strong>Automatic Login:</strong> Upon successfully registering, PPBudget generates your authentication session token and directs you immediately to your personal <strong>Dashboard</strong>.
+                </div>
+            </div>
+        </section>
+
+        <!-- STEP 2 -->
+        <section class="guide-section" id="step-2">
+            <div class="section-title-wrap">
+                <span class="section-step-pill">Step 2</span>
+                <h2>Creating Categories</h2>
+            </div>
+            <p>Categories allow you to group transactions into meaningful financial buckets (e.g., <em>Groceries</em>, <em>Dining Out</em>, <em>Rent</em>, <em>Salary</em>). Categories form the backbone for your budgets, reporting, and automated rules.</p>
+            
+            <div class="instruction-block">
+                <h3>Category Types Explained:</h3>
+                <ul class="feature-list">
+                    <li><strong>Expense:</strong> Money flowing out for goods, services, and living costs (e.g., <em>Groceries</em>, <em>Utilities</em>, <em>Entertainment</em>).</li>
+                    <li><strong>Income:</strong> Inbound revenue and earnings (e.g., <em>Salary</em>, <em>Investments</em>, <em>Freelance</em>).</li>
+                    <li><strong>Transfer:</strong> Movement of funds between your own accounts that does not alter your net worth (e.g., <em>Credit Card Payment</em>, <em>Savings Transfer</em>).</li>
+                </ul>
+            </div>
+
+            <div class="instruction-block">
+                <h3>How to Add a Category:</h3>
+                <ol class="step-list">
+                    <li>Click <strong>Categories</strong> in the left sidebar (or go to <strong>Settings</strong> &rarr; <strong>Categories</strong>).</li>
+                    <li>In the creation bar at the top, type your desired name into the <strong>New Category Name</strong> input (e.g., <code>Groceries</code>).</li>
+                    <li>In the dropdown menu, select the category type: <strong>Expense</strong>, <strong>Income</strong>, or <strong>Transfer</strong>.</li>
+                    <li>Click the <strong>+ Add</strong> button. Your new category will instantly appear under its corresponding section below.</li>
+                </ol>
+            </div>
+
+            <div class="instruction-block">
+                <h3>Managing Existing Categories:</h3>
+                <ul class="step-list">
+                    <li><strong>Edit Category:</strong> Hover over any category row and click the <strong>Pencil icon</strong>. Edit the name or category type inline, then click the green <strong>Checkmark icon</strong> to save changes.</li>
+                    <li><strong>Delete Category:</strong> Click the <strong>Trash icon</strong> on a category row. If transactions are currently assigned to that category, PPBudget will display a warning dialog confirming how many transactions will become uncategorized before deletion.</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- STEP 3 -->
+        <section class="guide-section" id="step-3">
+            <div class="section-title-wrap">
+                <span class="section-step-pill">Step 3</span>
+                <h2>Setting up Budgets</h2>
+            </div>
+            <p>Budgets let you allocate target spending limits for each category during a specific calendar month and track your real-time pacing.</p>
+
+            <div class="instruction-block">
+                <h3>How to Create a Monthly Budget:</h3>
+                <ol class="step-list">
+                    <li>Click <strong>Budgets</strong> in the sidebar navigation.</li>
+                    <li>Use the <strong>Month Selector</strong> (with <strong>&lt;</strong> and <strong>&gt;</strong> arrows) at the top to select the target month (e.g., <em>August 2026</em>).</li>
+                    <li>Click the <strong>+ New Budget</strong> button in the upper right corner.</li>
+                    <li>In the modal dialog:
+                        <ul>
+                            <li>Choose your target category from the <strong>Category</strong> dropdown (e.g., <em>Dining Out</em>).</li>
+                            <li>Enter the maximum allowed spending in the <strong>Monthly Limit ($)</strong> field (e.g., <code>450</code>).</li>
+                        </ul>
+                    </li>
+                    <li>Click <strong>Save Budget</strong>.</li>
+                </ol>
+            </div>
+
+            <div class="instruction-block">
+                <h3>Understanding Budget Visuals & Pacing:</h3>
+                <ul class="feature-list">
+                    <li><strong>Total Month Overview:</strong> Shows aggregate monthly spend across all budgeted categories combined. A vertical <strong>Today (Day X)</strong> pacing indicator compares your current calendar progress with your spending velocity.</li>
+                    <li><strong>Status Indicators:</strong> Displays <span class="status-badge status-green">On track for the month</span> if spending is under the daily expected pace, or <span class="status-badge status-amber">Pacing ahead of schedule</span> if spending is running faster than expected.</li>
+                    <li><strong>Avg / Day & Safe / Day:</strong> Each individual budget card calculates your average daily expenditure so far, plus the exact <strong>Safe / Day</strong> dollar amount you can spend for the remainder of the month without exceeding your limit.</li>
+                    <li><strong>Quick Inline Limit Editing:</strong> Click the <strong>Pencil icon</strong> on any card to update its monthly limit without opening a separate form.</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- STEP 4 -->
+        <section class="guide-section" id="step-4">
+            <div class="section-title-wrap">
+                <span class="section-step-pill">Step 4</span>
+                <h2>Creating Accounts</h2>
+            </div>
+            <p>Accounts represent where your money lives (bank accounts, cash, investments) or what you owe (credit cards, loans). PPBudget organizes accounts into Assets and Liabilities to calculate your net financial position.</p>
+
+            <div class="instruction-block">
+                <h3>Account Types in PPBudget:</h3>
+                <ul class="feature-list">
+                    <li><strong>Asset:</strong> Bank checking accounts, high-yield savings accounts, physical cash, and brokerage portfolios.</li>
+                    <li><strong>Liability:</strong> Credit cards, student loans, auto loans, mortgages, and personal debt.</li>
+                    <li><strong>Income / Expense:</strong> Dedicated ledger accounts used for tracking specialized revenue or outflow streams.</li>
+                </ul>
+            </div>
+
+            <div class="instruction-block">
+                <h3>How to Add an Account Manually:</h3>
+                <ol class="step-list">
+                    <li>Click <strong>Accounts</strong> in the sidebar.</li>
+                    <li>Click the <strong>+ Add Account</strong> button in the top right.</li>
+                    <li>In the dialog form, enter:
+                        <ul>
+                            <li><strong>Account Name:</strong> A recognizable label (e.g., <code>Main Checking</code> or <code>Sapphire Credit Card</code>).</li>
+                            <li><strong>Account Type:</strong> Select <strong>Asset</strong> or <strong>Liability</strong>.</li>
+                            <li><strong>Initial Balance ($):</strong> The starting balance on your statement (e.g., <code>2500.00</code> for cash/checking, or current balance owed on a credit card).</li>
+                        </ul>
+                    </li>
+                    <li>Click <strong>Create Account</strong>.</li>
+                </ol>
+            </div>
+
+            <div class="callout callout-info">
+                <div class="callout-icon">ℹ️</div>
+                <div class="callout-content">
+                    <strong>Preparing for Automated Bank Sync:</strong> If you plan to link your real bank accounts with <strong>SimpleFin</strong>, you can create your accounts here first or have them automatically configured when syncing. Read the <a href="simplefin-importer.html">SimpleFin Importer Guide</a> for full details.
+                </div>
+            </div>
+        </section>
+
+        <!-- STEP 5 -->
+        <section class="guide-section" id="step-5">
+            <div class="section-title-wrap">
+                <span class="section-step-pill">Step 5</span>
+                <h2>Tracking Subscriptions</h2>
+            </div>
+            <p>Subscriptions keep recurring charges (streaming services, gym memberships, software licenses, domain renewals) organized so you never get surprised by auto-renewals.</p>
+
+            <div class="instruction-block">
+                <h3>How to Add a Subscription:</h3>
+                <ol class="step-list">
+                    <li>Click <strong>Subscriptions</strong> in the sidebar.</li>
+                    <li>Click the <strong>+ Add Subscription</strong> button.</li>
+                    <li>Enter the subscription details:
+                        <ul>
+                            <li><strong>Name:</strong> Service name (e.g., <code>Netflix</code>, <code>Spotify</code>, <code>Cloud Storage</code>).</li>
+                            <li><strong>Amount ($):</strong> The recurring cost (e.g., <code>15.49</code>).</li>
+                            <li><strong>Billing Cycle:</strong> Select <strong>Monthly</strong> or <strong>Yearly</strong>.</li>
+                            <li><strong>Next Billing Date:</strong> Choose the next scheduled payment date.</li>
+                        </ul>
+                    </li>
+                    <li>Click <strong>Save Subscription</strong>.</li>
+                </ol>
+            </div>
+
+            <div class="instruction-block">
+                <h3>Linking Subscriptions to Transactions:</h3>
+                <p>When you record a manual transaction or review imported transactions:</p>
+                <ol class="step-list">
+                    <li>Open the <strong>Add Transaction</strong> or <strong>Edit Transaction</strong> modal.</li>
+                    <li>In the <strong>Subscription</strong> dropdown, select the matching subscription name.</li>
+                    <li>Once linked, PPBudget automatically marks the subscription as <span class="status-badge status-green">Paid This Period</span> with a direct link to the transaction date.</li>
+                    <li>If a billing date arrives and no matching transaction is found, the dashboard displays an alert such as <span class="status-badge status-amber">Expected today</span> or <span class="status-badge status-amber">Overdue</span>.</li>
+                </ol>
+            </div>
+
+            <div class="instruction-block">
+                <h3>Subscription Summary Cards:</h3>
+                <ul class="feature-list">
+                    <li><strong>Active and expected subscriptions:</strong> Total dollar value of all active subscriptions.</li>
+                    <li><strong>Expected and not yet paid:</strong> Remaining subscription charges expected before the period ends.</li>
+                    <li><strong>Expected monthly costs:</strong> Normalized monthly cost (automatically dividing yearly subscriptions by 12 for accurate monthly budgeting).</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- NEXT STEPS -->
+        <section class="next-steps-section">
+            <h2>Next Steps & Advanced Features</h2>
+            <p>Now that your basic account structure, categories, budgets, and subscriptions are set up, explore advanced automation in PPBudget:</p>
+            <div class="next-links-grid">
+                <a href="simplefin-importer.html" class="next-card">
+                    <span class="next-tag">Automation</span>
+                    <h3>SimpleFin Importer &rarr;</h3>
+                    <p>Connect your financial institutions to automatically sync transactions and account balances daily.</p>
+                </a>
+                <a href="rules-engine.html" class="next-card">
+                    <span class="next-tag">Rules</span>
+                    <h3>Rules Engine &rarr;</h3>
+                    <p>Create automated keyword and merchant rules to auto-categorize incoming transactions instantly.</p>
+                </a>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

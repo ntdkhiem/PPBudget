@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PPBudget Guide - SimpleFin Importer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="sidebar">
+        <h2>PPBudget Guide</h2>
+        <ul>
+            <li><a href="index.html">Overview</a></li>
+            <li><a href="getting-started.html">Getting Started</a></li>
+            <li><a href="simplefin-importer.html" class="active">SimpleFin Importer</a></li>
+            <li><a href="rules-engine.html">Rules Engine</a></li>
+        </ul>
+    </nav>
+    <main class="content">
+        <header class="page-header">
+            <span class="badge badge-primary">Automation &amp; Integrations</span>
+            <h1>SimpleFin Importer</h1>
+            <p class="lead">Synchronize transactions directly and securely from your financial institutions into PPBudget with automated account mapping and background scheduling.</p>
+        </header>
+
+        <section id="what-is-simplefin">
+            <h2>What is SimpleFin?</h2>
+            <p><strong>SimpleFin Bridge</strong> is a lightweight, privacy-focused financial aggregation service designed to securely connect your bank, credit union, and credit card accounts to personal finance applications like PPBudget.</p>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <h3>Read-Only Security</h3>
+                    <p>SimpleFin only provides read-only transaction and balance data. It has zero capability to transfer money, initiate payments, or alter account states.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Automated Syncing</h3>
+                    <p>Eliminate tedious CSV exports and manual balance entries. Your actual cleared transactions flow directly into your budgeting dashboard.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🛡️</div>
+                    <h3>Privacy First</h3>
+                    <p>Your banking login credentials stay securely within SimpleFin's isolated infrastructure. PPBudget only communicates with an encrypted, unique access token.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="getting-started">
+            <h2>Setting Up the SimpleFin Connection</h2>
+            <p>Connecting your financial accounts to PPBudget takes just a couple of minutes using SimpleFin's secure claim process.</p>
+
+            <div class="step-guide">
+                <div class="step-item">
+                    <div class="step-number">1</div>
+                    <div class="step-body">
+                        <h3>Create Your SimpleFin Account</h3>
+                        <p>Sign up or log in to your account at <a href="https://beta.simplefin.org" target="_blank" rel="noopener noreferrer">SimpleFin Bridge</a> (<code>beta.simplefin.org</code>).</p>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-number">2</div>
+                    <div class="step-body">
+                        <h3>Link Your Banks</h3>
+                        <p>In your SimpleFin dashboard, add and authenticate the banks, credit cards, or investment accounts you wish to track in PPBudget.</p>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-number">3</div>
+                    <div class="step-body">
+                        <h3>Generate a Setup Token (Claim URL)</h3>
+                        <p>Create a new connection token in SimpleFin. SimpleFin will generate a <strong>Setup Token / Claim URL</strong> (either a base64 encoded string or a direct secure claim URL starting with <code>https://...</code>).</p>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-number">4</div>
+                    <div class="step-body">
+                        <h3>Connect in PPBudget Settings</h3>
+                        <p>In PPBudget, open <strong>Settings &rarr; Data Importer</strong> (<code>/settings/importer</code>). Paste your setup token into the <strong>Setup Token</strong> input field and click <strong>Continue</strong>.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="callout callout-info">
+                <h4>Behind the Scenes: Claim Exchange</h4>
+                <p>When you click <strong>Continue</strong>, PPBudget sends a secure POST request to the SimpleFin Claim URL. SimpleFin responds with an encrypted, persistent Access URL containing your user credentials. PPBudget securely stores this access token inside your user profile settings in the database for all future synchronization pulls.</p>
+            </div>
+        </section>
+
+        <section id="account-mapping">
+            <h2>Account Mapping &amp; Account Memory</h2>
+            <p>Once connected, PPBudget queries SimpleFin for all active accounts under your bank connections and presents the interactive <strong>Account Mapping Wizard</strong>.</p>
+
+            <h3>How Mapping Works</h3>
+            <p>For each account discovered in SimpleFin, you can specify how PPBudget handles incoming data:</p>
+            <ul>
+                <li><strong>Map to Existing Account:</strong> Associate the SimpleFin account with an account you already created in PPBudget (e.g., "Chase Freedom", "Ally Savings").</li>
+                <li><strong>+ Create New Account:</strong> Automatically create a matching account in PPBudget with the current balance and currency fetched from SimpleFin.</li>
+                <li><strong>Skip Importing:</strong> Ignore this account entirely during import operations.</li>
+            </ul>
+
+            <div class="highlight-box">
+                <div class="highlight-header">
+                    <span class="highlight-tag">Core Architecture</span>
+                    <h3>Persistent Account Memory</h3>
+                </div>
+                <p>PPBudget features an intelligent <strong>Account Memory</strong> system. When you configure your account mappings:</p>
+                <ol>
+                    <li>The system creates an associative map between each external <code>SimpleFin Account ID</code> (e.g., <code>ACT-89421-XYZ</code>) and the target <code>PPBudget Account ID</code> (UUID).</li>
+                    <li>This mapping is stored securely in the database inside <code>user_settings</code> under the <code>simplefin_config</code> key, alongside your access credentials.</li>
+                    <li>Additionally, the foreign key relationship is recorded directly in your PPBudget accounts table (via <code>simplefin_account_id</code>).</li>
+                </ol>
+                <p><strong>The Result:</strong> On every subsequent manual pull and background automatic sync, PPBudget automatically routes each transaction to its designated target account without requiring any re-configuration.</p>
+            </div>
+        </section>
+
+        <section id="import-options">
+            <h2>Import Configuration Options</h2>
+            <p>Before running an import, you can tailor how transactions are ingested and processed:</p>
+
+            <table class="docs-table">
+                <thead>
+                    <tr>
+                        <th>Option</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>Import Start Date</code></td>
+                        <td>30 days ago</td>
+                        <td>Specifies the historical cutoff date. Transactions posted before this date will be skipped.</td>
+                    </tr>
+                    <tr>
+                        <td><code>Import Pending Transactions</code></td>
+                        <td>Disabled</td>
+                        <td>When enabled, imports unsettled transactions. Note that pending amounts and merchant descriptions may change once cleared by the bank.</td>
+                    </tr>
+                    <tr>
+                        <td><code>Apply Categorization Rules</code></td>
+                        <td>Enabled</td>
+                        <td>Automatically executes active <a href="rules-engine.html">Rules Engine</a> rules on newly ingested transactions to assign categories, tags, and subscriptions immediately.</td>
+                    </tr>
+                    <tr>
+                        <td><code>Smart De-duplication</code></td>
+                        <td>Enabled</td>
+                        <td>Uses content hashing (date, exact integer amount, and cleaned description) plus SimpleFin's unique transaction IDs to guarantee no duplicate records are created.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section id="background-sync">
+            <h2>Automated Background Sync (12-Hour Cron)</h2>
+            <p>PPBudget is built for hands-off automation. You don't need to manually click sync buttons every day to keep your budget current.</p>
+
+            <div class="callout callout-success">
+                <h4>Scheduled Background Execution</h4>
+                <p>PPBudget runs a built-in background scheduler that executes every <strong>12 hours</strong> (<code>@every 12h</code>). For all users with <strong>Auto-Sync</strong> enabled:</p>
+                <ul>
+                    <li>The engine pulls the last 30 days of transactions from SimpleFin.</li>
+                    <li>It uses your saved <strong>Account Memory</strong> configuration to map transactions to the right accounts.</li>
+                    <li>It applies smart de-duplication to skip already-imported records.</li>
+                    <li>It executes active <strong>Categorization Rules</strong> to organize the new transactions.</li>
+                </ul>
+            </div>
+
+            <h3>Enabling Auto-Sync</h3>
+            <p>To enable automated syncing:</p>
+            <ol>
+                <li>Go to <strong>Settings &rarr; Data Importer</strong> (<code>/settings/importer</code>).</li>
+                <li>Toggle the <strong>Auto-Sync</strong> switch on the dashboard card.</li>
+                <li>The interface displays the next scheduled sync time (e.g., <em>Next: Sep 1, 11:30 AM</em>).</li>
+            </ol>
+
+            <h3>Email Notifications</h3>
+            <p>Whenever a background auto-sync completes with new transactions, PPBudget sends a detailed HTML email summary directly to your notification address. The email includes:</p>
+            <ul>
+                <li>Total number of newly imported transactions.</li>
+                <li>Counts of automatically categorized items vs. items requiring manual review.</li>
+                <li>A formatted transaction ledger grouped by account, complete with direct links to review or edit transactions.</li>
+            </ul>
+        </section>
+
+        <section id="manual-sync">
+            <h2>Manual On-Demand Sync</h2>
+            <p>If you made a recent purchase and want to see it reflected immediately, you can trigger a manual sync anytime:</p>
+            <ol>
+                <li>Navigate to <strong>Settings &rarr; Data Importer</strong>.</li>
+                <li>Click the <strong>Sync Now</strong> button.</li>
+                <li>Review the discovered accounts and click <strong>Continue</strong> through the wizard.</li>
+                <li>Click <strong>Start Import</strong> to watch the live progress bar import and categorize your transactions in real-time.</li>
+            </ol>
+        </section>
+    </main>
+</body>
+</html>

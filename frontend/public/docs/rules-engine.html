@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PPBudget Guide - Rules Engine</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="sidebar">
+        <h2>PPBudget Guide</h2>
+        <ul>
+            <li><a href="index.html">Overview</a></li>
+            <li><a href="getting-started.html">Getting Started</a></li>
+            <li><a href="simplefin-importer.html">SimpleFin Importer</a></li>
+            <li><a href="rules-engine.html" class="active">Rules Engine</a></li>
+        </ul>
+    </nav>
+    <main class="content">
+        <header class="page-header">
+            <span class="badge badge-primary">Automation &amp; Workflow</span>
+            <h1>Rules Engine</h1>
+            <p class="lead">Automate transaction categorization, subscription tracking, and budget tagging with flexible, condition-based rule triggers.</p>
+        </header>
+
+        <section id="what-is-rules-engine">
+            <h2>What is the Rules Engine?</h2>
+            <p>The <strong>Rules Engine</strong> in PPBudget is an automated transaction processing system. Rather than manually assigning categories and tags to dozens of bank transactions every week, you can configure declarative <em>If &rarr; Then</em> rules.</p>
+            <p>Whenever transactions are imported from <a href="simplefin-importer.html">SimpleFin</a>, uploaded via CSV, or created manually, active rules automatically inspect the transaction properties and apply the designated category, subscription link, or tag instantly.</p>
+        </section>
+
+        <section id="anatomy-of-a-rule">
+            <h2>Anatomy of a Rule</h2>
+            <p>Every rule in PPBudget is composed of three primary parts:</p>
+
+            <div class="rule-diagram">
+                <div class="rule-box rule-trigger">
+                    <span class="rule-label">1. Triggers (If)</span>
+                    <p>One or more conditions evaluated against the transaction (e.g., Description contains "Starbucks").</p>
+                </div>
+                <div class="rule-arrow">&rarr;</div>
+                <div class="rule-box rule-strictness">
+                    <span class="rule-label">2. Match Logic</span>
+                    <p><strong>Match All (AND)</strong> or <strong>Match Any (OR)</strong>.</p>
+                </div>
+                <div class="rule-arrow">&rarr;</div>
+                <div class="rule-box rule-action">
+                    <span class="rule-label">3. Actions (Then)</span>
+                    <p>One or more operations performed when matched (e.g., Set Category to "Coffee").</p>
+                </div>
+            </div>
+
+            <h3>1. Trigger Fields &amp; Operators</h3>
+            <p>Rules can match on multiple attributes of a transaction:</p>
+
+            <table class="docs-table">
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Supported Operators</th>
+                        <th>Example</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>Description</code></td>
+                        <td><code>contains</code>, <code>is exactly</code>, <code>starts with</code>, <code>ends with</code></td>
+                        <td><code>Description contains "Starbucks"</code> or <code>starts with "UBER *"</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>Amount</code></td>
+                        <td><code>greater than</code>, <code>less than</code>, <code>is exactly</code></td>
+                        <td><code>Amount greater than "100.00"</code> (e.g. flagging large expenses)</td>
+                    </tr>
+                    <tr>
+                        <td><code>Account</code></td>
+                        <td><code>is exactly</code></td>
+                        <td><code>Account is "Business Checking"</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>2. Match Logic (Strictness)</h3>
+            <ul>
+                <li><strong>Match All (AND):</strong> Every condition defined in the rule must evaluate to true for the action to trigger.</li>
+                <li><strong>Match Any (OR):</strong> If any single condition in the list is met, the rule will execute its actions.</li>
+            </ul>
+
+            <h3>3. Available Actions</h3>
+            <p>When a transaction meets the conditions, the Rules Engine can perform any of the following actions:</p>
+            <ul>
+                <li><strong>Set Category:</strong> Assigns the transaction to a specific category (e.g., <em>Groceries</em>, <em>Dining Out</em>, <em>Utilities</em>).</li>
+                <li><strong>Link to Subscription:</strong> Connects recurring transactions (such as Netflix or Spotify) directly to a tracked subscription profile.</li>
+                <li><strong>Add Tag:</strong> Attaches custom labels (e.g., <em>#tax-deductible</em>, <em>#reimbursable</em>, <em>#vacation</em>) for granular filtering.</li>
+                <li><strong>Set Budget:</strong> Allocates the transaction toward a particular budget envelope.</li>
+                <li><strong>Link as Card Payment:</strong> Flags internal transfer entries as credit card payoff transactions.</li>
+            </ul>
+        </section>
+
+        <section id="creating-a-rule">
+            <h2>How to Create a Rule (Step-by-Step)</h2>
+            <p>Let's walk through an example of creating a rule that automatically categorizes all Starbucks purchases as <strong>"Coffee &amp; Drinks"</strong>.</p>
+
+            <div class="step-guide">
+                <div class="step-item">
+                    <div class="step-number">1</div>
+                    <div class="step-body">
+                        <h3>Navigate to Rules Settings</h3>
+                        <p>Open <strong>Settings &rarr; Rules</strong> (<code>/settings/rules</code>) in your PPBudget navigation.</p>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-number">2</div>
+                    <div class="step-body">
+                        <h3>Click "Create Rule"</h3>
+                        <p>Click the <strong>+ Create Rule</strong> button at the top right of the page to open the Rule Builder dialog.</p>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-number">3</div>
+                    <div class="step-body">
+                        <h3>Name Your Rule</h3>
+                        <p>Enter a descriptive name such as <code>Coffee - Starbucks</code> and an optional description.</p>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-number">4</div>
+                    <div class="step-body">
+                        <h3>Define Triggers (If)</h3>
+                        <p>Configure the matching condition:</p>
+                        <ul>
+                            <li><strong>Field:</strong> <code>Description</code></li>
+                            <li><strong>Operator:</strong> <code>Contains</code></li>
+                            <li><strong>Value:</strong> <code>Starbucks</code></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-number">5</div>
+                    <div class="step-body">
+                        <h3>Define Actions (Then)</h3>
+                        <p>Configure what PPBudget should do when a match is found:</p>
+                        <ul>
+                            <li><strong>Action:</strong> <code>Set Category</code></li>
+                            <li><strong>Value:</strong> Select <code>Coffee &amp; Drinks</code> (or your preferred category) from the dropdown list.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-number">6</div>
+                    <div class="step-body">
+                        <h3>Save &amp; Activate</h3>
+                        <p>Click <strong>Save Rule</strong>. The rule is immediately active for all future transaction imports.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="retroactive-application">
+            <h2>Applying Rules to Existing Transactions</h2>
+            <p>When you create or update a rule, you often want it to categorize transactions that were already imported in the past. PPBudget provides built-in retroactive execution:</p>
+
+            <div class="highlight-box">
+                <div class="highlight-header">
+                    <span class="highlight-tag">Retroactive Processing</span>
+                    <h3>Run Rule on Existing Transactions</h3>
+                </div>
+                <p>When creating or editing a rule, enable the checkbox <strong>"Run rule on existing transactions"</strong>:</p>
+                <ul>
+                    <li><strong>All Past Transactions:</strong> Scans your entire historical transaction database and updates every matching transaction.</li>
+                    <li><strong>Specific Date Range:</strong> Choose a <em>Start Date</em> and <em>End Date</em> to limit retroactive categorization to a specific timeframe (e.g. the current month).</li>
+                </ul>
+                <p>Upon saving, PPBudget immediately processes the transactions in the background and reports how many historical transactions were updated.</p>
+            </div>
+        </section>
+
+        <section id="integration-with-importer">
+            <h2>Automatic Integration with SimpleFin</h2>
+            <p>The Rules Engine works hand-in-hand with the <a href="simplefin-importer.html">SimpleFin Importer</a>:</p>
+            <ol>
+                <li>Every 12 hours (or on manual sync), SimpleFin fetches cleared transactions from your banks.</li>
+                <li>When <strong>Apply Categorization Rules</strong> is enabled, PPBudget immediately feeds each newly ingested transaction through your active rules pipeline.</li>
+                <li>Transactions matching your rules are categorized automatically before you even open the app.</li>
+                <li>Your budget progress bars, category breakdowns, and dashboard analytics update in real time.</li>
+            </ol>
+        </section>
+
+        <section id="best-practices">
+            <h2>Best Practices for Writing Rules</h2>
+            <div class="tips-grid">
+                <div class="tip-card">
+                    <h4>💡 Use Broad Substrings for Merchants</h4>
+                    <p>Bank statements often append store numbers or location codes (e.g. <code>STARBUCKS #10482 SEATTLE WA</code>). Using <strong>Description contains "Starbucks"</strong> will reliably match all store locations.</p>
+                </div>
+                <div class="tip-card">
+                    <h4>💡 Combine with Amount for Multi-Purpose Merchants</h4>
+                    <p>For retailers like Amazon or Target, combine <code>Description contains "Amazon"</code> with <code>Amount less than "25.00"</code> to separate small digital purchases from large household orders.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
