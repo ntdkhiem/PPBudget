@@ -26,14 +26,27 @@ export default function AddTransactionDialog({
   categories,
   subscriptions,
 }: AddTransactionDialogProps) {
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      if (window.confirm("Are you sure you want to cancel? Any unsaved changes will be lost.")) {
+        onOpenChange(false);
+      }
+    } else {
+      onOpenChange(true);
+    }
+  };
+
   return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-md shadow-indigo-500/20 flex items-center gap-2">
           <Plus className="h-4 w-4" /> Add Transaction
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 backdrop-blur-xl bg-white dark:bg-slate-900/90 dark:bg-slate-900/90 shadow-2xl">
+      <DialogContent 
+        onInteractOutside={(e) => e.preventDefault()}
+        className="sm:max-w-[425px] rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 backdrop-blur-xl bg-white dark:bg-slate-900/90 shadow-2xl"
+      >
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold font-heading text-slate-900 dark:text-white">Add Transaction</DialogTitle>
           <DialogDescription>Create a new manual transaction.</DialogDescription>

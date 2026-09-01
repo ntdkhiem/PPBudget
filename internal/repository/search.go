@@ -6,18 +6,18 @@ import (
 	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
-func (r *Repository) SearchTransactions(ctx context.Context, query string, limit int) ([]domain.Transaction, error) {
+func (r *Repository) SearchTransactions(ctx context.Context, userID string, query string, limit int) ([]domain.Transaction, error) {
 	q := `
         SELECT 
-            t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
+            t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
             t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, a.simplefin_id as simplefin_account_id
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
-        WHERE t.deleted_at IS NULL AND t.search_vector @@ websearch_to_tsquery('english', $1)
-		ORDER BY ts_rank(t.search_vector, websearch_to_tsquery('english', $1)) DESC
-		LIMIT $2
+        WHERE t.user_id = $1 AND t.deleted_at IS NULL AND t.search_vector @@ websearch_to_tsquery('english', $2)
+		ORDER BY ts_rank(t.search_vector, websearch_to_tsquery('english', $2)) DESC
+		LIMIT $3
     `
-	rows, err := r.pool.Query(ctx, q, query, limit)
+	rows, err := r.pool.Query(ctx, q, userID, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (r *Repository) SearchTransactions(ctx context.Context, query string, limit
 		var subID *string
 
 		err := rows.Scan(
-			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
+			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
 			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &sfAccountID,
 		)
 		if err != nil {
@@ -52,17 +52,17 @@ func (r *Repository) SearchTransactions(ctx context.Context, query string, limit
 	return txns, nil
 }
 
-func (r *Repository) SearchCategories(ctx context.Context, query string, limit int) ([]domain.Category, error) {
+func (r *Repository) SearchCategories(ctx context.Context, userID string, query string, limit int) ([]domain.Category, error) {
 	q := `
-		SELECT id, name, type, 
-			(SELECT count(*) FROM transactions WHERE category_id = categories.id) as transaction_count, 
+		SELECT id, user_id, name, type, 
+			(SELECT count(*) FROM transactions WHERE category_id = categories.id AND deleted_at IS NULL AND user_id = $1) as transaction_count, 
 			created_at
 		FROM categories 
-		WHERE name ILIKE '%' || $1 || '%'
-		ORDER BY name <-> $1
-		LIMIT $2
+		WHERE user_id = $1 AND name ILIKE '%' || $2 || '%'
+		ORDER BY name <-> $2
+		LIMIT $3
 	`
-	rows, err := r.pool.Query(ctx, q, query, limit)
+	rows, err := r.pool.Query(ctx, q, userID, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (r *Repository) SearchCategories(ctx context.Context, query string, limit i
 	var categories []domain.Category
 	for rows.Next() {
 		var c domain.Category
-		if err := rows.Scan(&c.ID, &c.Name, &c.Type, &c.TransactionCount, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.Type, &c.TransactionCount, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		categories = append(categories, c)
@@ -79,18 +79,18 @@ func (r *Repository) SearchCategories(ctx context.Context, query string, limit i
 	return categories, nil
 }
 
-func (r *Repository) SearchAccounts(ctx context.Context, query string, limit int) ([]domain.Account, error) {
+func (r *Repository) SearchAccounts(ctx context.Context, userID string, query string, limit int) ([]domain.Account, error) {
 	q := `
-		SELECT a.id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
+		SELECT a.id, a.user_id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
 		       COALESCE(SUM(t.amount), 0) + a.initial_balance as current_balance
 		FROM accounts a
-		LEFT JOIN transactions t ON a.id = t.account_id
-		WHERE a.name ILIKE '%' || $1 || '%'
+		LEFT JOIN transactions t ON a.id = t.account_id AND t.deleted_at IS NULL AND t.user_id = $1
+		WHERE a.user_id = $1 AND a.name ILIKE '%' || $2 || '%'
 		GROUP BY a.id
-		ORDER BY a.name <-> $1
-		LIMIT $2
+		ORDER BY a.name <-> $2
+		LIMIT $3
 	`
-	rows, err := r.pool.Query(ctx, q, query, limit)
+	rows, err := r.pool.Query(ctx, q, userID, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (r *Repository) SearchAccounts(ctx context.Context, query string, limit int
 	for rows.Next() {
 		var a domain.Account
 		var balance, currentBalance int64
-		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance); err != nil {
+		if err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance); err != nil {
 			return nil, err
 		}
 		a.InitialBalance = money.Money(balance)
@@ -110,15 +110,15 @@ func (r *Repository) SearchAccounts(ctx context.Context, query string, limit int
 	return accounts, nil
 }
 
-func (r *Repository) SearchSubscriptions(ctx context.Context, query string, limit int) ([]domain.Subscription, error) {
+func (r *Repository) SearchSubscriptions(ctx context.Context, userID string, query string, limit int) ([]domain.Subscription, error) {
 	q := `
-		SELECT id, name, amount, billing_cycle, next_billing_date, category_id, created_at, updated_at
+		SELECT id, user_id, name, amount, billing_cycle, next_billing_date, category_id, created_at, updated_at
 		FROM subscriptions 
-		WHERE name ILIKE '%' || $1 || '%'
-		ORDER BY name <-> $1
-		LIMIT $2
+		WHERE user_id = $1 AND name ILIKE '%' || $2 || '%'
+		ORDER BY name <-> $2
+		LIMIT $3
 	`
-	rows, err := r.pool.Query(ctx, q, query, limit)
+	rows, err := r.pool.Query(ctx, q, userID, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (r *Repository) SearchSubscriptions(ctx context.Context, query string, limi
 	for rows.Next() {
 		var s domain.Subscription
 		var amount int64
-		if err := rows.Scan(&s.ID, &s.Name, &amount, &s.BillingCycle, &s.NextBillingDate, &s.CategoryID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &amount, &s.BillingCycle, &s.NextBillingDate, &s.CategoryID, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		s.Amount = money.Money(amount)

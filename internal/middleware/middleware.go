@@ -12,6 +12,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+type contextKey string
+
+const (
+	UserIDKey contextKey = "user_id"
+	APIKeyKey contextKey = "api_key"
+)
+
 func StructuredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,15 +48,35 @@ func StructuredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-func RequireAPIKey(validKey string) func(http.Handler) http.Handler {
+type TokenLookupFunc func(ctx context.Context, token string) (string, error)
+
+func RequireAPIKey(validKey string, tokenLookup TokenLookupFunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			providedKey := r.Header.Get("X-API-Key")
-			if providedKey == "" || providedKey != validKey {
+			if providedKey == "" {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
+
+			var userID string
+			if tokenLookup != nil {
+				uid, err := tokenLookup(r.Context(), providedKey)
+				if err == nil && uid != "" {
+					userID = uid
+				}
+			}
+
+			// If no user found by personal token, check against global validKey
+			if userID == "" && (validKey == "" || providedKey != validKey) {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+
 			ctx := context.WithValue(r.Context(), "api_key", providedKey)
+			if userID != "" {
+				ctx = context.WithValue(ctx, "user_id", userID)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -74,7 +101,24 @@ func RequireJWT(secret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			claims, ok := token.Claims.(jwt.MapClaims)
+			if ok && token.Valid {
+				userID, ok := claims["user_id"].(string)
+				if !ok || userID == "" {
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				ctx := context.WithValue(r.Context(), "user_id", userID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+			} else {
+				http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			}
 		})
 	}
+}
+
+// GetUserID extracts the user_id from context.
+func GetUserID(ctx context.Context) (string, bool) {
+	userID, ok := ctx.Value("user_id").(string)
+	return userID, ok && userID != ""
 }

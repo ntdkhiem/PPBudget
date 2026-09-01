@@ -6,8 +6,17 @@ import (
 	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
+type User struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 type Account struct {
 	ID             string      `json:"id"`
+	UserID         string      `json:"user_id"`
 	Name           string      `json:"name"`
 	Type           string      `json:"type"`
 	Currency       string      `json:"currency"`
@@ -20,6 +29,7 @@ type Account struct {
 
 type Transaction struct {
 	ID                 string            `json:"id"`
+	UserID             string            `json:"user_id"`
 	AccountID          string            `json:"account_id"`
 	CategoryID         *string           `json:"category_id,omitempty"`
 	Amount             money.Money       `json:"amount"`
@@ -50,6 +60,7 @@ type TransactionWithBalance struct {
 
 type Category struct {
 	ID               string    `json:"id"`
+	UserID           string    `json:"user_id"`
 	Name             string    `json:"name"`
 	Type             string    `json:"type"`
 	TransactionCount int       `json:"transaction_count"`
@@ -58,6 +69,7 @@ type Category struct {
 
 type Rule struct {
 	ID          string          `json:"id"`
+	UserID      string          `json:"user_id"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	TriggerType string          `json:"trigger_type"`
@@ -87,6 +99,7 @@ type RuleAction struct {
 
 type Budget struct {
 	ID         string      `json:"id"`
+	UserID     string      `json:"user_id"`
 	Name       string      `json:"name"`
 	CategoryID string      `json:"category_id"`
 	Amount     money.Money `json:"amount_cents"`
@@ -129,6 +142,7 @@ type ReportsSummary struct {
 
 type Subscription struct {
 	ID              string      `json:"id"`
+	UserID          string      `json:"user_id"`
 	Name            string      `json:"name"`
 	Amount          money.Money `json:"amount"`
 	BillingCycle    string      `json:"billing_cycle"`

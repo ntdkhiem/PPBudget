@@ -3,9 +3,17 @@ package handler
 import (
 	"net/http"
 	"strconv"
+
+	"ntdkhiem/ppbudget-go/internal/middleware"
 )
 
 func (h *Handler) GlobalSearch(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	query := r.URL.Query().Get("q")
 	if query == "" {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -21,7 +29,7 @@ func (h *Handler) GlobalSearch(w http.ResponseWriter, r *http.Request) {
 		limit = l
 	}
 
-	result, err := h.svc.GlobalSearch(r.Context(), query, limit)
+	result, err := h.svc.GlobalSearch(r.Context(), userID, query, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to search")
 		return

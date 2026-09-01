@@ -10,6 +10,7 @@ import (
 
 	"ntdkhiem/ppbudget-go/internal/config"
 	"ntdkhiem/ppbudget-go/internal/domain"
+	"ntdkhiem/ppbudget-go/internal/middleware"
 	"ntdkhiem/ppbudget-go/internal/repository"
 	"ntdkhiem/ppbudget-go/pkg/money"
 
@@ -49,7 +50,13 @@ type IngestRequest struct {
 	Description        string `json:"description"`
 }
 
-func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
+func (s *Service) Ingest(ctx context.Context, userID string, req IngestRequest) error {
+	if userID == "" {
+		if u, ok := middleware.GetUserID(ctx); ok {
+			userID = u
+		}
+	}
+
 	// 1. Parse Amount and Date
 	amount, err := money.NewFromString(req.Amount)
 	if err != nil {
@@ -69,7 +76,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 	defer tx.Rollback(ctx)
 
 	// 3. Look up internal account ID
-	accountID, err := s.repo.GetAccountBySimplefinID(ctx, tx, req.SimplefinAccountID)
+	accountID, err := s.repo.GetAccountBySimplefinID(ctx, tx, userID, req.SimplefinAccountID)
 	if err != nil {
 		if err == apperrors.ErrNotFound {
 			return fmt.Errorf("account not found for simplefin_id: %s", req.SimplefinAccountID)
@@ -82,7 +89,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 	var subscriptionID *string
 	isReviewed := false
 
-	rules, err := s.repo.ListRulesDetailed(ctx)
+	rules, err := s.repo.ListRulesDetailed(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -155,7 +162,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 	}
 
 	// 4. Insert idempotently
-	_, created, err := s.repo.InsertIngestedTransaction(ctx, tx, accountID, amount, date, req.Description, req.SimplefinTxID, categoryID, subscriptionID, isReviewed)
+	_, created, err := s.repo.InsertIngestedTransaction(ctx, tx, userID, accountID, amount, date, req.Description, req.SimplefinTxID, categoryID, subscriptionID, isReviewed)
 	if err != nil {
 		return err
 	}
@@ -173,8 +180,8 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) error {
 	return nil
 }
 
-func (s *Service) GetTransaction(ctx context.Context, id string) (*domain.Transaction, error) {
-	return s.repo.GetTransaction(ctx, id)
+func (s *Service) GetTransaction(ctx context.Context, userID, id string) (*domain.Transaction, error) {
+	return s.repo.GetTransaction(ctx, userID, id)
 }
 
 type TransferRequest struct {
@@ -185,7 +192,7 @@ type TransferRequest struct {
 	Description   string `json:"description"`
 }
 
-func (s *Service) CreateTransfer(ctx context.Context, req TransferRequest) error {
+func (s *Service) CreateTransfer(ctx context.Context, userID string, req TransferRequest) error {
 	amount, err := money.NewFromString(req.Amount)
 	if err != nil {
 		return fmt.Errorf("%w: invalid amount", apperrors.ErrInvalidInput)
@@ -199,121 +206,125 @@ func (s *Service) CreateTransfer(ctx context.Context, req TransferRequest) error
 		return fmt.Errorf("%w: invalid date format", apperrors.ErrInvalidInput)
 	}
 
-	return s.repo.CreateTransfer(ctx, req.FromAccountID, req.ToAccountID, amount, date, req.Description)
+	return s.repo.CreateTransfer(ctx, userID, req.FromAccountID, req.ToAccountID, amount, date, req.Description)
 }
 
-func (s *Service) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time, search string) ([]domain.TransactionWithBalance, error) {
-	return s.repo.ListTransactions(ctx, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
+func (s *Service) ListTransactions(ctx context.Context, userID, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time, search string) ([]domain.TransactionWithBalance, error) {
+	return s.repo.ListTransactions(ctx, userID, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
 }
 
-func (s *Service) ReviewTransaction(ctx context.Context, txnID string, categoryID *string) error {
-	return s.repo.MarkReviewed(ctx, txnID, categoryID)
+func (s *Service) ReviewTransaction(ctx context.Context, userID, txnID string, categoryID *string) error {
+	return s.repo.MarkReviewed(ctx, userID, txnID, categoryID)
 }
 
-func (s *Service) ListAccounts(ctx context.Context) ([]domain.Account, error) {
-	return s.repo.ListAccounts(ctx)
+func (s *Service) ListAccounts(ctx context.Context, userID string) ([]domain.Account, error) {
+	return s.repo.ListAccounts(ctx, userID)
 }
 
 // Categories
 
-func (s *Service) CreateCategory(ctx context.Context, name, catType string) error {
-	return s.repo.CreateCategory(ctx, name, catType)
+func (s *Service) CreateCategory(ctx context.Context, userID, name, catType string) error {
+	return s.repo.CreateCategory(ctx, userID, name, catType)
 }
 
-func (s *Service) UpdateCategory(ctx context.Context, id, name, catType string) error {
-	return s.repo.UpdateCategory(ctx, id, name, catType)
+func (s *Service) UpdateCategory(ctx context.Context, userID, id, name, catType string) error {
+	return s.repo.UpdateCategory(ctx, userID, id, name, catType)
 }
 
-func (s *Service) DeleteCategory(ctx context.Context, id string) error {
-	return s.repo.DeleteCategory(ctx, id)
+func (s *Service) DeleteCategory(ctx context.Context, userID, id string) error {
+	return s.repo.DeleteCategory(ctx, userID, id)
 }
 
-func (s *Service) ListCategories(ctx context.Context) ([]domain.Category, error) {
-	return s.repo.ListCategories(ctx)
+func (s *Service) ListCategories(ctx context.Context, userID string) ([]domain.Category, error) {
+	return s.repo.ListCategories(ctx, userID)
 }
 
 // Rules
 
-func (s *Service) ListRulesDetailed(ctx context.Context) ([]domain.Rule, error) {
-	return s.repo.ListRulesDetailed(ctx)
+func (s *Service) ListRulesDetailed(ctx context.Context, userID string) ([]domain.Rule, error) {
+	return s.repo.ListRulesDetailed(ctx, userID)
 }
 
-func (s *Service) CreateRule(ctx context.Context, rule *domain.Rule) error {
+func (s *Service) CreateRule(ctx context.Context, userID string, rule *domain.Rule) error {
+	rule.UserID = userID
 	return s.repo.CreateRule(ctx, rule)
 }
 
-func (s *Service) UpdateRule(ctx context.Context, rule *domain.Rule) error {
+func (s *Service) UpdateRule(ctx context.Context, userID string, rule *domain.Rule) error {
+	rule.UserID = userID
 	return s.repo.UpdateRule(ctx, rule)
 }
 
-func (s *Service) GetRule(ctx context.Context, id string) (*domain.Rule, error) {
-	return s.repo.GetRule(ctx, id)
+func (s *Service) GetRule(ctx context.Context, userID, id string) (*domain.Rule, error) {
+	return s.repo.GetRule(ctx, userID, id)
 }
 
-func (s *Service) DeleteRule(ctx context.Context, id string) error {
-	return s.repo.DeleteRule(ctx, id)
+func (s *Service) DeleteRule(ctx context.Context, userID, id string) error {
+	return s.repo.DeleteRule(ctx, userID, id)
 }
 
 // Budgets
 
-func (s *Service) CreateBudget(ctx context.Context, budget *domain.Budget) error {
+func (s *Service) CreateBudget(ctx context.Context, userID string, budget *domain.Budget) error {
+	budget.UserID = userID
 	return s.repo.CreateBudget(ctx, budget)
 }
 
-func (s *Service) UpdateBudget(ctx context.Context, budget *domain.Budget) error {
+func (s *Service) UpdateBudget(ctx context.Context, userID string, budget *domain.Budget) error {
+	budget.UserID = userID
 	return s.repo.UpdateBudget(ctx, budget)
 }
 
-func (s *Service) DeleteBudget(ctx context.Context, id string) error {
-	return s.repo.DeleteBudget(ctx, id)
+func (s *Service) DeleteBudget(ctx context.Context, userID, id string) error {
+	return s.repo.DeleteBudget(ctx, userID, id)
 }
 
-func (s *Service) GetBudgetsSummary(ctx context.Context, month time.Time) ([]domain.BudgetSummary, error) {
-	return s.repo.GetBudgetsSummary(ctx, month)
+func (s *Service) GetBudgetsSummary(ctx context.Context, userID string, month time.Time) ([]domain.BudgetSummary, error) {
+	return s.repo.GetBudgetsSummary(ctx, userID, month)
 }
 
 // Accounts
 
-func (s *Service) CreateAccount(ctx context.Context, name, accType, currency string, initialBalance int64) error {
-	return s.repo.CreateAccount(ctx, name, accType, currency, initialBalance)
+func (s *Service) CreateAccount(ctx context.Context, userID, name, accType, currency string, initialBalance int64) error {
+	return s.repo.CreateAccount(ctx, userID, name, accType, currency, initialBalance)
 }
 
-func (s *Service) GetAccount(ctx context.Context, id string) (*domain.Account, error) {
-	return s.repo.GetAccount(ctx, id)
+func (s *Service) GetAccount(ctx context.Context, userID, id string) (*domain.Account, error) {
+	return s.repo.GetAccount(ctx, userID, id)
 }
 
-func (s *Service) UpdateAccount(ctx context.Context, id, name, accType, currency string, initialBalance int64) error {
-	return s.repo.UpdateAccount(ctx, id, name, accType, currency, initialBalance)
+func (s *Service) UpdateAccount(ctx context.Context, userID, id, name, accType, currency string, initialBalance int64) error {
+	return s.repo.UpdateAccount(ctx, userID, id, name, accType, currency, initialBalance)
 }
 
-func (s *Service) DeleteAccount(ctx context.Context, id string) error {
-	return s.repo.DeleteAccount(ctx, id)
+func (s *Service) DeleteAccount(ctx context.Context, userID, id string) error {
+	return s.repo.DeleteAccount(ctx, userID, id)
 }
 
 // Transactions (Manual)
 
-func (s *Service) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, linkedTransactionID *string) error {
-	return s.repo.CreateTransaction(ctx, accountID, amount, date, description, notes, categoryID, subscriptionID, linkedTransactionID)
+func (s *Service) CreateTransaction(ctx context.Context, userID, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
+	return s.repo.CreateTransaction(ctx, userID, accountID, amount, date, description, notes, categoryID, subscriptionID)
 }
 
-func (s *Service) DeleteTransaction(ctx context.Context, id string) error {
-	return s.repo.DeleteTransaction(ctx, id)
+func (s *Service) DeleteTransaction(ctx context.Context, userID, id string) error {
+	return s.repo.DeleteTransaction(ctx, userID, id)
 }
 
-func (s *Service) BulkDeleteTransactions(ctx context.Context, ids []string) error {
-	return s.repo.BulkDeleteTransactions(ctx, ids)
+func (s *Service) BulkDeleteTransactions(ctx context.Context, userID string, ids []string) error {
+	return s.repo.BulkDeleteTransactions(ctx, userID, ids)
 }
 
-func (s *Service) BulkUpdateTransactionsCategory(ctx context.Context, ids []string, categoryID string) error {
-	return s.repo.BulkUpdateTransactionsCategory(ctx, ids, categoryID)
+func (s *Service) BulkUpdateTransactionsCategory(ctx context.Context, userID string, ids []string, categoryID string) error {
+	return s.repo.BulkUpdateTransactionsCategory(ctx, userID, ids, categoryID)
 }
 
-func (s *Service) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink) error {
-	return s.repo.UpdateTransaction(ctx, id, accountID, amount, date, description, notes, categoryID, subscriptionID, paysFor, paidBy)
+func (s *Service) UpdateTransaction(ctx context.Context, userID, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink) error {
+	return s.repo.UpdateTransaction(ctx, userID, id, accountID, amount, date, description, notes, categoryID, subscriptionID, paysFor, paidBy)
 }
 
-func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, startDate, endDate *time.Time) (int, error) {
-	rule, err := s.repo.GetRule(ctx, ruleID)
+func (s *Service) ApplyRule(ctx context.Context, userID, ruleID string, runAll bool, startDate, endDate *time.Time) (int, error) {
+	rule, err := s.repo.GetRule(ctx, userID, ruleID)
 	if err != nil {
 		return 0, err
 	}
@@ -324,7 +335,7 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 		eDate = endDate
 	}
 
-	txns, err := s.repo.GetTransactionsByDateRange(ctx, sDate, eDate)
+	txns, err := s.repo.GetTransactionsByDateRange(ctx, userID, sDate, eDate)
 	if err != nil {
 		return 0, err
 	}
@@ -418,7 +429,7 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 			}
 
 			if needsUpdate {
-				err = s.repo.UpdateTransaction(ctx, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID, newSubID, t.PaysFor, t.PaidBy)
+				err = s.repo.UpdateTransaction(ctx, userID, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID, newSubID, t.PaysFor, t.PaidBy)
 				if err != nil {
 					continue
 				}
@@ -432,14 +443,14 @@ func (s *Service) ApplyRule(ctx context.Context, ruleID string, runAll bool, sta
 
 // Reports
 
-func (s *Service) GetNetWorthTrend(ctx context.Context, startDate, endDate time.Time) ([]domain.NetWorthPoint, error) {
-	return s.repo.GetNetWorthTrend(ctx, startDate, endDate)
+func (s *Service) GetNetWorthTrend(ctx context.Context, userID string, startDate, endDate time.Time) ([]domain.NetWorthPoint, error) {
+	return s.repo.GetNetWorthTrend(ctx, userID, startDate, endDate)
 }
 
-func (s *Service) GetSpendingByCategory(ctx context.Context, startDate, endDate time.Time) ([]domain.CategorySpend, error) {
-	return s.repo.GetSpendingByCategory(ctx, startDate, endDate)
+func (s *Service) GetSpendingByCategory(ctx context.Context, userID string, startDate, endDate time.Time) ([]domain.CategorySpend, error) {
+	return s.repo.GetSpendingByCategory(ctx, userID, startDate, endDate)
 }
 
-func (s *Service) GetReportsSummary(ctx context.Context, startDate, endDate time.Time) (*domain.ReportsSummary, error) {
-	return s.repo.GetReportsSummary(ctx, startDate, endDate)
+func (s *Service) GetReportsSummary(ctx context.Context, userID string, startDate, endDate time.Time) (*domain.ReportsSummary, error) {
+	return s.repo.GetReportsSummary(ctx, userID, startDate, endDate)
 }

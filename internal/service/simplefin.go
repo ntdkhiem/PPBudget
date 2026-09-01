@@ -64,7 +64,7 @@ type SimplefinExecuteRequest struct {
 }
 
 // 1. Claim
-func (s *Service) SimpleFinClaim(ctx context.Context, req SimplefinClaimRequest) (*SimplefinClaimResponse, error) {
+func (s *Service) SimpleFinClaim(ctx context.Context, userID string, req SimplefinClaimRequest) (*SimplefinClaimResponse, error) {
 	token := req.SetupToken
 
 	// Check if it's a raw access URL
@@ -76,7 +76,7 @@ func (s *Service) SimpleFinClaim(ctx context.Context, req SimplefinClaimRequest)
 	var config struct {
 		AccessToken string `json:"access_token"`
 	}
-	if b, err := s.repo.GetAppSetting(ctx, "simplefin_config"); err == nil && b != "" {
+	if b, err := s.repo.GetUserSetting(ctx, userID, "simplefin_config"); err == nil && b != "" {
 		if err := json.Unmarshal([]byte(b), &config); err == nil && config.AccessToken != "" {
 			return &SimplefinClaimResponse{AccessURL: config.AccessToken}, nil
 		}
@@ -116,20 +116,20 @@ func (s *Service) SimpleFinClaim(ctx context.Context, req SimplefinClaimRequest)
 
 	accessURL := string(accessURLBytes)
 
-	// Save to app_settings
+	// Save to user_settings
 	configData := map[string]interface{}{
 		"access_token": accessURL,
 		"flow":         "simplefin",
 	}
 	if b, err := json.MarshalIndent(configData, "", "  "); err == nil {
-		_ = s.repo.SetAppSetting(ctx, "simplefin_config", string(b))
+		_ = s.repo.SetUserSetting(ctx, userID, "simplefin_config", string(b))
 	}
 
 	return &SimplefinClaimResponse{AccessURL: accessURL}, nil
 }
 
 // 2. Fetch Accounts
-func (s *Service) SimpleFinFetchAccounts(ctx context.Context, req SimplefinFetchAccountsRequest) (*SimplefinFetchAccountsResponse, error) {
+func (s *Service) SimpleFinFetchAccounts(ctx context.Context, userID string, req SimplefinFetchAccountsRequest) (*SimplefinFetchAccountsResponse, error) {
 	accountsURL := req.AccessURL + "/accounts"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, accountsURL, nil)
 	if err != nil {
@@ -156,7 +156,7 @@ func (s *Service) SimpleFinFetchAccounts(ctx context.Context, req SimplefinFetch
 		return nil, fmt.Errorf("failed to parse simplefin response: %w", err)
 	}
 
-	ppAccounts, err := s.repo.ListAccounts(ctx)
+	ppAccounts, err := s.repo.ListAccounts(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch ppbudget accounts: %w", err)
 	}
@@ -181,7 +181,7 @@ var ImportProgress = struct {
 }{Status: "idle"}
 
 // 3. Execute
-func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequest) error {
+func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req SimplefinExecuteRequest) error {
 	accountsURL := req.AccessURL + "/accounts"
 
 	// Format start date if provided
@@ -258,7 +258,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 	ImportProgress.Unlock()
 
 	// Save account mapping to db
-	if b, err := s.repo.GetAppSetting(ctx, "simplefin_config"); err == nil && b != "" {
+	if b, err := s.repo.GetUserSetting(ctx, userID, "simplefin_config"); err == nil && b != "" {
 		var config map[string]interface{}
 		if err := json.Unmarshal([]byte(b), &config); err == nil {
 			config["account_mapping"] = req.AccountMapping
@@ -266,7 +266,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 			config["apply_rules"] = req.ApplyRules
 			config["content_dedup"] = req.ContentDedup
 			if out, err := json.MarshalIndent(config, "", "  "); err == nil {
-				_ = s.repo.SetAppSetting(ctx, "simplefin_config", string(out))
+				_ = s.repo.SetUserSetting(ctx, userID, "simplefin_config", string(out))
 			}
 		}
 	}
@@ -288,16 +288,16 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 				if err != nil {
 					balance = money.Money(0)
 				}
-				newID, err := s.repo.UpsertSimplefinAccount(bgCtx, acc.ID, acc.Name, acc.Currency, balance.ToInt64())
+				newID, err := s.repo.UpsertSimplefinAccount(bgCtx, userID, acc.ID, acc.Name, acc.Currency, balance.ToInt64())
 				if err != nil {
-					s.logger.Error("failed to create account", "error", err, "sf_id", acc.ID)
+					s.logger.Error("failed to create account", "error", err, "sf_id", acc.ID, "user_id", userID)
 					continue
 				}
 				targetAccountID = newID
 			} else {
 				targetAccountID = mappedAccountID
 				// Link the simplefin account to the PP account if it hasn't been linked yet.
-				_ = s.repo.LinkSimplefinAccount(bgCtx, targetAccountID, acc.ID)
+				_ = s.repo.LinkSimplefinAccount(bgCtx, userID, targetAccountID, acc.ID)
 			}
 
 			tx, err := s.repo.BeginTx(bgCtx)
@@ -325,7 +325,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 				}
 
 				if req.ContentDedup {
-					exists, err := s.repo.TransactionExistsByDetails(bgCtx, targetAccountID, amount.ToInt64(), date, txn.Description)
+					exists, err := s.repo.TransactionExistsByDetails(bgCtx, userID, targetAccountID, amount.ToInt64(), date, txn.Description)
 					if err == nil && exists {
 						ImportProgress.Lock()
 						ImportProgress.Current++
@@ -334,9 +334,9 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 					}
 				}
 
-				txnID, created, err := s.repo.InsertIngestedTransaction(bgCtx, tx, targetAccountID, amount, date, txn.Description, txn.ID, nil, nil, false)
+				txnID, created, err := s.repo.InsertIngestedTransaction(bgCtx, tx, userID, targetAccountID, amount, date, txn.Description, txn.ID, nil, nil, false)
 				if err != nil {
-					s.logger.Error("failed to insert transaction", "error", err, "sf_txn_id", txn.ID)
+					s.logger.Error("failed to insert transaction", "error", err, "sf_txn_id", txn.ID, "user_id", userID)
 				} else if created {
 					importedTxns = append(importedTxns, domain.Transaction{
 						ID:          txnID,
@@ -344,6 +344,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 						Amount:      amount,
 						Date:        date,
 						Description: txn.Description,
+						UserID:      userID,
 					})
 				}
 
@@ -359,7 +360,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 
 		// Apply all active rules to imported transactions
 		if req.ApplyRules {
-			rules, err := s.ListRulesDetailed(bgCtx)
+			rules, err := s.ListRulesDetailed(bgCtx, userID)
 			if err == nil {
 				var sDate *time.Time
 				if !startTime.IsZero() {
@@ -369,15 +370,15 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 					if !r.IsActive {
 						continue
 					}
-					_, err := s.ApplyRule(bgCtx, r.ID, false, sDate, nil)
+					_, err := s.ApplyRule(bgCtx, userID, r.ID, false, sDate, nil)
 					if err != nil {
-						s.logger.Error("failed to apply rule during import", "error", err, "rule_id", r.ID)
+						s.logger.Error("failed to apply rule during import", "error", err, "rule_id", r.ID, "user_id", userID)
 					}
 				}
 			}
 		}
 
-		s.sendImportNotification(bgCtx, importedTxns, req.IsAutoSync)
+		s.sendImportNotification(bgCtx, userID, importedTxns, req.IsAutoSync)
 
 		ImportProgress.Lock()
 		ImportProgress.Status = "completed"
@@ -387,12 +388,23 @@ func (s *Service) SimpleFinExecute(ctx context.Context, req SimplefinExecuteRequ
 	return nil
 }
 
-func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Transaction, autoSync bool) {
+func (s *Service) sendImportNotification(ctx context.Context, userID string, txns []domain.Transaction, autoSync bool) {
 	if len(txns) == 0 {
 		return
 	}
-	if s.cfg.NotificationEmail == "" {
-		s.logger.Info("notification email not configured, skipping")
+
+	userEmail, _ := s.repo.GetUserSetting(ctx, userID, "notification_email")
+	if userEmail == "" {
+		if user, err := s.repo.GetUserByID(ctx, userID); err == nil && user != nil {
+			userEmail = user.Email
+		}
+	}
+	if userEmail == "" {
+		userEmail = s.cfg.NotificationEmail
+	}
+
+	if userEmail == "" {
+		s.logger.Info("notification email not configured, skipping", "user_id", userID)
 		return
 	}
 	if s.cfg.SMTPHost == "" && s.cfg.ResendAPIKey == "" {
@@ -401,7 +413,7 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 	}
 
 	// Fetch account names for nicer email
-	accounts, _ := s.ListAccounts(ctx)
+	accounts, _ := s.ListAccounts(ctx, userID)
 	accMap := make(map[string]string)
 	for _, a := range accounts {
 		accMap[a.ID] = a.Name
@@ -410,7 +422,7 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 	// Refresh txns from DB to pick up any category assignments from rules
 	var updatedTxns []domain.Transaction
 	for _, txn := range txns {
-		t, err := s.GetTransaction(ctx, txn.ID)
+		t, err := s.GetTransaction(ctx, userID, txn.ID)
 		if err == nil {
 			updatedTxns = append(updatedTxns, *t)
 		} else {
@@ -420,7 +432,7 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 	txns = updatedTxns
 
 	// Fetch categories for nicer email
-	categories, _ := s.ListCategories(ctx)
+	categories, _ := s.ListCategories(ctx, userID)
 	catMap := make(map[string]string)
 	for _, c := range categories {
 		catMap[c.ID] = c.Name
@@ -536,7 +548,7 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 		// Use Resend HTTP API
 		resendBody := fmt.Sprintf(`{"from": "%s", "to": ["%s"], "subject": "PPBudget Import Completed", "html": %q}`,
 			s.cfg.ResendFromEmail,
-			s.cfg.NotificationEmail,
+			userEmail,
 			body.String(),
 		)
 
@@ -547,13 +559,13 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 			client := &http.Client{Timeout: 10 * time.Second}
 			resp, err := client.Do(req)
 			if err != nil {
-				s.logger.Error("failed to send import notification via Resend", "error", err)
+				s.logger.Error("failed to send import notification via Resend", "error", err, "user_id", userID)
 			} else {
 				defer resp.Body.Close()
 				if resp.StatusCode >= 400 {
-					s.logger.Error("resend API returned error", "status", resp.StatusCode)
+					s.logger.Error("resend API returned error", "status", resp.StatusCode, "user_id", userID)
 				} else {
-					s.logger.Info("import notification email sent via Resend", "count", len(txns))
+					s.logger.Info("import notification email sent via Resend", "count", len(txns), "user_id", userID)
 				}
 			}
 		} else {
@@ -562,79 +574,87 @@ func (s *Service) sendImportNotification(ctx context.Context, txns []domain.Tran
 	} else {
 		// Use standard SMTP (works locally or if provider allows port 587)
 		auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
-		msg := []byte("To: " + s.cfg.NotificationEmail + "\r\n" +
+		msg := []byte("To: " + userEmail + "\r\n" +
 			"Subject: PPBudget Import Completed\r\n" +
 			"MIME-version: 1.0;\r\n" +
 			"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" +
 			body.String())
 
-		err := smtp.SendMail(s.cfg.SMTPHost+":"+s.cfg.SMTPPort, auth, s.cfg.SMTPUser, []string{s.cfg.NotificationEmail}, msg)
+		err := smtp.SendMail(s.cfg.SMTPHost+":"+s.cfg.SMTPPort, auth, s.cfg.SMTPUser, []string{userEmail}, msg)
 		if err != nil {
-			s.logger.Error("failed to send import notification email via SMTP", "error", err)
+			s.logger.Error("failed to send import notification email via SMTP", "error", err, "user_id", userID)
 		} else {
-			s.logger.Info("import notification email sent via SMTP", "count", len(txns))
+			s.logger.Info("import notification email sent via SMTP", "count", len(txns), "user_id", userID)
 		}
 	}
 }
 
 // 4. Auto-Sync Background Job
 func (s *Service) RunAutoSync(ctx context.Context) error {
-	b, err := s.repo.GetAppSetting(ctx, "simplefin_config")
-	if err != nil || b == "" {
-		s.logger.Info("auto-sync: no simplefin_config found, skipping")
-		return nil // Not set up yet
-	}
-
-	var config struct {
-		AccessToken    string            `json:"access_token"`
-		AccountMapping map[string]string `json:"account_mapping"`
-		ImportPending  bool              `json:"import_pending"`
-		ApplyRules     bool              `json:"apply_rules"`
-		ContentDedup   bool              `json:"content_dedup"`
-		AutoSync       bool              `json:"auto_sync"`
-	}
-	if err := json.Unmarshal([]byte(b), &config); err != nil {
-		return fmt.Errorf("auto-sync: failed to unmarshal config: %w", err)
-	}
-
-	if !config.AutoSync {
-		s.logger.Info("auto-sync: disabled in config")
-		return nil
-	}
-	if config.AccessToken == "" {
-		return fmt.Errorf("auto-sync: missing access token")
-	}
-
-	// Calculate start date: 30 days ago
-	startDate := time.Now().Add(-30 * 24 * time.Hour).Format("2006-01-02")
-
-	req := SimplefinExecuteRequest{
-		AccessURL:      config.AccessToken,
-		AccountMapping: config.AccountMapping,
-		StartDate:      startDate,
-		ImportPending:  config.ImportPending,
-		ApplyRules:     config.ApplyRules,
-		ContentDedup:   config.ContentDedup,
-		IsAutoSync:     true,
-	}
-
-	err = s.SimpleFinExecute(ctx, req)
+	configs, err := s.repo.GetAllUsersWithSimpleFin(ctx)
 	if err != nil {
-		s.logger.Error("auto-sync: failed to execute simplefin import", "error", err)
+		s.logger.Error("auto-sync: failed to get user configs", "error", err)
 		return err
 	}
-	s.logger.Info("auto-sync: successfully started import for last 30 days")
+
+	if len(configs) == 0 {
+		s.logger.Info("auto-sync: no users with simplefin_config found, skipping")
+		return nil
+	}
+
+	for _, userCfg := range configs {
+		var config struct {
+			AccessToken    string            `json:"access_token"`
+			AccountMapping map[string]string `json:"account_mapping"`
+			ImportPending  bool              `json:"import_pending"`
+			ApplyRules     bool              `json:"apply_rules"`
+			ContentDedup   bool              `json:"content_dedup"`
+			AutoSync       bool              `json:"auto_sync"`
+		}
+		if err := json.Unmarshal([]byte(userCfg.ConfigJSON), &config); err != nil {
+			s.logger.Error("auto-sync: failed to unmarshal config for user", "error", err, "user_id", userCfg.UserID)
+			continue
+		}
+
+		if !config.AutoSync {
+			continue
+		}
+		if config.AccessToken == "" {
+			s.logger.Warn("auto-sync: missing access token for user", "user_id", userCfg.UserID)
+			continue
+		}
+
+		// Calculate start date: 30 days ago
+		startDate := time.Now().Add(-30 * 24 * time.Hour).Format("2006-01-02")
+
+		req := SimplefinExecuteRequest{
+			AccessURL:      config.AccessToken,
+			AccountMapping: config.AccountMapping,
+			StartDate:      startDate,
+			ImportPending:  config.ImportPending,
+			ApplyRules:     config.ApplyRules,
+			ContentDedup:   config.ContentDedup,
+			IsAutoSync:     true,
+		}
+
+		if err := s.SimpleFinExecute(ctx, userCfg.UserID, req); err != nil {
+			s.logger.Error("auto-sync: failed to execute simplefin import for user", "error", err, "user_id", userCfg.UserID)
+		} else {
+			s.logger.Info("auto-sync: started import for user", "user_id", userCfg.UserID)
+		}
+	}
+
 	return nil
 }
 
 // GetSimplefinConfig returns the simplefin configuration string from the database.
-func (s *Service) GetSimplefinConfig(ctx context.Context) (string, error) {
-	return s.repo.GetAppSetting(ctx, "simplefin_config")
+func (s *Service) GetSimplefinConfig(ctx context.Context, userID string) (string, error) {
+	return s.repo.GetUserSetting(ctx, userID, "simplefin_config")
 }
 
 // UpdateSimplefinAutoSync toggles the auto_sync setting in the simplefin configuration.
-func (s *Service) UpdateSimplefinAutoSync(ctx context.Context, enabled bool) error {
-	b, err := s.repo.GetAppSetting(ctx, "simplefin_config")
+func (s *Service) UpdateSimplefinAutoSync(ctx context.Context, userID string, enabled bool) error {
+	b, err := s.repo.GetUserSetting(ctx, userID, "simplefin_config")
 	if err != nil {
 		return err
 	}
@@ -649,7 +669,7 @@ func (s *Service) UpdateSimplefinAutoSync(ctx context.Context, enabled bool) err
 
 	config["auto_sync"] = enabled
 	if out, err := json.MarshalIndent(config, "", "  "); err == nil {
-		return s.repo.SetAppSetting(ctx, "simplefin_config", string(out))
+		return s.repo.SetUserSetting(ctx, userID, "simplefin_config", string(out))
 	} else {
 		return err
 	}

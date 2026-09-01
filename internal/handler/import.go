@@ -4,10 +4,17 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"ntdkhiem/ppbudget-go/internal/middleware"
 	"ntdkhiem/ppbudget-go/internal/service"
 )
 
 func (h *Handler) SimpleFinClaim(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req service.SimplefinClaimRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload")
@@ -19,9 +26,9 @@ func (h *Handler) SimpleFinClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.svc.SimpleFinClaim(r.Context(), req)
+	resp, err := h.svc.SimpleFinClaim(r.Context(), userID, req)
 	if err != nil {
-		h.logger.Error("failed to claim simplefin token", "error", err)
+		h.logger.Error("failed to claim simplefin token", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "failed to claim token")
 		return
 	}
@@ -30,6 +37,12 @@ func (h *Handler) SimpleFinClaim(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SimpleFinFetchAccounts(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req service.SimplefinFetchAccountsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload")
@@ -41,9 +54,9 @@ func (h *Handler) SimpleFinFetchAccounts(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	resp, err := h.svc.SimpleFinFetchAccounts(r.Context(), req)
+	resp, err := h.svc.SimpleFinFetchAccounts(r.Context(), userID, req)
 	if err != nil {
-		h.logger.Error("failed to fetch simplefin accounts", "error", err)
+		h.logger.Error("failed to fetch simplefin accounts", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "failed to fetch accounts")
 		return
 	}
@@ -52,6 +65,12 @@ func (h *Handler) SimpleFinFetchAccounts(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) SimpleFinExecute(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req service.SimplefinExecuteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload")
@@ -63,9 +82,9 @@ func (h *Handler) SimpleFinExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.SimpleFinExecute(r.Context(), req)
+	err := h.svc.SimpleFinExecute(r.Context(), userID, req)
 	if err != nil {
-		h.logger.Error("failed to execute simplefin import", "error", err)
+		h.logger.Error("failed to execute simplefin import", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "failed to execute import")
 		return
 	}
@@ -81,8 +100,14 @@ func (h *Handler) SimpleFinStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	// Read from db
-	b, err := h.svc.GetSimplefinConfig(r.Context())
+	b, err := h.svc.GetSimplefinConfig(r.Context(), userID)
 	if err != nil || b == "" {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"connected": false})
 		return
@@ -119,6 +144,12 @@ func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SimpleFinAutoSyncToggle(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -127,7 +158,7 @@ func (h *Handler) SimpleFinAutoSyncToggle(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := h.svc.UpdateSimplefinAutoSync(r.Context(), req.Enabled); err != nil {
+	if err := h.svc.UpdateSimplefinAutoSync(r.Context(), userID, req.Enabled); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update simplefin config")
 		return
 	}

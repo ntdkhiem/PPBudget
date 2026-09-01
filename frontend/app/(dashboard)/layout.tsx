@@ -2,9 +2,10 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState, ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { LayoutDashboard, ReceiptText, ListChecks, PieChart, Settings, SlidersHorizontal, LogOut, Wallet, Database, Repeat, Menu } from "lucide-react";
+import { LayoutDashboard, ReceiptText, ListChecks, PieChart, Settings, SlidersHorizontal, LogOut, Wallet, Database, Repeat, Menu, Tag } from "lucide-react";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { GlobalSearch } from "@/components/global-search";
@@ -111,8 +112,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   if (!isAuthed) return null;
 
+  const queryClient = useQueryClient();
+
   const handleLogout = () => {
     localStorage.removeItem("ppbudget_token");
+    queryClient.clear();
     router.push("/login");
   };
 
@@ -122,7 +126,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     { href: "/transactions", label: "Transactions", icon: ReceiptText },
     { href: "/budgets", label: "Budgets", icon: PieChart },
     { href: "/subscriptions", label: "Subscriptions", icon: Repeat },
-    { href: "/settings/categories", label: "Categories", icon: Settings },
+    { href: "/settings", label: "Settings", icon: Settings },
+    { href: "/settings/categories", label: "Categories", icon: Tag },
     { href: "/settings/rules", label: "Rules", icon: SlidersHorizontal },
     { href: "/settings/importer", label: "Data Importer", icon: Database },
   ];

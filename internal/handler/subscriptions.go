@@ -7,11 +7,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"ntdkhiem/ppbudget-go/internal/domain"
+	"ntdkhiem/ppbudget-go/internal/middleware"
 )
 
 func (h *Handler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	ctx := r.Context()
-	subs, err := h.svc.ListSubscriptions(ctx)
+	subs, err := h.svc.ListSubscriptions(ctx, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list subscriptions")
 		return
@@ -23,6 +30,12 @@ func (h *Handler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var body struct {
 		Name            string  `json:"name"`
 		Amount          int64   `json:"amount"` // in cents
@@ -48,7 +61,7 @@ func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if err := h.svc.CreateSubscription(ctx, body.Name, body.Amount, body.BillingCycle, nextDate, body.CategoryID); err != nil {
+	if err := h.svc.CreateSubscription(ctx, userID, body.Name, body.Amount, body.BillingCycle, nextDate, body.CategoryID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create subscription")
 		return
 	}
@@ -57,6 +70,12 @@ func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
@@ -64,7 +83,7 @@ func (h *Handler) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if err := h.svc.DeleteSubscription(ctx, id); err != nil {
+	if err := h.svc.DeleteSubscription(ctx, userID, id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete subscription")
 		return
 	}
@@ -73,6 +92,12 @@ func (h *Handler) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
@@ -104,7 +129,7 @@ func (h *Handler) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if err := h.svc.UpdateSubscription(ctx, id, body.Name, body.Amount, body.BillingCycle, nextDate, body.CategoryID); err != nil {
+	if err := h.svc.UpdateSubscription(ctx, userID, id, body.Name, body.Amount, body.BillingCycle, nextDate, body.CategoryID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update subscription")
 		return
 	}

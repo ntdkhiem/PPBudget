@@ -30,16 +30,16 @@ func (r *Repository) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	return r.pool.Begin(ctx)
 }
 
-// GetAccountBySimplefinID fetches an account by its importer ID
-func (r *Repository) GetAccountBySimplefinID(ctx context.Context, tx pgx.Tx, simplefinID string) (string, error) {
+// GetAccountBySimplefinID fetches an account by its importer ID scoped by userID
+func (r *Repository) GetAccountBySimplefinID(ctx context.Context, tx pgx.Tx, userID, simplefinID string) (string, error) {
 	var accountID string
-	query := `SELECT id FROM accounts WHERE simplefin_id = $1`
+	query := `SELECT id FROM accounts WHERE simplefin_id = $1 AND user_id = $2`
 
 	var row pgx.Row
 	if tx != nil {
-		row = tx.QueryRow(ctx, query, simplefinID)
+		row = tx.QueryRow(ctx, query, simplefinID, userID)
 	} else {
-		row = r.pool.QueryRow(ctx, query, simplefinID)
+		row = r.pool.QueryRow(ctx, query, simplefinID, userID)
 	}
 
 	err := row.Scan(&accountID)
@@ -53,15 +53,22 @@ func (r *Repository) GetAccountBySimplefinID(ctx context.Context, tx pgx.Tx, sim
 }
 
 // InsertIngestedTransaction inserts a transaction, returning the ID, and true if created, false if it was a duplicate
-func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, accountID string, amount money.Money, date time.Time, description, simplefinTxID string, categoryID *string, subscriptionID *string, isReviewed bool) (string, bool, error) {
+func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, userID, accountID string, amount money.Money, date time.Time, description, simplefinTxID string, categoryID *string, subscriptionID *string, isReviewed bool) (string, bool, error) {
 	query := `
-        INSERT INTO transactions (account_id, amount, date, description, simplefin_id, category_id, subscription_id, is_reviewed)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (simplefin_id) DO NOTHING
-        RETURNING id
-    `
+		INSERT INTO transactions (account_id, amount, date, description, simplefin_id, category_id, subscription_id, is_reviewed, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (simplefin_id) DO NOTHING
+		RETURNING id
+	`
+	args := []interface{}{accountID, amount.ToInt64(), date, description, simplefinTxID, categoryID, subscriptionID, isReviewed, userID}
+
 	var id string
-	err := tx.QueryRow(ctx, query, accountID, amount.ToInt64(), date, description, simplefinTxID, categoryID, subscriptionID, isReviewed).Scan(&id)
+	var err error
+	if tx != nil {
+		err = tx.QueryRow(ctx, query, args...).Scan(&id)
+	} else {
+		err = r.pool.QueryRow(ctx, query, args...).Scan(&id)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", false, nil // Duplicate safely ignored
@@ -72,7 +79,7 @@ func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, a
 }
 
 // CreateTransfer creates two linked transactions
-func (r *Repository) CreateTransfer(ctx context.Context, fromAccountID, toAccountID string, amount money.Money, date time.Time, description string) error {
+func (r *Repository) CreateTransfer(ctx context.Context, userID, fromAccountID, toAccountID string, amount money.Money, date time.Time, description string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -82,13 +89,13 @@ func (r *Repository) CreateTransfer(ctx context.Context, fromAccountID, toAccoun
 	transferID := uuid.New().String()
 
 	query := `
-        INSERT INTO transactions (account_id, amount, date, description, transfer_id, is_reviewed)
-        VALUES ($1, $2, $3, $4, $5, true), ($6, $7, $3, $4, $5, true)
+        INSERT INTO transactions (account_id, amount, date, description, transfer_id, is_reviewed, user_id)
+        VALUES ($1, $2, $3, $4, $5, true, $6), ($7, $8, $3, $4, $5, true, $6)
     `
 	// From account gets negative (outflow), To account gets positive (inflow)
 	_, err = tx.Exec(ctx, query,
 		fromAccountID, -amount.ToInt64(),
-		transferID, description,
+		transferID, description, userID,
 		toAccountID, amount.ToInt64())
 	if err != nil {
 		return err
@@ -98,10 +105,10 @@ func (r *Repository) CreateTransfer(ctx context.Context, fromAccountID, toAccoun
 }
 
 // ListTransactions fetches transactions for an account with running balances and cursor pagination
-func (r *Repository) ListTransactions(ctx context.Context, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time, search string) ([]domain.TransactionWithBalance, error) {
+func (r *Repository) ListTransactions(ctx context.Context, userID, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time, search string) ([]domain.TransactionWithBalance, error) {
 	query := `
         SELECT 
-            t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
+            t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
             t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id,
             (a.initial_balance + SUM(t.amount) OVER (PARTITION BY t.account_id ORDER BY t.date, t.id)) as running_balance,
             (t.amount 
@@ -136,17 +143,17 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
             JOIN transactions st ON l.source_transaction_id = st.id
             WHERE l.target_transaction_id = t.id
         ) paid_by_agg ON true
-        WHERE ($1 = '' OR t.account_id = NULLIF($1, '')::uuid) AND t.deleted_at IS NULL
-          AND ($2::timestamptz IS NULL OR (t.date, t.id) < ($2::timestamptz, $3::uuid))
-          AND ($4::boolean = false OR t.is_reviewed = false)
-          AND ($5::date IS NULL OR t.date >= $5::date)
-          AND ($6::date IS NULL OR t.date <= $6::date)
-          AND ($7 = '' OR t.search_vector @@ websearch_to_tsquery('english', $7) OR t.description ILIKE '%' || $7 || '%' OR t.notes ILIKE '%' || $7 || '%' OR t.amount::text ILIKE '%' || $7 || '%')
+        WHERE t.user_id = $1 AND ($2 = '' OR t.account_id = NULLIF($2, '')::uuid) AND t.deleted_at IS NULL
+          AND ($3::timestamptz IS NULL OR (t.date, t.id) < ($3::timestamptz, $4::uuid))
+          AND ($5::boolean = false OR t.is_reviewed = false)
+          AND ($6::date IS NULL OR t.date >= $6::date)
+          AND ($7::date IS NULL OR t.date <= $7::date)
+          AND ($8 = '' OR t.search_vector @@ websearch_to_tsquery('english', $8) OR t.description ILIKE '%' || $8 || '%' OR t.notes ILIKE '%' || $8 || '%' OR t.amount::text ILIKE '%' || $8 || '%')
         ORDER BY t.date DESC, t.id DESC
         LIMIT 50;
     `
 
-	rows, err := r.pool.Query(ctx, query, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
+	rows, err := r.pool.Query(ctx, query, userID, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +173,7 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 		var paidByJson []byte
 
 		err := rows.Scan(
-			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
+			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
 			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID,
 			&balance, &effectiveAmount, &paysForJson, &paidByJson,
 		)
@@ -193,10 +200,10 @@ func (r *Repository) ListTransactions(ctx context.Context, accountID string, cur
 }
 
 // GetTransactionsByDateRange fetches all transactions (or bounded by dates) without limits
-func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, endDate *time.Time) ([]domain.Transaction, error) {
+func (r *Repository) GetTransactionsByDateRange(ctx context.Context, userID string, startDate, endDate *time.Time) ([]domain.Transaction, error) {
 	query := `
         SELECT 
-            t.id, t.account_id, t.category_id, t.amount, t.date, t.description, 
+            t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
             t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, a.simplefin_id as simplefin_account_id,
             (t.amount 
              - COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
@@ -226,12 +233,12 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
             ), '[]'::json) as paid_by
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
-        WHERE t.deleted_at IS NULL
-          AND ($1::date IS NULL OR t.date >= $1::date)
-          AND ($2::date IS NULL OR t.date <= $2::date)
+        WHERE t.user_id = $1 AND t.deleted_at IS NULL
+          AND ($2::date IS NULL OR t.date >= $2::date)
+          AND ($3::date IS NULL OR t.date <= $3::date)
     `
 
-	rows, err := r.pool.Query(ctx, query, startDate, endDate)
+	rows, err := r.pool.Query(ctx, query, userID, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +258,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 		var paidByJson []byte
 
 		err := rows.Scan(
-			&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
+			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
 			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &sfAccountID,
 			&effectiveAmount, &paysForJson, &paidByJson,
 		)
@@ -278,24 +285,24 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, startDate, 
 }
 
 // MarkReviewed updates the category and marks the transaction as reviewed
-func (r *Repository) MarkReviewed(ctx context.Context, txnID string, categoryID *string) error {
+func (r *Repository) MarkReviewed(ctx context.Context, userID, txnID string, categoryID *string) error {
 	var query string
 	var args []interface{}
 
 	if categoryID != nil {
 		query = `
 			UPDATE transactions 
-			SET is_reviewed = true, category_id = $2, updated_at = NOW()
-			WHERE id = $1 AND deleted_at IS NULL
+			SET is_reviewed = true, category_id = $3, updated_at = NOW()
+			WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
 		`
-		args = []interface{}{txnID, categoryID}
+		args = []interface{}{txnID, userID, categoryID}
 	} else {
 		query = `
 			UPDATE transactions 
 			SET is_reviewed = true, updated_at = NOW()
-			WHERE id = $1 AND deleted_at IS NULL
+			WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
 		`
-		args = []interface{}{txnID}
+		args = []interface{}{txnID, userID}
 	}
 
 	tag, err := r.pool.Exec(ctx, query, args...)
@@ -308,17 +315,18 @@ func (r *Repository) MarkReviewed(ctx context.Context, txnID string, categoryID 
 	return nil
 }
 
-// ListAccounts fetches all accounts
-func (r *Repository) ListAccounts(ctx context.Context) ([]domain.Account, error) {
+// ListAccounts fetches all accounts for a user
+func (r *Repository) ListAccounts(ctx context.Context, userID string) ([]domain.Account, error) {
 	query := `
-		SELECT a.id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
+		SELECT a.id, a.user_id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
 		       COALESCE(SUM(t.amount), 0) + a.initial_balance as current_balance
 		FROM accounts a
-		LEFT JOIN transactions t ON a.id = t.account_id
+		LEFT JOIN transactions t ON a.id = t.account_id AND t.deleted_at IS NULL AND t.user_id = $1
+		WHERE a.user_id = $1
 		GROUP BY a.id
 		ORDER BY a.name ASC
 	`
-	rows, err := r.pool.Query(ctx, query)
+	rows, err := r.pool.Query(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +336,7 @@ func (r *Repository) ListAccounts(ctx context.Context) ([]domain.Account, error)
 	for rows.Next() {
 		var a domain.Account
 		var balance, currentBalance int64
-		err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance)
+		err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance)
 		if err != nil {
 			return nil, err
 		}
@@ -341,15 +349,15 @@ func (r *Repository) ListAccounts(ctx context.Context) ([]domain.Account, error)
 
 // Categories
 
-func (r *Repository) CreateCategory(ctx context.Context, name, catType string) error {
-	query := `INSERT INTO categories (name, type) VALUES ($1, $2)`
-	_, err := r.pool.Exec(ctx, query, name, catType)
+func (r *Repository) CreateCategory(ctx context.Context, userID, name, catType string) error {
+	query := `INSERT INTO categories (name, type, user_id) VALUES ($1, $2, $3)`
+	_, err := r.pool.Exec(ctx, query, name, catType, userID)
 	return err
 }
 
-func (r *Repository) UpdateCategory(ctx context.Context, id, name, catType string) error {
-	query := `UPDATE categories SET name = $1, type = $2 WHERE id = $3`
-	tag, err := r.pool.Exec(ctx, query, name, catType, id)
+func (r *Repository) UpdateCategory(ctx context.Context, userID, id, name, catType string) error {
+	query := `UPDATE categories SET name = $1, type = $2 WHERE id = $3 AND user_id = $4`
+	tag, err := r.pool.Exec(ctx, query, name, catType, id, userID)
 	if err != nil {
 		return err
 	}
@@ -359,9 +367,9 @@ func (r *Repository) UpdateCategory(ctx context.Context, id, name, catType strin
 	return nil
 }
 
-func (r *Repository) DeleteCategory(ctx context.Context, id string) error {
-	query := `DELETE FROM categories WHERE id = $1`
-	tag, err := r.pool.Exec(ctx, query, id)
+func (r *Repository) DeleteCategory(ctx context.Context, userID, id string) error {
+	query := `DELETE FROM categories WHERE id = $1 AND user_id = $2`
+	tag, err := r.pool.Exec(ctx, query, id, userID)
 	if err != nil {
 		return err
 	}
@@ -371,14 +379,15 @@ func (r *Repository) DeleteCategory(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *Repository) ListCategories(ctx context.Context) ([]domain.Category, error) {
+func (r *Repository) ListCategories(ctx context.Context, userID string) ([]domain.Category, error) {
 	query := `
-		SELECT c.id, c.name, c.type, c.created_at, COUNT(t.id) as transaction_count
+		SELECT c.id, c.user_id, c.name, c.type, c.created_at, COUNT(t.id) as transaction_count
 		FROM categories c
-		LEFT JOIN transactions t ON c.id = t.category_id
+		LEFT JOIN transactions t ON c.id = t.category_id AND t.deleted_at IS NULL AND t.user_id = $1
+		WHERE c.user_id = $1
 		GROUP BY c.id
 		ORDER BY c.name ASC`
-	rows, err := r.pool.Query(ctx, query)
+	rows, err := r.pool.Query(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +396,7 @@ func (r *Repository) ListCategories(ctx context.Context) ([]domain.Category, err
 	var categories []domain.Category
 	for rows.Next() {
 		var c domain.Category
-		if err := rows.Scan(&c.ID, &c.Name, &c.Type, &c.CreatedAt, &c.TransactionCount); err != nil {
+		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.Type, &c.CreatedAt, &c.TransactionCount); err != nil {
 			return nil, err
 		}
 		categories = append(categories, c)
@@ -395,30 +404,26 @@ func (r *Repository) ListCategories(ctx context.Context) ([]domain.Category, err
 	return categories, nil
 }
 
-// Rules moved to rules.go
-
-// Budgets moved to budgets.go
-
 // Accounts
 
-func (r *Repository) CreateAccount(ctx context.Context, name, accType, currency string, initialBalance int64) error {
-	query := `INSERT INTO accounts (name, type, currency, initial_balance) VALUES ($1, $2, $3, $4)`
-	_, err := r.pool.Exec(ctx, query, name, accType, currency, initialBalance)
+func (r *Repository) CreateAccount(ctx context.Context, userID, name, accType, currency string, initialBalance int64) error {
+	query := `INSERT INTO accounts (name, type, currency, initial_balance, user_id) VALUES ($1, $2, $3, $4, $5)`
+	_, err := r.pool.Exec(ctx, query, name, accType, currency, initialBalance, userID)
 	return err
 }
 
-func (r *Repository) GetAccount(ctx context.Context, id string) (*domain.Account, error) {
+func (r *Repository) GetAccount(ctx context.Context, userID, id string) (*domain.Account, error) {
 	query := `
-		SELECT a.id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
+		SELECT a.id, a.user_id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
 		       COALESCE(SUM(t.amount), 0) + a.initial_balance as current_balance
 		FROM accounts a
-		LEFT JOIN transactions t ON a.id = t.account_id
-		WHERE a.id = $1
+		LEFT JOIN transactions t ON a.id = t.account_id AND t.deleted_at IS NULL AND t.user_id = $2
+		WHERE a.id = $1 AND a.user_id = $2
 		GROUP BY a.id
 	`
 	var a domain.Account
 	var balance, currentBalance int64
-	err := r.pool.QueryRow(ctx, query, id).Scan(&a.ID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance)
+	err := r.pool.QueryRow(ctx, query, id, userID).Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apperrors.ErrNotFound
@@ -430,13 +435,13 @@ func (r *Repository) GetAccount(ctx context.Context, id string) (*domain.Account
 	return &a, nil
 }
 
-func (r *Repository) UpdateAccount(ctx context.Context, id, name, accType, currency string, initialBalance int64) error {
+func (r *Repository) UpdateAccount(ctx context.Context, userID, id, name, accType, currency string, initialBalance int64) error {
 	query := `
 		UPDATE accounts 
 		SET name = $1, type = $2, currency = $3, initial_balance = $4, updated_at = NOW()
-		WHERE id = $5
+		WHERE id = $5 AND user_id = $6
 	`
-	tag, err := r.pool.Exec(ctx, query, name, accType, currency, initialBalance, id)
+	tag, err := r.pool.Exec(ctx, query, name, accType, currency, initialBalance, id, userID)
 	if err != nil {
 		return err
 	}
@@ -446,9 +451,9 @@ func (r *Repository) UpdateAccount(ctx context.Context, id, name, accType, curre
 	return nil
 }
 
-func (r *Repository) DeleteAccount(ctx context.Context, id string) error {
-	query := `DELETE FROM accounts WHERE id = $1`
-	tag, err := r.pool.Exec(ctx, query, id)
+func (r *Repository) DeleteAccount(ctx context.Context, userID, id string) error {
+	query := `DELETE FROM accounts WHERE id = $1 AND user_id = $2`
+	tag, err := r.pool.Exec(ctx, query, id, userID)
 	if err != nil {
 		return err
 	}
@@ -460,19 +465,19 @@ func (r *Repository) DeleteAccount(ctx context.Context, id string) error {
 
 // Transactions (Manual)
 
-func (r *Repository) CreateTransaction(ctx context.Context, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, linkedTransactionID *string) error {
+func (r *Repository) CreateTransaction(ctx context.Context, userID, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
 	query := `
-		INSERT INTO transactions (account_id, amount, date, description, notes, category_id, subscription_id, linked_transaction_id, is_reviewed)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+		INSERT INTO transactions (account_id, amount, date, description, notes, category_id, subscription_id, is_reviewed, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
 	`
 	// Manual transactions are considered reviewed automatically.
-	_, err := r.pool.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID, linkedTransactionID)
+	_, err := r.pool.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID, userID)
 	return err
 }
 
-func (r *Repository) DeleteTransaction(ctx context.Context, id string) error {
-	query := `UPDATE transactions SET deleted_at = NOW() WHERE id = $1`
-	tag, err := r.pool.Exec(ctx, query, id)
+func (r *Repository) DeleteTransaction(ctx context.Context, userID, id string) error {
+	query := `UPDATE transactions SET deleted_at = NOW() WHERE id = $1 AND user_id = $2`
+	tag, err := r.pool.Exec(ctx, query, id, userID)
 	if err != nil {
 		return err
 	}
@@ -482,16 +487,16 @@ func (r *Repository) DeleteTransaction(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *Repository) BulkDeleteTransactions(ctx context.Context, ids []string) error {
+func (r *Repository) BulkDeleteTransactions(ctx context.Context, userID string, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	query := `UPDATE transactions SET deleted_at = NOW() WHERE id = ANY($1)`
-	_, err := r.pool.Exec(ctx, query, ids)
+	query := `UPDATE transactions SET deleted_at = NOW() WHERE id = ANY($1) AND user_id = $2`
+	_, err := r.pool.Exec(ctx, query, ids, userID)
 	return err
 }
 
-func (r *Repository) BulkUpdateTransactionsCategory(ctx context.Context, ids []string, categoryID string) error {
+func (r *Repository) BulkUpdateTransactionsCategory(ctx context.Context, userID string, ids []string, categoryID string) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -499,12 +504,12 @@ func (r *Repository) BulkUpdateTransactionsCategory(ctx context.Context, ids []s
 	if categoryID != "" {
 		catID = &categoryID
 	}
-	query := `UPDATE transactions SET category_id = $1 WHERE id = ANY($2) AND deleted_at IS NULL`
-	_, err := r.pool.Exec(ctx, query, catID, ids)
+	query := `UPDATE transactions SET category_id = $1 WHERE id = ANY($2) AND user_id = $3 AND deleted_at IS NULL`
+	_, err := r.pool.Exec(ctx, query, catID, ids, userID)
 	return err
 }
 
-func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink) error {
+func (r *Repository) UpdateTransaction(ctx context.Context, userID, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -514,9 +519,9 @@ func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string
 	query := `
 		UPDATE transactions 
 		SET account_id = $1, amount = $2, date = $3, description = $4, notes = $5, category_id = $6, subscription_id = $7, updated_at = NOW()
-		WHERE id = $8 AND deleted_at IS NULL
+		WHERE id = $8 AND user_id = $9 AND deleted_at IS NULL
 	`
-	tag, err := tx.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID, id)
+	tag, err := tx.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID, id, userID)
 	if err != nil {
 		return err
 	}
@@ -557,11 +562,11 @@ func (r *Repository) UpdateTransaction(ctx context.Context, id, accountID string
 
 // Reports
 
-func (r *Repository) GetNetWorthTrend(ctx context.Context, startDate, endDate time.Time) ([]domain.NetWorthPoint, error) {
+func (r *Repository) GetNetWorthTrend(ctx context.Context, userID string, startDate, endDate time.Time) ([]domain.NetWorthPoint, error) {
 	query := `
 		WITH dates AS (
 			SELECT (date_trunc('month', d) + INTERVAL '1 month - 1 day')::date AS end_of_month
-			FROM generate_series(date_trunc('month', $1::timestamp), date_trunc('month', $2::timestamp), '1 month'::interval) d
+			FROM generate_series(date_trunc('month', $2::timestamp), date_trunc('month', $3::timestamp), '1 month'::interval) d
 		),
 		balances AS (
 			SELECT 
@@ -569,8 +574,8 @@ func (r *Repository) GetNetWorthTrend(ctx context.Context, startDate, endDate ti
 				a.type,
 				a.initial_balance + COALESCE(SUM(t.amount), 0) as balance
 			FROM dates d
-			CROSS JOIN accounts a
-			LEFT JOIN transactions t ON t.account_id = a.id AND t.date <= d.end_of_month AND t.deleted_at IS NULL
+			CROSS JOIN (SELECT * FROM accounts WHERE user_id = $1) a
+			LEFT JOIN transactions t ON t.account_id = a.id AND t.date <= d.end_of_month AND t.deleted_at IS NULL AND t.user_id = $1
 			GROUP BY d.end_of_month, a.id, a.type, a.initial_balance
 		)
 		SELECT 
@@ -581,7 +586,7 @@ func (r *Repository) GetNetWorthTrend(ctx context.Context, startDate, endDate ti
 		GROUP BY month
 		ORDER BY month ASC
 	`
-	rows, err := r.pool.Query(ctx, query, startDate, endDate)
+	rows, err := r.pool.Query(ctx, query, userID, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
@@ -603,18 +608,19 @@ func (r *Repository) GetNetWorthTrend(ctx context.Context, startDate, endDate ti
 	return points, nil
 }
 
-func (r *Repository) GetSpendingByCategory(ctx context.Context, startDate, endDate time.Time) ([]domain.CategorySpend, error) {
+func (r *Repository) GetSpendingByCategory(ctx context.Context, userID string, startDate, endDate time.Time) ([]domain.CategorySpend, error) {
 	query := `
 		SELECT c.id, c.name, SUM(ABS(t.amount)) as total_spent
 		FROM transactions t
 		JOIN categories c ON t.category_id = c.id
-		WHERE t.date >= $1 AND t.date <= $2
+		WHERE t.user_id = $1 AND c.user_id = $1
+		  AND t.date >= $2 AND t.date <= $3
 		  AND c.type = 'expense'
 		  AND t.deleted_at IS NULL
 		GROUP BY c.id, c.name
 		ORDER BY total_spent DESC
 	`
-	rows, err := r.pool.Query(ctx, query, startDate, endDate)
+	rows, err := r.pool.Query(ctx, query, userID, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
@@ -633,9 +639,9 @@ func (r *Repository) GetSpendingByCategory(ctx context.Context, startDate, endDa
 	return spending, nil
 }
 
-func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate time.Time) (*domain.ReportsSummary, error) {
+func (r *Repository) GetReportsSummary(ctx context.Context, userID string, startDate, endDate time.Time) (*domain.ReportsSummary, error) {
 	// Auto-rollover past due subscriptions
-	r.RolloverSubscriptions(ctx)
+	r.RolloverSubscriptions(ctx, userID)
 
 	var summary domain.ReportsSummary
 
@@ -644,10 +650,10 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 			COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as in_period,
 			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as out_period
 		FROM transactions
-		WHERE date >= $1 AND date <= $2 AND deleted_at IS NULL AND transfer_id IS NULL
+		WHERE user_id = $1 AND date >= $2 AND date <= $3 AND deleted_at IS NULL AND transfer_id IS NULL
 	`
 	var inPeriod, outPeriod int64
-	err := r.pool.QueryRow(ctx, queryInOut, startDate, endDate).Scan(&inPeriod, &outPeriod)
+	err := r.pool.QueryRow(ctx, queryInOut, userID, startDate, endDate).Scan(&inPeriod, &outPeriod)
 	if err != nil {
 		return nil, err
 	}
@@ -657,10 +663,10 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 	querySubs := `
 		SELECT COALESCE(SUM(amount), 0)
 		FROM subscriptions
-		WHERE next_billing_date >= $1 AND next_billing_date <= $2
+		WHERE user_id = $1 AND next_billing_date >= $2 AND next_billing_date <= $3
 	`
 	var subs int64
-	err = r.pool.QueryRow(ctx, querySubs, startDate, endDate).Scan(&subs)
+	err = r.pool.QueryRow(ctx, querySubs, userID, startDate, endDate).Scan(&subs)
 	if err != nil {
 		subs = 0 // fallback
 	}
@@ -670,13 +676,13 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 		WITH sub_payments AS (
 			SELECT DISTINCT t.id, ABS(t.amount) as amount
 			FROM transactions t
-			JOIN subscriptions s ON t.subscription_id = s.id AND t.deleted_at IS NULL
-			WHERE t.date >= $1 AND t.date <= $2 AND t.amount < 0
+			JOIN subscriptions s ON t.subscription_id = s.id AND t.deleted_at IS NULL AND s.user_id = $1
+			WHERE t.user_id = $1 AND t.date >= $2 AND t.date <= $3 AND t.amount < 0
 		)
 		SELECT COALESCE(SUM(amount), 0) FROM sub_payments
 	`
 	var subsPaid int64
-	err = r.pool.QueryRow(ctx, querySubsPaid, startDate, endDate).Scan(&subsPaid)
+	err = r.pool.QueryRow(ctx, querySubsPaid, userID, startDate, endDate).Scan(&subsPaid)
 	if err != nil {
 		subsPaid = 0
 	}
@@ -690,7 +696,8 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 				AND t.date >= b.start_date 
 				AND t.date <= b.end_date
 				AND t.deleted_at IS NULL
-			WHERE b.start_date <= $2 AND b.end_date >= $1
+				AND t.user_id = $1
+			WHERE b.user_id = $1 AND b.start_date <= $3 AND b.end_date >= $2
 			GROUP BY b.id
 		)
 		SELECT 
@@ -698,12 +705,11 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 			COALESCE(SUM(s.spent_total), 0) as spent
 		FROM budgets b
 		JOIN budget_spent s ON b.id = s.id
-		WHERE b.start_date <= $2 AND b.end_date >= $1
+		WHERE b.user_id = $1 AND b.start_date <= $3 AND b.end_date >= $2
 	`
 	var allocated, spent int64
-	err = r.pool.QueryRow(ctx, queryBudgets, startDate, endDate).Scan(&allocated, &spent)
+	err = r.pool.QueryRow(ctx, queryBudgets, userID, startDate, endDate).Scan(&allocated, &spent)
 	if err != nil {
-		// fallback to 0 if budgets table doesn't exist yet
 		allocated = 0
 		spent = 0
 	}
@@ -713,7 +719,8 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 		WITH acc_balances AS (
 			SELECT a.id, a.type, a.initial_balance + COALESCE(SUM(t.amount), 0) as balance
 			FROM accounts a
-			LEFT JOIN transactions t ON t.account_id = a.id AND t.deleted_at IS NULL
+			LEFT JOIN transactions t ON t.account_id = a.id AND t.deleted_at IS NULL AND t.user_id = $1
+			WHERE a.user_id = $1
 			GROUP BY a.id, a.type, a.initial_balance
 		)
 		SELECT 
@@ -722,7 +729,7 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 		FROM acc_balances
 	`
 	var netWorth int64
-	err = r.pool.QueryRow(ctx, queryNetWorth).Scan(&netWorth)
+	err = r.pool.QueryRow(ctx, queryNetWorth, userID).Scan(&netWorth)
 	if err != nil {
 		return nil, err
 	}
@@ -731,9 +738,9 @@ func (r *Repository) GetReportsSummary(ctx context.Context, startDate, endDate t
 	return &summary, nil
 }
 
-func (r *Repository) GetTransaction(ctx context.Context, id string) (*domain.Transaction, error) {
+func (r *Repository) GetTransaction(ctx context.Context, userID, id string) (*domain.Transaction, error) {
 	q := `
-		SELECT t.id, t.account_id, t.category_id, t.amount, t.date, t.description,
+		SELECT t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description,
 		       t.transfer_id, t.is_reviewed, 
 		       t.is_reconciled, t.notes, t.subscription_id,
 		       a.simplefin_id as simplefin_account_id,
@@ -769,21 +776,24 @@ func (r *Repository) GetTransaction(ctx context.Context, id string) (*domain.Tra
 		    JOIN transactions st ON l.source_transaction_id = st.id
 		    WHERE l.target_transaction_id = t.id
 		) paid_by_agg ON true
-		WHERE t.id = $1 AND t.deleted_at IS NULL
+		WHERE t.id = $1 AND t.user_id = $2 AND t.deleted_at IS NULL
 	`
-	row := r.pool.QueryRow(ctx, q, id)
+	row := r.pool.QueryRow(ctx, q, id, userID)
 	var t domain.Transaction
 	var amount int64
 	var effectiveAmount int64
 	var paysForJSON, paidByJSON []byte
 	var catID, transferID, notes, sfAccountID, subID *string
 	err := row.Scan(
-		&t.ID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
+		&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
 		&transferID, &t.IsReviewed, &t.IsReconciled,
 		&notes, &subID, &sfAccountID,
 		&effectiveAmount, &paysForJSON, &paidByJSON,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, apperrors.ErrNotFound
+		}
 		return nil, err
 	}
 	t.Amount = money.Money(amount)

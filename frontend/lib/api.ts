@@ -21,7 +21,7 @@ export async function apiFetch<T>(
   });
 
   if (!res.ok) {
-    if (res.status === 401 && typeof window !== "undefined") {
+    if (res.status === 401 && typeof window !== "undefined" && !endpoint.startsWith("/auth/")) {
       localStorage.removeItem("ppbudget_token");
       window.location.href = "/login";
     }

@@ -86,15 +86,16 @@ func main() {
 
 	// Routes
 	r.Route("/api/v1", func(r chi.Router) {
-		// Public route
+		// Public routes
 		r.Post("/auth/login", h.Login)
+		r.Post("/auth/register", h.Register)
 
 		// Cron webhook (Protected by X-API-Key natively in handler)
 		r.Post("/import/simplefin/cron", h.SimpleFinCronTrigger)
 
 		// Secure ingestion endpoint (Machine-to-Machine)
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAPIKey(cfg.IngestAPIKey))
+			r.Use(middleware.RequireAPIKey(cfg.IngestAPIKey, svc.GetUserByAPIToken))
 			r.Post("/ingest", h.Ingest)
 		})
 
@@ -113,6 +114,10 @@ func main() {
 		// Secure user routes (Dashboard)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireJWT(cfg.JWTSecret))
+
+			// Settings & API Tokens
+			r.Post("/settings/generate-token", h.GenerateAPIToken)
+			r.Get("/settings/token", h.GetAPIToken)
 
 			// Accounts
 			r.Get("/accounts", h.ListAccounts)

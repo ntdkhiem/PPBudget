@@ -5,17 +5,16 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"ntdkhiem/ppbudget-go/internal/domain"
 	"strings"
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/config"
+	"ntdkhiem/ppbudget-go/internal/domain"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
+	"ntdkhiem/ppbudget-go/internal/middleware"
 	"ntdkhiem/ppbudget-go/internal/service"
 
-	apperrors "ntdkhiem/ppbudget-go/internal/errors"
-
 	"github.com/go-chi/chi/v5"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type Handler struct {
@@ -29,6 +28,12 @@ func New(svc *service.Service, logger *slog.Logger, cfg *config.Config) *Handler
 }
 
 func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req service.IngestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload")
@@ -40,7 +45,7 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.Ingest(r.Context(), req)
+	err := h.svc.Ingest(r.Context(), userID, req)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrInvalidInput) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
@@ -54,13 +59,19 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req service.TransferRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
 
-	err := h.svc.CreateTransfer(r.Context(), req)
+	err := h.svc.CreateTransfer(r.Context(), userID, req)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrInvalidInput) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
@@ -74,6 +85,12 @@ func (h *Handler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	accountID := r.URL.Query().Get("account_id")
 	if accountID == "all" {
 		accountID = ""
@@ -112,7 +129,7 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 
 	search := r.URL.Query().Get("search")
 
-	txns, err := h.svc.ListTransactions(r.Context(), accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
+	txns, err := h.svc.ListTransactions(r.Context(), userID, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch transactions")
 		return
@@ -121,38 +138,14 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, txns)
 }
 
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid payload")
-		return
-	}
-
-	// Simple Tier 1 password check
-	if body.Password != h.cfg.AdminPassword {
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-
-	// Generate JWT
-	claims := jwt.MapClaims{
-		"role": "admin",
-		"exp":  time.Now().Add(24 * time.Hour).Unix(),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(h.cfg.JWTSecret))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"token": tokenString})
-}
-
 func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
-	accounts, err := h.svc.ListAccounts(r.Context())
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	accounts, err := h.svc.ListAccounts(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch accounts")
 		return
@@ -161,6 +154,12 @@ func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ReviewTransaction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	txnID := chi.URLParam(r, "id")
 	if txnID == "" {
 		writeError(w, http.StatusBadRequest, "transaction id is required")
@@ -172,7 +171,7 @@ func (h *Handler) ReviewTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body) // allow empty body
 
-	err := h.svc.ReviewTransaction(r.Context(), txnID, body.CategoryID)
+	err := h.svc.ReviewTransaction(r.Context(), userID, txnID, body.CategoryID)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")
@@ -201,7 +200,13 @@ func writeError(w http.ResponseWriter, status int, message string) {
 // --- Categories & Rules ---
 
 func (h *Handler) ListCategories(w http.ResponseWriter, r *http.Request) {
-	categories, err := h.svc.ListCategories(r.Context())
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	categories, err := h.svc.ListCategories(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list categories")
 		return
@@ -210,7 +215,13 @@ func (h *Handler) ListCategories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListRules(w http.ResponseWriter, r *http.Request) {
-	rules, err := h.svc.ListRulesDetailed(r.Context())
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	rules, err := h.svc.ListRulesDetailed(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list rules")
 		return
@@ -219,12 +230,18 @@ func (h *Handler) ListRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var rule domain.Rule
 	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
-	if err := h.svc.CreateRule(r.Context(), &rule); err != nil {
+	if err := h.svc.CreateRule(r.Context(), userID, &rule); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create rule")
 		return
 	}
@@ -232,8 +249,14 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetRule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
-	rule, err := h.svc.GetRule(r.Context(), id)
+	rule, err := h.svc.GetRule(r.Context(), userID, id)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "rule not found")
@@ -246,6 +269,12 @@ func (h *Handler) GetRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	var rule domain.Rule
 	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
@@ -253,7 +282,7 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule.ID = id
-	if err := h.svc.UpdateRule(r.Context(), &rule); err != nil {
+	if err := h.svc.UpdateRule(r.Context(), userID, &rule); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "rule not found")
 			return
@@ -265,8 +294,14 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteRule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
-	if err := h.svc.DeleteRule(r.Context(), id); err != nil {
+	if err := h.svc.DeleteRule(r.Context(), userID, id); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "rule not found")
 			return
@@ -278,6 +313,12 @@ func (h *Handler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ApplyRule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	var payload struct {
 		RunAll    bool   `json:"run_all"`
@@ -305,7 +346,7 @@ func (h *Handler) ApplyRule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updatedCount, err := h.svc.ApplyRule(r.Context(), id, payload.RunAll, sDate, eDate)
+	updatedCount, err := h.svc.ApplyRule(r.Context(), userID, id, payload.RunAll, sDate, eDate)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "rule not found")
@@ -319,6 +360,12 @@ func (h *Handler) ApplyRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var body struct {
 		Name string `json:"name"`
 		Type string `json:"type"`
@@ -332,7 +379,7 @@ func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.CreateCategory(r.Context(), body.Name, body.Type)
+	err := h.svc.CreateCategory(r.Context(), userID, body.Name, body.Type)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create category")
 		return
@@ -341,6 +388,12 @@ func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
@@ -356,7 +409,7 @@ func (h *Handler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.UpdateCategory(r.Context(), id, body.Name, body.Type)
+	err := h.svc.UpdateCategory(r.Context(), userID, id, body.Name, body.Type)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "category not found")
@@ -369,13 +422,19 @@ func (h *Handler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
 		return
 	}
 
-	err := h.svc.DeleteCategory(r.Context(), id)
+	err := h.svc.DeleteCategory(r.Context(), userID, id)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "category not found")
@@ -390,12 +449,18 @@ func (h *Handler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
 // --- Budgets ---
 
 func (h *Handler) CreateBudget(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var budget domain.Budget
 	if err := json.NewDecoder(r.Body).Decode(&budget); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
-	if err := h.svc.CreateBudget(r.Context(), &budget); err != nil {
+	if err := h.svc.CreateBudget(r.Context(), userID, &budget); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create budget")
 		return
 	}
@@ -403,6 +468,12 @@ func (h *Handler) CreateBudget(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateBudget(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	var budget domain.Budget
 	if err := json.NewDecoder(r.Body).Decode(&budget); err != nil {
@@ -410,7 +481,7 @@ func (h *Handler) UpdateBudget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	budget.ID = id
-	if err := h.svc.UpdateBudget(r.Context(), &budget); err != nil {
+	if err := h.svc.UpdateBudget(r.Context(), userID, &budget); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "budget not found")
 			return
@@ -422,8 +493,14 @@ func (h *Handler) UpdateBudget(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteBudget(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
-	if err := h.svc.DeleteBudget(r.Context(), id); err != nil {
+	if err := h.svc.DeleteBudget(r.Context(), userID, id); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "budget not found")
 			return
@@ -435,6 +512,12 @@ func (h *Handler) DeleteBudget(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetBudgetsSummary(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	monthStr := r.URL.Query().Get("month")
 	if monthStr == "" {
 		writeError(w, http.StatusBadRequest, "month is required")
@@ -450,7 +533,7 @@ func (h *Handler) GetBudgetsSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	budgets, err := h.svc.GetBudgetsSummary(r.Context(), month)
+	budgets, err := h.svc.GetBudgetsSummary(r.Context(), userID, month)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch budgets summary")
 		return
@@ -461,6 +544,12 @@ func (h *Handler) GetBudgetsSummary(w http.ResponseWriter, r *http.Request) {
 // --- Accounts ---
 
 func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var body struct {
 		Name           string `json:"name"`
 		Type           string `json:"type"`
@@ -475,7 +564,7 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		body.Currency = "USD"
 	}
 
-	err := h.svc.CreateAccount(r.Context(), body.Name, body.Type, body.Currency, body.InitialBalance)
+	err := h.svc.CreateAccount(r.Context(), userID, body.Name, body.Type, body.Currency, body.InitialBalance)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create account")
 		return
@@ -484,13 +573,19 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
 		return
 	}
 
-	account, err := h.svc.GetAccount(r.Context(), id)
+	account, err := h.svc.GetAccount(r.Context(), userID, id)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "account not found")
@@ -503,6 +598,12 @@ func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
@@ -520,7 +621,7 @@ func (h *Handler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.UpdateAccount(r.Context(), id, body.Name, body.Type, body.Currency, body.InitialBalance)
+	err := h.svc.UpdateAccount(r.Context(), userID, id, body.Name, body.Type, body.Currency, body.InitialBalance)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "account not found")
@@ -533,13 +634,19 @@ func (h *Handler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
 		return
 	}
 
-	err := h.svc.DeleteAccount(r.Context(), id)
+	err := h.svc.DeleteAccount(r.Context(), userID, id)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "account not found")
@@ -554,6 +661,12 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 // --- Transactions (Manual) ---
 
 func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var body struct {
 		AccountID           string  `json:"account_id"`
 		Amount              int64   `json:"amount"`
@@ -562,7 +675,6 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 		Notes               *string `json:"notes"`
 		CategoryID          *string `json:"category_id"`
 		SubscriptionID      *string `json:"subscription_id"`
-		LinkedTransactionID *string `json:"linked_transaction_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
@@ -575,7 +687,7 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.CreateTransaction(r.Context(), body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID, body.LinkedTransactionID)
+	err = h.svc.CreateTransaction(r.Context(), userID, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create transaction")
 		return
@@ -584,13 +696,19 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteTransaction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
 		return
 	}
 
-	err := h.svc.DeleteTransaction(r.Context(), id)
+	err := h.svc.DeleteTransaction(r.Context(), userID, id)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")
@@ -603,6 +721,12 @@ func (h *Handler) DeleteTransaction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) BulkDeleteTransactions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var body struct {
 		TransactionIDs []string `json:"transaction_ids"`
 	}
@@ -610,7 +734,7 @@ func (h *Handler) BulkDeleteTransactions(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
-	err := h.svc.BulkDeleteTransactions(r.Context(), body.TransactionIDs)
+	err := h.svc.BulkDeleteTransactions(r.Context(), userID, body.TransactionIDs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete transactions")
 		return
@@ -619,6 +743,12 @@ func (h *Handler) BulkDeleteTransactions(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) BulkUpdateTransactionsCategory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var body struct {
 		TransactionIDs []string `json:"transaction_ids"`
 		CategoryID     string   `json:"category_id"`
@@ -627,7 +757,7 @@ func (h *Handler) BulkUpdateTransactionsCategory(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
-	err := h.svc.BulkUpdateTransactionsCategory(r.Context(), body.TransactionIDs, body.CategoryID)
+	err := h.svc.BulkUpdateTransactionsCategory(r.Context(), userID, body.TransactionIDs, body.CategoryID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update transactions")
 		return
@@ -636,6 +766,12 @@ func (h *Handler) BulkUpdateTransactionsCategory(w http.ResponseWriter, r *http.
 }
 
 func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
@@ -664,7 +800,7 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.UpdateTransaction(r.Context(), id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID, body.PaysFor, body.PaidBy)
+	err = h.svc.UpdateTransaction(r.Context(), userID, id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID, body.PaysFor, body.PaidBy)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")
@@ -683,6 +819,12 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 // --- Reports ---
 
 func (h *Handler) GetNetWorthTrend(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	startDateStr := r.URL.Query().Get("start_date")
 	endDateStr := r.URL.Query().Get("end_date")
 
@@ -700,7 +842,7 @@ func (h *Handler) GetNetWorthTrend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	points, err := h.svc.GetNetWorthTrend(r.Context(), startDate, endDate)
+	points, err := h.svc.GetNetWorthTrend(r.Context(), userID, startDate, endDate)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch net worth trend")
 		return
@@ -709,6 +851,12 @@ func (h *Handler) GetNetWorthTrend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetSpendingByCategory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	startDateStr := r.URL.Query().Get("start_date")
 	endDateStr := r.URL.Query().Get("end_date")
 
@@ -727,7 +875,7 @@ func (h *Handler) GetSpendingByCategory(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	spending, err := h.svc.GetSpendingByCategory(r.Context(), startDate, endDate)
+	spending, err := h.svc.GetSpendingByCategory(r.Context(), userID, startDate, endDate)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch spending")
 		return
@@ -736,6 +884,12 @@ func (h *Handler) GetSpendingByCategory(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) GetReportsSummary(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	startDateStr := r.URL.Query().Get("start_date")
 	endDateStr := r.URL.Query().Get("end_date")
 
@@ -754,7 +908,7 @@ func (h *Handler) GetReportsSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	summary, err := h.svc.GetReportsSummary(r.Context(), startDate, endDate)
+	summary, err := h.svc.GetReportsSummary(r.Context(), userID, startDate, endDate)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch reports summary")
 		return
@@ -763,14 +917,20 @@ func (h *Handler) GetReportsSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		http.Error(w, "missing transaction id", http.StatusBadRequest)
 		return
 	}
-	txn, err := h.svc.GetTransaction(r.Context(), id)
+	txn, err := h.svc.GetTransaction(r.Context(), userID, id)
 	if err != nil {
-		h.logger.Error("failed to get transaction", "error", err)
+		h.logger.Error("failed to get transaction", "error", err, "user_id", userID)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

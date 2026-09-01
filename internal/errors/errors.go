@@ -7,4 +7,5 @@ var (
 	ErrInvalidInput = errors.New("invalid input")
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrDuplicate    = errors.New("duplicate transaction")
+	ErrConflict     = errors.New("conflict")
 )
