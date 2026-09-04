@@ -50,7 +50,7 @@ func StructuredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 
 type TokenLookupFunc func(ctx context.Context, token string) (string, error)
 
-func RequireAPIKey(validKey string, tokenLookup TokenLookupFunc) func(http.Handler) http.Handler {
+func RequireAPIKey(tokenLookup TokenLookupFunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			providedKey := r.Header.Get("X-API-Key")
@@ -59,24 +59,19 @@ func RequireAPIKey(validKey string, tokenLookup TokenLookupFunc) func(http.Handl
 				return
 			}
 
-			var userID string
-			if tokenLookup != nil {
-				uid, err := tokenLookup(r.Context(), providedKey)
-				if err == nil && uid != "" {
-					userID = uid
-				}
+			if tokenLookup == nil {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
 			}
 
-			// If no user found by personal token, check against global validKey
-			if userID == "" && (validKey == "" || providedKey != validKey) {
+			userID, err := tokenLookup(r.Context(), providedKey)
+			if err != nil || userID == "" {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
 
 			ctx := context.WithValue(r.Context(), "api_key", providedKey)
-			if userID != "" {
-				ctx = context.WithValue(ctx, "user_id", userID)
-			}
+			ctx = context.WithValue(ctx, "user_id", userID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

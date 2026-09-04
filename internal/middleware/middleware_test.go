@@ -95,7 +95,6 @@ func TestRequireJWT(t *testing.T) {
 }
 
 func TestRequireAPIKey(t *testing.T) {
-	fallbackKey := "global-secret-key"
 	mockLookup := func(ctx context.Context, token string) (string, error) {
 		if token == "user-personal-token-abc" {
 			return "user-id-999", nil
@@ -114,7 +113,7 @@ func TestRequireAPIKey(t *testing.T) {
 		w.Write([]byte("ok:global"))
 	})
 
-	mw := RequireAPIKey(fallbackKey, mockLookup)(testHandler)
+	mw := RequireAPIKey(mockLookup)(testHandler)
 
 	tests := []struct {
 		name           string
@@ -137,12 +136,6 @@ func TestRequireAPIKey(t *testing.T) {
 			apiKeyHeader:   "user-personal-token-abc",
 			expectedStatus: http.StatusOK,
 			expectedBody:   "user:user-id-999",
-		},
-		{
-			name:           "fallback global API key",
-			apiKeyHeader:   "global-secret-key",
-			expectedStatus: http.StatusOK,
-			expectedBody:   "ok:global",
 		},
 	}
 

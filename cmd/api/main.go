@@ -95,7 +95,7 @@ func main() {
 
 		// Secure ingestion endpoint (Machine-to-Machine)
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAPIKey(cfg.IngestAPIKey, svc.GetUserByAPIToken))
+			r.Use(middleware.RequireAPIKey(svc.GetUserByAPIToken))
 			r.Post("/ingest", h.Ingest)
 		})
 

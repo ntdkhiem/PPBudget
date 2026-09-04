@@ -93,10 +93,13 @@ func (h *Handler) SimpleFinExecute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SimpleFinStatus(w http.ResponseWriter, r *http.Request) {
-	service.ImportProgress.RLock()
-	defer service.ImportProgress.RUnlock()
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
-	writeJSON(w, http.StatusOK, service.ImportProgress)
+	writeJSON(w, http.StatusOK, service.GetImportProgress(userID))
 }
 
 func (h *Handler) SimpleFinConfig(w http.ResponseWriter, r *http.Request) {

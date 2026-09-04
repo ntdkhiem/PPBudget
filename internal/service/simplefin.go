@@ -172,13 +172,34 @@ func (s *Service) SimpleFinFetchAccounts(ctx context.Context, userID string, req
 	}, nil
 }
 
-var ImportProgress = struct {
-	sync.RWMutex
+type ImportStatus struct {
 	Status  string `json:"status"`
 	Current int    `json:"current"`
 	Total   int    `json:"total"`
 	Error   string `json:"error"`
-}{Status: "idle"}
+}
+
+var userProgress = struct {
+	sync.RWMutex
+	m map[string]ImportStatus
+}{m: make(map[string]ImportStatus)}
+
+func GetImportProgress(userID string) ImportStatus {
+	userProgress.RLock()
+	defer userProgress.RUnlock()
+	if p, ok := userProgress.m[userID]; ok {
+		return p
+	}
+	return ImportStatus{Status: "idle"}
+}
+
+func updateImportProgress(userID string, updateFn func(*ImportStatus)) {
+	userProgress.Lock()
+	defer userProgress.Unlock()
+	p := userProgress.m[userID]
+	updateFn(&p)
+	userProgress.m[userID] = p
+}
 
 // 3. Execute
 func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req SimplefinExecuteRequest) error {
@@ -250,12 +271,12 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 		}
 	}
 
-	ImportProgress.Lock()
-	ImportProgress.Status = "running"
-	ImportProgress.Current = 0
-	ImportProgress.Total = totalTransactions
-	ImportProgress.Error = ""
-	ImportProgress.Unlock()
+	updateImportProgress(userID, func(p *ImportStatus) {
+		p.Status = "running"
+		p.Current = 0
+		p.Total = totalTransactions
+		p.Error = ""
+	})
 
 	// Save account mapping to db
 	if b, err := s.repo.GetUserSetting(ctx, userID, "simplefin_config"); err == nil && b != "" {
@@ -318,18 +339,14 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 
 				amount, err := money.NewFromString(txn.Amount)
 				if err != nil {
-					ImportProgress.Lock()
-					ImportProgress.Current++
-					ImportProgress.Unlock()
+					updateImportProgress(userID, func(p *ImportStatus) { p.Current++ })
 					continue
 				}
 
 				if req.ContentDedup {
 					exists, err := s.repo.TransactionExistsByDetails(bgCtx, userID, targetAccountID, amount.ToInt64(), date, txn.Description)
 					if err == nil && exists {
-						ImportProgress.Lock()
-						ImportProgress.Current++
-						ImportProgress.Unlock()
+						updateImportProgress(userID, func(p *ImportStatus) { p.Current++ })
 						continue // Duplicate found based on content, skip
 					}
 				}
@@ -348,9 +365,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 					})
 				}
 
-				ImportProgress.Lock()
-				ImportProgress.Current++
-				ImportProgress.Unlock()
+				updateImportProgress(userID, func(p *ImportStatus) { p.Current++ })
 			}
 
 			if err := tx.Commit(bgCtx); err != nil {
@@ -380,9 +395,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 
 		s.sendImportNotification(bgCtx, userID, importedTxns, req.IsAutoSync)
 
-		ImportProgress.Lock()
-		ImportProgress.Status = "completed"
-		ImportProgress.Unlock()
+		updateImportProgress(userID, func(p *ImportStatus) { p.Status = "completed" })
 	}()
 
 	return nil
@@ -400,11 +413,7 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 		}
 	}
 	if userEmail == "" {
-		userEmail = s.cfg.NotificationEmail
-	}
-
-	if userEmail == "" {
-		s.logger.Info("notification email not configured, skipping", "user_id", userID)
+		s.logger.Info("notification email not configured for user, skipping", "user_id", userID)
 		return
 	}
 	if s.cfg.SMTPHost == "" && s.cfg.ResendAPIKey == "" {
