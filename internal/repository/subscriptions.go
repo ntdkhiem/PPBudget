@@ -10,6 +10,11 @@ import (
 )
 
 func (r *Repository) CreateSubscription(ctx context.Context, userID, name string, amount int64, cycle string, nextDate time.Time, categoryID *string) error {
+	if categoryID != nil {
+		if err := r.checkOwnership(ctx, nil, "categories", *categoryID, userID); err != nil {
+			return err
+		}
+	}
 	query := `
 		INSERT INTO subscriptions (user_id, name, amount, billing_cycle, next_billing_date, category_id)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -59,6 +64,11 @@ func (r *Repository) DeleteSubscription(ctx context.Context, userID, id string) 
 }
 
 func (r *Repository) UpdateSubscription(ctx context.Context, userID, id string, name string, amount int64, cycle string, nextDate time.Time, categoryID *string) error {
+	if categoryID != nil {
+		if err := r.checkOwnership(ctx, nil, "categories", *categoryID, userID); err != nil {
+			return err
+		}
+	}
 	query := `
 		UPDATE subscriptions 
 		SET name = $1, amount = $2, billing_cycle = $3, next_billing_date = $4, category_id = $5, updated_at = NOW()

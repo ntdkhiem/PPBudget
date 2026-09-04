@@ -11,6 +11,11 @@ import (
 )
 
 func (r *Repository) CreateBudget(ctx context.Context, budget *domain.Budget) error {
+	if budget.CategoryID != "" {
+		if err := r.checkOwnership(ctx, nil, "categories", budget.CategoryID, budget.UserID); err != nil {
+			return err
+		}
+	}
 	query := `
 		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, user_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at, updated_at
@@ -21,6 +26,11 @@ func (r *Repository) CreateBudget(ctx context.Context, budget *domain.Budget) er
 }
 
 func (r *Repository) UpdateBudget(ctx context.Context, budget *domain.Budget) error {
+	if budget.CategoryID != "" {
+		if err := r.checkOwnership(ctx, nil, "categories", budget.CategoryID, budget.UserID); err != nil {
+			return err
+		}
+	}
 	query := `
 		UPDATE budgets SET name = $1, category_id = $2, amount = $3, period_type = $4, start_date = $5, end_date = $6, updated_at = NOW()
 		WHERE id = $7 AND user_id = $8 RETURNING updated_at

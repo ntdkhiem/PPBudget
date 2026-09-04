@@ -25,6 +25,27 @@ func New(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
+func (r *Repository) checkOwnership(ctx context.Context, tx pgx.Tx, table, id, userID string) error {
+	if id == "" {
+		return nil
+	}
+	query := fmt.Sprintf("SELECT 1 FROM %s WHERE id = $1 AND user_id = $2", table)
+	var dummy int
+	var err error
+	if tx != nil {
+		err = tx.QueryRow(ctx, query, id, userID).Scan(&dummy)
+	} else {
+		err = r.pool.QueryRow(ctx, query, id, userID).Scan(&dummy)
+	}
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperrors.ErrForbidden
+		}
+		return err
+	}
+	return nil
+}
+
 // BeginTx starts a new database transaction
 func (r *Repository) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	return r.pool.Begin(ctx)
@@ -85,6 +106,13 @@ func (r *Repository) CreateTransfer(ctx context.Context, userID, fromAccountID, 
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	if err := r.checkOwnership(ctx, tx, "accounts", fromAccountID, userID); err != nil {
+		return err
+	}
+	if err := r.checkOwnership(ctx, tx, "accounts", toAccountID, userID); err != nil {
+		return err
+	}
 
 	transferID := uuid.New().String()
 
@@ -466,6 +494,19 @@ func (r *Repository) DeleteAccount(ctx context.Context, userID, id string) error
 // Transactions (Manual)
 
 func (r *Repository) CreateTransaction(ctx context.Context, userID, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
+	if err := r.checkOwnership(ctx, nil, "accounts", accountID, userID); err != nil {
+		return err
+	}
+	if categoryID != nil {
+		if err := r.checkOwnership(ctx, nil, "categories", *categoryID, userID); err != nil {
+			return err
+		}
+	}
+	if subscriptionID != nil {
+		if err := r.checkOwnership(ctx, nil, "subscriptions", *subscriptionID, userID); err != nil {
+			return err
+		}
+	}
 	query := `
 		INSERT INTO transactions (account_id, amount, date, description, notes, category_id, subscription_id, is_reviewed, user_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
@@ -502,6 +543,9 @@ func (r *Repository) BulkUpdateTransactionsCategory(ctx context.Context, userID 
 	}
 	var catID *string
 	if categoryID != "" {
+		if err := r.checkOwnership(ctx, nil, "categories", categoryID, userID); err != nil {
+			return err
+		}
 		catID = &categoryID
 	}
 	query := `UPDATE transactions SET category_id = $1 WHERE id = ANY($2) AND user_id = $3 AND deleted_at IS NULL`
@@ -515,6 +559,20 @@ func (r *Repository) UpdateTransaction(ctx context.Context, userID, id, accountI
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	if err := r.checkOwnership(ctx, tx, "accounts", accountID, userID); err != nil {
+		return err
+	}
+	if categoryID != nil {
+		if err := r.checkOwnership(ctx, tx, "categories", *categoryID, userID); err != nil {
+			return err
+		}
+	}
+	if subscriptionID != nil {
+		if err := r.checkOwnership(ctx, tx, "subscriptions", *subscriptionID, userID); err != nil {
+			return err
+		}
+	}
 
 	query := `
 		UPDATE transactions 
@@ -536,6 +594,9 @@ func (r *Repository) UpdateTransaction(ctx context.Context, userID, id, accountI
 		}
 
 		for _, link := range paysFor {
+			if err := r.checkOwnership(ctx, tx, "transactions", link.TransactionID, userID); err != nil {
+				return err
+			}
 			setQuery := `INSERT INTO transaction_links (source_transaction_id, target_transaction_id, amount) VALUES ($1, $2, $3)`
 			if _, err := tx.Exec(ctx, setQuery, id, link.TransactionID, link.Amount.ToInt64()); err != nil {
 				return err
@@ -550,6 +611,9 @@ func (r *Repository) UpdateTransaction(ctx context.Context, userID, id, accountI
 		}
 
 		for _, link := range paidBy {
+			if err := r.checkOwnership(ctx, tx, "transactions", link.TransactionID, userID); err != nil {
+				return err
+			}
 			setQuery := `INSERT INTO transaction_links (source_transaction_id, target_transaction_id, amount) VALUES ($1, $2, $3)`
 			if _, err := tx.Exec(ctx, setQuery, link.TransactionID, id, link.Amount.ToInt64()); err != nil {
 				return err
