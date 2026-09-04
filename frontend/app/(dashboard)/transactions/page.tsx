@@ -90,6 +90,8 @@ const truncateText = (text: string, maxLength: number = 100) => {
 
 interface TransactionRowProps {
   txn: Transaction;
+  index: number;
+  measureRef: (node: Element | null) => void;
   isSelected: boolean;
   accounts: Account[] | undefined;
   categories: Category[] | undefined;
@@ -104,6 +106,8 @@ interface TransactionRowProps {
 
 const TransactionRow = memo(function TransactionRow({
   txn,
+  index,
+  measureRef,
   isSelected,
   accounts,
   categories,
@@ -117,6 +121,8 @@ const TransactionRow = memo(function TransactionRow({
 }: TransactionRowProps) {
   return (
     <TableRow 
+      ref={measureRef}
+      data-index={index}
       className={`group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''}`}
       onClick={() => onRowClick(txn)}
     >
@@ -670,6 +676,8 @@ export default function TransactionsPage() {
                   <TransactionRow 
                     key={virtualRow.key}
                     txn={txn}
+                    index={virtualRow.index}
+                    measureRef={rowVirtualizer.measureElement}
                     isSelected={selectedIds.includes(txn.id)}
                     accounts={accounts}
                     categories={categories}
