@@ -132,8 +132,8 @@ func (r *Repository) CreateTransfer(ctx context.Context, userID, fromAccountID, 
 	return tx.Commit(ctx)
 }
 
-// ListTransactions fetches transactions for an account with running balances and cursor pagination
-func (r *Repository) ListTransactions(ctx context.Context, userID, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time, search string) ([]domain.TransactionWithBalance, error) {
+func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionFilter) ([]domain.TransactionWithBalance, error) {
+	// Base query
 	query := `
         SELECT 
             t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
@@ -171,17 +171,66 @@ func (r *Repository) ListTransactions(ctx context.Context, userID, accountID str
             JOIN transactions st ON l.source_transaction_id = st.id
             WHERE l.target_transaction_id = t.id
         ) paid_by_agg ON true
-        WHERE t.user_id = $1 AND ($2 = '' OR t.account_id = NULLIF($2, '')::uuid) AND t.deleted_at IS NULL
-          AND ($3::timestamptz IS NULL OR (t.date, t.id) < ($3::timestamptz, $4::uuid))
-          AND ($5::boolean = false OR t.is_reviewed = false)
-          AND ($6::date IS NULL OR t.date >= $6::date)
-          AND ($7::date IS NULL OR t.date <= $7::date)
-          AND ($8 = '' OR t.search_vector @@ websearch_to_tsquery('english', $8) OR t.description ILIKE '%' || $8 || '%' OR t.notes ILIKE '%' || $8 || '%' OR t.amount::text ILIKE '%' || $8 || '%')
-        ORDER BY t.date DESC, t.id DESC
-        LIMIT 50;
+        WHERE t.user_id = $1 AND t.deleted_at IS NULL
     `
+	args := []interface{}{f.UserID}
+	argID := 2
 
-	rows, err := r.pool.Query(ctx, query, userID, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
+	if f.AccountID != "" {
+		query += fmt.Sprintf(" AND t.account_id = $%d", argID)
+		args = append(args, f.AccountID)
+		argID++
+	} else if len(f.AccountIDs) > 0 {
+		query += fmt.Sprintf(" AND t.account_id = ANY($%d)", argID)
+		args = append(args, f.AccountIDs)
+		argID++
+	}
+
+	if len(f.CategoryIDs) > 0 {
+		query += fmt.Sprintf(" AND t.category_id = ANY($%d)", argID)
+		args = append(args, f.CategoryIDs)
+		argID++
+	}
+
+	if f.Type == "Income" {
+		query += ` AND t.amount > 0 AND (t.category_id IS NULL OR t.category_id NOT IN (SELECT id FROM categories WHERE type = 'transfer'))`
+	} else if f.Type == "Expense" {
+		query += ` AND t.amount < 0 AND (t.category_id IS NULL OR t.category_id NOT IN (SELECT id FROM categories WHERE type = 'transfer'))`
+	} else if f.Type == "Transfer" {
+		query += ` AND t.category_id IN (SELECT id FROM categories WHERE type = 'transfer')`
+	}
+
+	if f.CursorDate != nil && f.CursorID != nil {
+		query += fmt.Sprintf(" AND (t.date, t.id) < ($%d, $%d)", argID, argID+1)
+		args = append(args, *f.CursorDate, *f.CursorID)
+		argID += 2
+	}
+
+	if f.UnreviewedOnly {
+		query += " AND t.is_reviewed = false"
+	}
+
+	if f.StartDate != nil {
+		query += fmt.Sprintf(" AND t.date >= $%d", argID)
+		args = append(args, *f.StartDate)
+		argID++
+	}
+
+	if f.EndDate != nil {
+		query += fmt.Sprintf(" AND t.date <= $%d", argID)
+		args = append(args, *f.EndDate)
+		argID++
+	}
+
+	if f.Search != "" {
+		query += fmt.Sprintf(" AND (t.search_vector @@ websearch_to_tsquery('english', $%d) OR t.description ILIKE '%%' || $%d || '%%' OR t.notes ILIKE '%%' || $%d || '%%' OR t.amount::text ILIKE '%%' || $%d || '%%')", argID, argID, argID, argID)
+		args = append(args, f.Search)
+		argID++
+	}
+
+	query += " ORDER BY t.date DESC, t.id DESC LIMIT 100"
+
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

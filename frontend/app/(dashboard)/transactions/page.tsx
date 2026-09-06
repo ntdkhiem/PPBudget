@@ -298,8 +298,17 @@ export default function TransactionsPage() {
       params.append("cursor_date", currentCursor.date);
       params.append("cursor_id", currentCursor.id);
     }
+    if (selectedCategories.length > 0) {
+      params.append("categories", selectedCategories.join(","));
+    }
+    if (selectedAccounts.length > 0) {
+      params.append("accounts", selectedAccounts.join(","));
+    }
+    if (selectedType && selectedType !== "All") {
+      params.append("type", selectedType);
+    }
     return params.toString();
-  }, [date, currentCursor, debouncedSearchQuery]);
+  }, [date, currentCursor, debouncedSearchQuery, selectedCategories, selectedAccounts, selectedType]);
 
   const { data: unreviewedTransactions } = useQuery<Transaction[]>({
     queryKey: ["unreviewed"],
@@ -330,35 +339,8 @@ export default function TransactionsPage() {
   });
 
   const filteredTransactions = useMemo(() => {
-    if (!transactions) return [];
-    return transactions.filter(t => {
-      // Search
-      const searchLower = searchQuery.toLowerCase();
-      const matchesSearch = !searchQuery || 
-        t.description.toLowerCase().includes(searchLower) || 
-        Math.abs(t.amount).toString().includes(searchLower);
-        
-      // Category
-      const catMatches = selectedCategories.length === 0 || 
-        (t.category_id && selectedCategories.includes(t.category_id));
-
-      // Account
-      const accMatches = selectedAccounts.length === 0 ||
-        (t.account_id && selectedAccounts.includes(t.account_id));
-
-      // Type
-      let typeMatches = true;
-      if (selectedType !== 'All') {
-        const cat = categories?.find(c => c.id === t.category_id);
-        const isTransfer = cat?.type === 'transfer';
-        if (selectedType === 'Income') typeMatches = t.amount > 0 && !isTransfer;
-        else if (selectedType === 'Expense') typeMatches = t.amount < 0 && !isTransfer;
-        else if (selectedType === 'Transfer') typeMatches = isTransfer || false;
-      }
-
-      return matchesSearch && catMatches && accMatches && typeMatches;
-    });
-  }, [transactions, searchQuery, selectedCategories, selectedAccounts, selectedType, categories]);
+    return transactions || [];
+  }, [transactions]);
 
   const toggleCategory = (categoryId: string) => {
     setSelectedCategories(prev =>

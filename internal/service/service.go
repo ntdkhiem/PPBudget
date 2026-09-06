@@ -70,8 +70,8 @@ func (s *Service) CreateTransfer(ctx context.Context, userID string, req Transfe
 	return s.repo.CreateTransfer(ctx, userID, req.FromAccountID, req.ToAccountID, amount, date, req.Description)
 }
 
-func (s *Service) ListTransactions(ctx context.Context, userID, accountID string, cursorDate *time.Time, cursorID *string, unreviewedOnly bool, startDate, endDate *time.Time, search string) ([]domain.TransactionWithBalance, error) {
-	return s.repo.ListTransactions(ctx, userID, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
+func (s *Service) ListTransactions(ctx context.Context, f domain.TransactionFilter) ([]domain.TransactionWithBalance, error) {
+	return s.repo.ListTransactions(ctx, f)
 }
 
 func (s *Service) ReviewTransaction(ctx context.Context, userID, txnID string, categoryID *string) error {

@@ -99,7 +99,31 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 
 	search := r.URL.Query().Get("search")
 
-	txns, err := h.svc.ListTransactions(r.Context(), userID, accountID, cursorDate, cursorID, unreviewedOnly, startDate, endDate, search)
+	var accountIDs []string
+	if accountsStr := r.URL.Query().Get("accounts"); accountsStr != "" {
+		accountIDs = strings.Split(accountsStr, ",")
+	}
+	var categoryIDs []string
+	if categoriesStr := r.URL.Query().Get("categories"); categoriesStr != "" {
+		categoryIDs = strings.Split(categoriesStr, ",")
+	}
+	txnType := r.URL.Query().Get("type")
+
+	filter := domain.TransactionFilter{
+		UserID:         userID,
+		AccountID:      accountID,
+		AccountIDs:     accountIDs,
+		CategoryIDs:    categoryIDs,
+		Type:           txnType,
+		CursorDate:     cursorDate,
+		CursorID:       cursorID,
+		UnreviewedOnly: unreviewedOnly,
+		StartDate:      startDate,
+		EndDate:        endDate,
+		Search:         search,
+	}
+
+	txns, err := h.svc.ListTransactions(r.Context(), filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch transactions")
 		return
