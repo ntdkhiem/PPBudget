@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -35,19 +36,6 @@ func (r *Repository) SetUserSetting(ctx context.Context, userID, key, value stri
 	return err
 }
 
-// GetUserByAPIToken retrieves the user_id corresponding to an API token
-func (r *Repository) GetUserByAPIToken(ctx context.Context, token string) (string, error) {
-	var userID string
-	query := `SELECT user_id FROM user_settings WHERE key = 'api_token' AND value = $1 LIMIT 1`
-	err := r.pool.QueryRow(ctx, query, token).Scan(&userID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", nil
-		}
-		return "", fmt.Errorf("failed to query api token: %w", err)
-	}
-	return userID, nil
-}
 
 // GetUserSettings fetches a user setting by userID and key
 func (r *Repository) GetUserSettings(ctx context.Context, userID, key string) (string, error) {
@@ -81,4 +69,38 @@ func (r *Repository) GetAllUsersWithSimpleFin(ctx context.Context) ([]SimpleFinU
 		}
 	}
 	return configs, nil
+}
+
+type ExportTransactionRow struct {
+	Date        time.Time
+	Description string
+	Amount      int64
+	Account     string
+	Category    string
+}
+
+func (r *Repository) ExportTransactions(ctx context.Context, userID string) ([]ExportTransactionRow, error) {
+	query := `
+		SELECT t.date, t.description, t.amount, a.name as account, COALESCE(c.name, 'Uncategorized') as category
+		FROM transactions t
+		JOIN accounts a ON t.account_id = a.id
+		LEFT JOIN categories c ON t.category_id = c.id
+		WHERE t.user_id = $1 AND t.deleted_at IS NULL
+		ORDER BY t.date DESC, t.created_at DESC
+	`
+	rows, err := r.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var txns []ExportTransactionRow
+	for rows.Next() {
+		var row ExportTransactionRow
+		if err := rows.Scan(&row.Date, &row.Description, &row.Amount, &row.Account, &row.Category); err != nil {
+			return nil, err
+		}
+		txns = append(txns, row)
+	}
+	return txns, nil
 }

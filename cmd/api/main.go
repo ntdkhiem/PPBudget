@@ -93,11 +93,6 @@ func main() {
 		// Cron webhook (Protected by X-API-Key natively in handler)
 		r.Post("/import/simplefin/cron", h.SimpleFinCronTrigger)
 
-		// Secure ingestion endpoint (Machine-to-Machine)
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAPIKey(svc.GetUserByAPIToken))
-			r.Post("/ingest", h.Ingest)
-		})
 
 		// Importer endpoints
 		r.Group(func(r chi.Router) {
@@ -115,9 +110,11 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireJWT(cfg.JWTSecret))
 
-			// Settings & API Tokens
-			r.Post("/settings/generate-token", h.GenerateAPIToken)
-			r.Get("/settings/token", h.GetAPIToken)
+			// Settings
+
+			r.Post("/settings/password", h.ChangePassword)
+			r.Get("/settings/export/transactions", h.ExportTransactionsCSV)
+			r.Delete("/settings/account", h.DeleteUserAccount)
 
 			// Accounts
 			r.Get("/accounts", h.ListAccounts)

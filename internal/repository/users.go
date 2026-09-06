@@ -76,3 +76,17 @@ func (r *Repository) CreateUser(ctx context.Context, email, passwordHash string)
 	}
 	return &user, nil
 }
+
+// UpdateUserPassword updates the user's password hash.
+func (r *Repository) UpdateUserPassword(ctx context.Context, id, passwordHash string) error {
+	query := `UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1`
+	_, err := r.pool.Exec(ctx, query, id, passwordHash)
+	return err
+}
+
+// DeleteUser deletes a user and cascades all related data.
+func (r *Repository) DeleteUser(ctx context.Context, id string) error {
+	query := `DELETE FROM users WHERE id = $1`
+	_, err := r.pool.Exec(ctx, query, id)
+	return err
+}

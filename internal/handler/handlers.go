@@ -27,36 +27,6 @@ func New(svc *service.Service, logger *slog.Logger, cfg *config.Config) *Handler
 	return &Handler{svc: svc, logger: logger, cfg: cfg}
 }
 
-func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.GetUserID(r.Context())
-	if !ok || userID == "" {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	var req service.IngestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON payload")
-		return
-	}
-
-	if req.SimplefinAccountID == "" || req.SimplefinTxID == "" || req.Amount == "" || req.Date == "" {
-		writeError(w, http.StatusBadRequest, "missing required fields")
-		return
-	}
-
-	err := h.svc.Ingest(r.Context(), userID, req)
-	if err != nil {
-		if errors.Is(err, apperrors.ErrInvalidInput) {
-			writeError(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to ingest transaction")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
 
 func (h *Handler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
@@ -500,7 +470,8 @@ func (h *Handler) DeleteBudget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.svc.DeleteBudget(r.Context(), userID, id); err != nil {
+	allMonths := r.URL.Query().Get("all") == "true"
+	if err := h.svc.DeleteBudget(r.Context(), userID, id, allMonths); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "budget not found")
 			return

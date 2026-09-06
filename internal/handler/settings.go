@@ -1,48 +1,105 @@
 package handler
 
 import (
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
 	"net/http"
 
+	"ntdkhiem/ppbudget-go/internal/auth"
 	"ntdkhiem/ppbudget-go/internal/middleware"
 )
 
-// GenerateAPIToken generates a new API token for the authenticated user
-func (h *Handler) GenerateAPIToken(w http.ResponseWriter, r *http.Request) {
+
+// ChangePassword allows the user to change their password
+func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok || userID == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
-	token, err := h.svc.GenerateAPIToken(r.Context(), userID)
-	if err != nil {
-		h.logger.Error("failed to generate api token", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to generate API token")
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"token":   token,
-		"message": "API token generated successfully",
-	})
+	user, err := h.svc.GetUserByID(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch user")
+		return
+	}
+
+	if !auth.CheckPasswordHash(req.OldPassword, user.PasswordHash) {
+		writeError(w, http.StatusUnauthorized, "incorrect old password")
+		return
+	}
+
+	newHash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to hash new password")
+		return
+	}
+
+	if err := h.svc.UpdateUserPassword(r.Context(), userID, newHash); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update password")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "password updated"})
 }
 
-// GetAPIToken retrieves the API token for the authenticated user
-func (h *Handler) GetAPIToken(w http.ResponseWriter, r *http.Request) {
+// ExportTransactionsCSV exports all user transactions in CSV format
+func (h *Handler) ExportTransactionsCSV(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok || userID == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
-	token, err := h.svc.GetAPIToken(r.Context(), userID)
+	txns, err := h.svc.ExportTransactions(r.Context(), userID)
 	if err != nil {
-		h.logger.Error("failed to get api token", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to fetch API token")
+		writeError(w, http.StatusInternalServerError, "failed to export transactions")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"token": token,
-	})
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", `attachment; filename="transactions.csv"`)
+
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	// Write header
+	writer.Write([]string{"Date", "Description", "Amount", "Account", "Category"})
+
+	// Write rows
+	for _, txn := range txns {
+		writer.Write([]string{
+			txn.Date.Format("2006-01-02"),
+			txn.Description,
+			fmt.Sprintf("%.2f", float64(txn.Amount)/100.0),
+			txn.Account,
+			txn.Category,
+		})
+	}
+}
+
+// DeleteUserAccount securely wipes all of the user's data
+func (h *Handler) DeleteUserAccount(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := h.svc.DeleteUserAccount(r.Context(), userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete account")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "account deleted"})
 }

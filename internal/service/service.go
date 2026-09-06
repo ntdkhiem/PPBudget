@@ -10,7 +10,6 @@ import (
 
 	"ntdkhiem/ppbudget-go/internal/config"
 	"ntdkhiem/ppbudget-go/internal/domain"
-	"ntdkhiem/ppbudget-go/internal/middleware"
 	"ntdkhiem/ppbudget-go/internal/repository"
 	"ntdkhiem/ppbudget-go/pkg/money"
 
@@ -40,144 +39,6 @@ func (s *Service) GetNextAutoSync() time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.nextAutoSync
-}
-
-type IngestRequest struct {
-	SimplefinAccountID string `json:"simplefin_account_id"`
-	SimplefinTxID      string `json:"simplefin_transaction_id"`
-	Amount             string `json:"amount"`
-	Date               string `json:"date"`
-	Description        string `json:"description"`
-}
-
-func (s *Service) Ingest(ctx context.Context, userID string, req IngestRequest) error {
-	if userID == "" {
-		if u, ok := middleware.GetUserID(ctx); ok {
-			userID = u
-		}
-	}
-
-	// 1. Parse Amount and Date
-	amount, err := money.NewFromString(req.Amount)
-	if err != nil {
-		return fmt.Errorf("%w: invalid amount", apperrors.ErrInvalidInput)
-	}
-
-	date, err := time.Parse("2006-01-02", req.Date)
-	if err != nil {
-		return fmt.Errorf("%w: invalid date format, expected YYYY-MM-DD", apperrors.ErrInvalidInput)
-	}
-
-	// 2. Start DB Transaction
-	tx, err := s.repo.BeginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	// 3. Look up internal account ID
-	accountID, err := s.repo.GetAccountBySimplefinID(ctx, tx, userID, req.SimplefinAccountID)
-	if err != nil {
-		if err == apperrors.ErrNotFound {
-			return fmt.Errorf("account not found for simplefin_id: %s", req.SimplefinAccountID)
-		}
-		return err
-	}
-
-	// Auto-categorization
-	var categoryID *string
-	var subscriptionID *string
-	isReviewed := false
-
-	rules, err := s.repo.ListRulesDetailed(ctx, userID)
-	if err != nil {
-		return err
-	}
-
-	for _, rule := range rules {
-		if !rule.IsActive {
-			continue
-		}
-
-		match := false
-		if rule.Strictness == "all" || len(rule.Conditions) == 0 {
-			match = true
-		}
-
-		for _, cond := range rule.Conditions {
-			condMatch := false
-			if cond.Field == "description" {
-				switch cond.Operator {
-				case "contains":
-					condMatch = strings.Contains(strings.ToLower(req.Description), strings.ToLower(cond.Value))
-				case "is_exactly":
-					condMatch = req.Description == cond.Value
-				case "starts_with":
-					condMatch = strings.HasPrefix(req.Description, cond.Value)
-				case "ends_with":
-					condMatch = strings.HasSuffix(req.Description, cond.Value)
-				}
-			} else if cond.Field == "amount" {
-				// simple numerical check for amount
-				condAmt, _ := money.NewFromString(cond.Value)
-				if cond.Operator == "greater_than" {
-					condMatch = amount.ToInt64() > condAmt.ToInt64()
-				} else if cond.Operator == "less_than" {
-					condMatch = amount.ToInt64() < condAmt.ToInt64()
-				} else if cond.Operator == "is_exactly" {
-					condMatch = amount.ToInt64() == condAmt.ToInt64()
-				}
-			} else if cond.Field == "source_account" {
-				if cond.Operator == "is_exactly" {
-					condMatch = req.SimplefinAccountID == cond.Value
-				}
-			}
-
-			if rule.Strictness == "all" {
-				if !condMatch {
-					match = false
-					break
-				}
-			} else { // "any"
-				if condMatch {
-					match = true
-					break
-				}
-			}
-		}
-
-		if match {
-			for _, act := range rule.Actions {
-				if act.ActionType == "set_category" {
-					catID := act.Value
-					categoryID = &catID
-				} else if act.ActionType == "link_to_subscription" {
-					subID := act.Value
-					subscriptionID = &subID
-				}
-			}
-			isReviewed = true
-			break
-		}
-	}
-
-	// 4. Insert idempotently
-	_, created, err := s.repo.InsertIngestedTransaction(ctx, tx, userID, accountID, amount, date, req.Description, req.SimplefinTxID, categoryID, subscriptionID, isReviewed)
-	if err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-
-	if created {
-		s.logger.Info("transaction ingested", "simplefin_tx_id", req.SimplefinTxID, "amount", amount.String())
-	} else {
-		s.logger.Info("duplicate transaction ignored", "simplefin_tx_id", req.SimplefinTxID)
-	}
-
-	return nil
 }
 
 func (s *Service) GetTransaction(ctx context.Context, userID, id string) (*domain.Transaction, error) {
@@ -275,8 +136,8 @@ func (s *Service) UpdateBudget(ctx context.Context, userID string, budget *domai
 	return s.repo.UpdateBudget(ctx, budget)
 }
 
-func (s *Service) DeleteBudget(ctx context.Context, userID, id string) error {
-	return s.repo.DeleteBudget(ctx, userID, id)
+func (s *Service) DeleteBudget(ctx context.Context, userID, id string, allMonths bool) error {
+	return s.repo.DeleteBudget(ctx, userID, id, allMonths)
 }
 
 func (s *Service) GetBudgetsSummary(ctx context.Context, userID string, month time.Time) ([]domain.BudgetSummary, error) {

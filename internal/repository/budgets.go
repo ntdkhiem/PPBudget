@@ -46,7 +46,25 @@ func (r *Repository) UpdateBudget(ctx context.Context, budget *domain.Budget) er
 	return nil
 }
 
-func (r *Repository) DeleteBudget(ctx context.Context, userID, id string) error {
+func (r *Repository) DeleteBudget(ctx context.Context, userID, id string, allMonths bool) error {
+	if allMonths {
+		// Delete all budgets with the same category_id
+		query := `
+			DELETE FROM budgets 
+			WHERE user_id = $1 
+			  AND category_id = (SELECT category_id FROM budgets WHERE id = $2 AND user_id = $1)
+			  AND start_date >= (SELECT start_date FROM budgets WHERE id = $2 AND user_id = $1)
+		`
+		tag, err := r.pool.Exec(ctx, query, userID, id)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return apperrors.ErrNotFound
+		}
+		return nil
+	}
+
 	tag, err := r.pool.Exec(ctx, `DELETE FROM budgets WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return err
@@ -157,7 +175,7 @@ func (r *Repository) rolloverBudgets(ctx context.Context, userID string, targetM
 		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, user_id, created_at, updated_at)
 		SELECT name, category_id, amount, period_type, $1, $2, $3, NOW(), NOW()
 		FROM budgets
-		WHERE user_id = $3 AND start_date = $4
+		WHERE user_id = $3 AND start_date = $4 AND period_type != 'one_time'
 	`
 	_, err = r.pool.Exec(ctx, queryCopy, targetStart, targetEnd, userID, *latestStart)
 	return err

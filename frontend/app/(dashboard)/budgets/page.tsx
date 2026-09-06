@@ -4,9 +4,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { apiFetch, BudgetSummary, Category } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
-import { ChevronLeft, ChevronRight, Edit2, Check, X, Plus, Target, TrendingUp, Calendar, AlertCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Edit2, Check, X, Plus, Target, TrendingUp, Calendar, AlertCircle, Trash2 } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, getDaysInMonth, getDate, isSameMonth } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,10 @@ export default function BudgetsPage() {
   const [newCategoryId, setNewCategoryId] = useState("");
   const [newLimit, setNewLimit] = useState("");
 
+  // Delete Budget Modal State
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [budgetToDelete, setBudgetToDelete] = useState<string | null>(null);
+
   const { data: budgets, isLoading: loadingBudgets } = useQuery<BudgetSummary[]>({
     queryKey: ["budgets", monthStr],
     queryFn: () => apiFetch<BudgetSummary[]>(`/budgets/summary?month=${monthStr}`, {}, token),
@@ -41,7 +46,7 @@ export default function BudgetsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: { id?: string, category_id: string, limit_amount: number }) => {
+    mutationFn: (data: { id?: string, category_id: string, limit_amount: number, period_type?: string }) => {
       const year = currentMonth.getFullYear();
       const month = currentMonth.getMonth();
       // Ensure strict local-to-UTC date strings to avoid timezone drift
@@ -55,19 +60,33 @@ export default function BudgetsPage() {
           name: `${catName} Budget`,
           category_id: data.category_id, 
           amount_cents: data.limit_amount, 
-          period_type: "monthly",
+          period_type: data.period_type || "monthly",
           start_date: startDate,
           end_date: endDate
         }),
       }, token);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["budgets", monthStr] });
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
       setEditingId(null);
       setIsAddModalOpen(false);
       setNewCategoryId("");
       setNewLimit("");
     },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: ({ id, all }: { id: string; all: boolean }) => 
+      apiFetch(`/budgets/${id}${all ? '?all=true' : ''}`, { method: "DELETE" }, token),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      setDeleteModalOpen(false);
+      setBudgetToDelete(null);
+      toast.success("Budget deleted successfully");
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Failed to delete budget");
+    }
   });
 
   const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
@@ -154,16 +173,62 @@ export default function BudgetsPage() {
                   />
                 </div>
               </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>Cancel</Button>
+              <div className="flex flex-col gap-3 mt-6">
                 <Button 
-                  onClick={() => updateMutation.mutate({ category_id: newCategoryId, limit_amount: Math.round(parseFloat(newLimit) * 100) })}
+                  onClick={() => updateMutation.mutate({ category_id: newCategoryId, limit_amount: Math.round(parseFloat(newLimit) * 100), period_type: "monthly" })}
                   disabled={!newCategoryId || !newLimit || updateMutation.isPending}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white w-full"
                 >
-                  {updateMutation.isPending ? "Saving..." : "Save Budget"}
+                  {updateMutation.isPending ? "Saving..." : "Add for This & Future Months"}
                 </Button>
-              </DialogFooter>
+                <Button 
+                  variant="secondary"
+                  onClick={() => updateMutation.mutate({ category_id: newCategoryId, limit_amount: Math.round(parseFloat(newLimit) * 100), period_type: "one_time" })}
+                  disabled={!newCategoryId || !newLimit || updateMutation.isPending}
+                  className="w-full bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50"
+                >
+                  {updateMutation.isPending ? "Saving..." : "Add Only for This Month"}
+                </Button>
+                <Button variant="outline" onClick={() => setIsAddModalOpen(false)} className="w-full">
+                  Cancel
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Delete Budget</DialogTitle>
+                <DialogDescription>
+                  Are you sure you want to delete this budget? You can delete it for this month only, or remove it for this and all future months. Past months will not be affected.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-col gap-3 mt-6">
+                <Button 
+                  variant="destructive"
+                  className="w-full bg-red-700 hover:bg-red-800 text-white"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => {
+                    if (budgetToDelete) deleteMutation.mutate({ id: budgetToDelete, all: true });
+                  }}
+                >
+                  Delete for This & Future Months
+                </Button>
+                <Button 
+                  variant="destructive"
+                  className="w-full"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => {
+                    if (budgetToDelete) deleteMutation.mutate({ id: budgetToDelete, all: false });
+                  }}
+                >
+                  Delete for This Month Only
+                </Button>
+                <Button variant="outline" onClick={() => setDeleteModalOpen(false)} className="w-full">
+                  Cancel
+                </Button>
+              </div>
             </DialogContent>
           </Dialog>
         </div>
@@ -302,6 +367,7 @@ export default function BudgetsPage() {
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.9 }}
+                        className="flex gap-1"
                       >
                         <Button
                           size="icon-sm"
@@ -311,6 +377,19 @@ export default function BudgetsPage() {
                         >
                           <Edit2 size={14} />
                         </Button>
+                        {card.budgetId && (
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setBudgetToDelete(card.budgetId as string);
+                              setDeleteModalOpen(true);
+                            }}
+                            className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 h-8 w-8"
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>
