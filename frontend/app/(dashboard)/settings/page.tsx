@@ -24,6 +24,14 @@ export default function SettingsPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isTestingEmail, setIsTestingEmail] = useState(false);
+  const [exportTypes, setExportTypes] = useState({
+    accounts: true,
+    categories: true,
+    transactions: true,
+    budgets: true,
+    rules: true,
+    subscriptions: true,
+  });
 
   const handleTestEmail = async () => {
     try {
@@ -103,8 +111,9 @@ export default function SettingsPage() {
   const handleExportAllData = async () => {
     try {
       setIsExporting(true);
+      const types = Object.entries(exportTypes).filter(([_, v]) => v).map(([k, _]) => k).join(",");
       const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
-      const res = await fetch(`${backendUrl}/settings/export/all`, {
+      const res = await fetch(`${backendUrl}/settings/export/all?types=${types}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -246,19 +255,34 @@ export default function SettingsPage() {
               {isExporting ? "Exporting..." : "Export Transactions (CSV)"}
             </Button>
           </div>
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between border-t border-slate-100 dark:border-slate-800 pt-4">
-            <div className="text-sm text-slate-600 dark:text-slate-400 max-w-lg leading-relaxed">
-              Download a complete JSON backup of all your data. This includes transactions, accounts, budgets, rules, and subscriptions.
+          <div className="flex flex-col border-t border-slate-100 dark:border-slate-800 pt-4">
+            <div className="text-sm text-slate-600 dark:text-slate-400 mb-4 leading-relaxed">
+              Download a JSON backup of specific subsets of your data.
             </div>
-            <Button
-              onClick={handleExportAllData}
-              disabled={isExporting}
-              variant="outline"
-              className="flex items-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl shadow-sm shrink-0"
-            >
-              <Database className="h-4 w-4" />
-              {isExporting ? "Exporting..." : "Full Backup (JSON)"}
-            </Button>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+              {Object.entries(exportTypes).map(([key, value]) => (
+                <label key={key} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={value}
+                    onChange={(e) => setExportTypes({ ...exportTypes, [key]: e.target.checked })}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-600"
+                  />
+                  <span className="text-sm text-slate-700 dark:text-slate-300 capitalize">{key}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <Button
+                onClick={handleExportAllData}
+                disabled={isExporting}
+                variant="outline"
+                className="flex items-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl shadow-sm shrink-0"
+              >
+                <Database className="h-4 w-4" />
+                {isExporting ? "Exporting..." : "Export Selected (JSON)"}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

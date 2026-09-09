@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"ntdkhiem/ppbudget-go/internal/auth"
 	"ntdkhiem/ppbudget-go/internal/middleware"
@@ -112,7 +113,13 @@ func (h *Handler) ExportAllDataJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := h.svc.ExportAllData(r.Context(), userID)
+	typesParam := r.URL.Query().Get("types")
+	var types []string
+	if typesParam != "" {
+		types = strings.Split(typesParam, ",")
+	}
+
+	data, err := h.svc.ExportAllData(r.Context(), userID, types)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to export data")
 		return
