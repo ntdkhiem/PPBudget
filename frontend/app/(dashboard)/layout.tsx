@@ -125,7 +125,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     { href: "/accounts", label: "Accounts", icon: Wallet },
     { href: "/transactions", label: "Transactions", icon: ReceiptText },
     { href: "/budgets", label: "Budgets", icon: PieChart },
-    { href: "/subscriptions", label: "Subscriptions", icon: Repeat },
+    { href: "/subscriptions", label: "Recurring Payments", icon: Repeat },
     { href: "/settings/categories", label: "Categories", icon: Tag },
     { href: "/settings/rules", label: "Rules", icon: SlidersHorizontal },
     { href: "/settings/importer", label: "Data Importer", icon: Database },

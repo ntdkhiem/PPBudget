@@ -66,7 +66,7 @@ function SubscriptionsContent() {
   const [selectedSub, setSelectedSub] = useState<Subscription | null>(null);
   const [subName, setSubName] = useState("");
   const [subAmount, setSubAmount] = useState("");
-  const [subCycle, setSubCycle] = useState<"monthly" | "yearly">("monthly");
+  const [subCycle, setSubCycle] = useState<"weekly" | "monthly" | "yearly">("monthly");
   const [subDate, setSubDate] = useState("");
 
   const handleOpenSub = (sub?: Subscription) => {
@@ -74,7 +74,7 @@ function SubscriptionsContent() {
       setSelectedSub(sub);
       setSubName(sub.name);
       setSubAmount((sub.amount / 100).toString());
-      setSubCycle(sub.billing_cycle as "monthly" | "yearly");
+      setSubCycle(sub.billing_cycle as "weekly" | "monthly" | "yearly");
       setSubDate(sub.next_billing_date.split("T")[0]);
     } else {
       setSelectedSub(null);
@@ -146,14 +146,14 @@ function SubscriptionsContent() {
   });
 
   const expectedMonthlyCosts = subsList.reduce((acc, sub) => {
-    return acc + (sub.billing_cycle === 'yearly' ? Math.round(sub.amount / 12) : sub.amount);
+    return acc + (sub.billing_cycle === 'yearly' ? Math.round(sub.amount / 12) : sub.billing_cycle === 'weekly' ? sub.amount * 4 : sub.amount);
   }, 0);
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-12">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 mb-2">Subscriptions</h1>
+          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 mb-2">Recurring Payments</h1>
           <p className="text-slate-500 text-lg">Manage recurring payments and track expected costs.</p>
         </div>
         <Button 
@@ -193,7 +193,7 @@ function SubscriptionsContent() {
                     </div>
                     <div>
                       <p className="font-semibold text-slate-900 dark:text-slate-100">{sub.name}</p>
-                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{formatCurrency(sub.amount)} <span className="text-xs text-slate-500 font-normal">/{sub.billing_cycle === 'yearly' ? 'yr' : 'mo'}</span></p>
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{formatCurrency(sub.amount)} <span className="text-xs text-slate-500 font-normal">/{sub.billing_cycle === 'yearly' ? 'yr' : sub.billing_cycle === 'weekly' ? 'wk' : 'mo'}</span></p>
                     </div>
                   </div>
                   
@@ -301,9 +301,10 @@ function SubscriptionsContent() {
             </div>
             <div className="grid gap-2">
               <Label className="text-slate-700 dark:text-slate-300">Billing Cycle</Label>
-              <Select value={subCycle} onValueChange={(v: "monthly" | "yearly") => setSubCycle(v)}>
+              <Select value={subCycle} onValueChange={(v: "weekly" | "monthly" | "yearly") => setSubCycle(v)}>
                 <SelectTrigger className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100"><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="weekly">Weekly</SelectItem>
                   <SelectItem value="monthly">Monthly</SelectItem>
                   <SelectItem value="yearly">Yearly</SelectItem>
                 </SelectContent>

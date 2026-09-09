@@ -114,7 +114,7 @@ export interface Subscription {
   id: string;
   name: string;
   amount: number; // cents
-  billing_cycle: "monthly" | "yearly";
+  billing_cycle: "weekly" | "monthly" | "yearly";
   next_billing_date: string;
   category_id?: string | null;
 }

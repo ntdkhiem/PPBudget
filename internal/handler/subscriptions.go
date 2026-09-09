@@ -49,7 +49,7 @@ func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.Name == "" || body.Amount <= 0 || (body.BillingCycle != "monthly" && body.BillingCycle != "yearly") || body.NextBillingDate == "" {
+	if body.Name == "" || body.Amount <= 0 || (body.BillingCycle != "weekly" && body.BillingCycle != "monthly" && body.BillingCycle != "yearly") || body.NextBillingDate == "" {
 		writeError(w, http.StatusBadRequest, "invalid or missing required fields")
 		return
 	}
@@ -117,7 +117,7 @@ func (h *Handler) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.Name == "" || body.Amount <= 0 || (body.BillingCycle != "monthly" && body.BillingCycle != "yearly") || body.NextBillingDate == "" {
+	if body.Name == "" || body.Amount <= 0 || (body.BillingCycle != "weekly" && body.BillingCycle != "monthly" && body.BillingCycle != "yearly") || body.NextBillingDate == "" {
 		writeError(w, http.StatusBadRequest, "invalid or missing required fields")
 		return
 	}
