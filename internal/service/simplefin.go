@@ -401,10 +401,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 	return nil
 }
 
-func (s *Service) sendImportNotification(ctx context.Context, userID string, txns []domain.Transaction, autoSync bool) {
-	if len(txns) == 0 {
-		return
-	}
+func (s *Service) sendImportNotification(ctx context.Context, userID string, txns []domain.Transaction, autoSync bool) error {
 
 	userEmail, _ := s.repo.GetUserSetting(ctx, userID, "notification_email")
 	if userEmail == "" {
@@ -414,11 +411,11 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 	}
 	if userEmail == "" {
 		s.logger.Info("notification email not configured for user, skipping", "user_id", userID)
-		return
+		return fmt.Errorf("no email address configured for this user")
 	}
 	if s.cfg.SMTPHost == "" && s.cfg.ResendAPIKey == "" {
 		s.logger.Info("neither Resend nor SMTP configured, skipping email notification")
-		return
+		return fmt.Errorf("server has no SMTP or Resend credentials configured")
 	}
 
 	// Fetch account names for nicer email
@@ -562,24 +559,32 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 		)
 
 		req, err := http.NewRequest("POST", "https://api.resend.com/emails", strings.NewReader(resendBody))
-		if err == nil {
-			req.Header.Set("Authorization", "Bearer "+s.cfg.ResendAPIKey)
-			req.Header.Set("Content-Type", "application/json")
-			client := &http.Client{Timeout: 10 * time.Second}
-			resp, err := client.Do(req)
-			if err != nil {
-				s.logger.Error("failed to send import notification via Resend", "error", err, "user_id", userID)
-			} else {
-				defer resp.Body.Close()
-				if resp.StatusCode >= 400 {
-					s.logger.Error("resend API returned error", "status", resp.StatusCode, "user_id", userID)
-				} else {
-					s.logger.Info("import notification email sent via Resend", "count", len(txns), "user_id", userID)
-				}
-			}
-		} else {
+		if err != nil {
 			s.logger.Error("failed to create Resend request", "error", err)
+			return err
 		}
+
+		req.Header.Set("Authorization", "Bearer "+s.cfg.ResendAPIKey)
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			s.logger.Error("failed to send import notification via Resend", "error", err, "user_id", userID)
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			s.logger.Error("resend API returned error", "status", resp.StatusCode, "user_id", userID)
+			var errBody []byte
+			if resp.Body != nil {
+				errBody, _ = io.ReadAll(resp.Body)
+			}
+			return fmt.Errorf("resend API returned status %d: %s", resp.StatusCode, string(errBody))
+		}
+
+		s.logger.Info("import notification email sent via Resend", "count", len(txns), "user_id", userID)
+		return nil
 	} else {
 		// Use standard SMTP (works locally or if provider allows port 587)
 		auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
@@ -592,9 +597,11 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 		err := smtp.SendMail(s.cfg.SMTPHost+":"+s.cfg.SMTPPort, auth, s.cfg.SMTPUser, []string{userEmail}, msg)
 		if err != nil {
 			s.logger.Error("failed to send import notification email via SMTP", "error", err, "user_id", userID)
-		} else {
-			s.logger.Info("import notification email sent via SMTP", "count", len(txns), "user_id", userID)
+			return err
 		}
+		
+		s.logger.Info("import notification email sent via SMTP", "count", len(txns), "user_id", userID)
+		return nil
 	}
 }
 
