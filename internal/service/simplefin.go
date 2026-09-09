@@ -402,6 +402,9 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 }
 
 func (s *Service) sendImportNotification(ctx context.Context, userID string, txns []domain.Transaction, autoSync bool) error {
+	if len(txns) == 0 {
+		return nil
+	}
 
 	userEmail, _ := s.repo.GetUserSetting(ctx, userID, "notification_email")
 	if userEmail == "" {
@@ -693,6 +696,53 @@ func (s *Service) UpdateSimplefinAutoSync(ctx context.Context, userID string, en
 
 
 func (s *Service) SendTestEmail(ctx context.Context, userID string) error {
-	s.sendImportNotification(ctx, userID, []domain.Transaction{}, false)
-	return nil
+	userEmail, _ := s.repo.GetUserSetting(ctx, userID, "notification_email")
+	if userEmail == "" {
+		if user, err := s.repo.GetUserByID(ctx, userID); err == nil && user != nil {
+			userEmail = user.Email
+		}
+	}
+	if userEmail == "" {
+		return fmt.Errorf("no email address configured for this user")
+	}
+	if s.cfg.SMTPHost == "" && s.cfg.ResendAPIKey == "" {
+		return fmt.Errorf("server has no SMTP or Resend credentials configured")
+	}
+
+	subject := "PPBudget Email Test"
+	htmlBody := "<h2>Success!</h2><p>This is a test email to verify that your email configuration is working correctly.</p>"
+
+	if s.cfg.ResendAPIKey != "" {
+		resendBody := fmt.Sprintf(`{"from": "%s", "to": ["%s"], "subject": "%s", "html": %q}`,
+			s.cfg.ResendFromEmail,
+			userEmail,
+			subject,
+			htmlBody,
+		)
+		req, err := http.NewRequest("POST", "https://api.resend.com/emails", strings.NewReader(resendBody))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+s.cfg.ResendAPIKey)
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			errBody, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("resend API returned status %d: %s", resp.StatusCode, string(errBody))
+		}
+		return nil
+	} else {
+		auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
+		msg := []byte("To: " + userEmail + "\r\n" +
+			"Subject: " + subject + "\r\n" +
+			"MIME-version: 1.0;\r\n" +
+			"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" +
+			htmlBody)
+		return smtp.SendMail(s.cfg.SMTPHost+":"+s.cfg.SMTPPort, auth, s.cfg.SMTPUser, []string{userEmail}, msg)
+	}
 }
