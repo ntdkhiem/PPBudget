@@ -683,3 +683,9 @@ func (s *Service) UpdateSimplefinAutoSync(ctx context.Context, userID string, en
 		return err
 	}
 }
+
+
+func (s *Service) SendTestEmail(ctx context.Context, userID string) error {
+	s.sendImportNotification(ctx, userID, []domain.Transaction{}, false)
+	return nil
+}

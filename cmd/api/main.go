@@ -115,6 +115,7 @@ func main() {
 			r.Post("/settings/password", h.ChangePassword)
 			r.Get("/settings/export/transactions", h.ExportTransactionsCSV)
 			r.Delete("/settings/account", h.DeleteUserAccount)
+			r.Post("/settings/test-email", h.TestEmailNotification)
 
 			// Accounts
 			r.Get("/accounts", h.ListAccounts)

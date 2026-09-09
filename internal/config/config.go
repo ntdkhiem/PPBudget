@@ -15,7 +15,6 @@ type Config struct {
 	SMTPPort          string
 	SMTPUser          string
 	SMTPPass          string
-	NotificationEmail string
 	ResendAPIKey      string
 	ResendFromEmail   string
 	FrontendURL       string
@@ -32,7 +31,6 @@ func Load() *Config {
 		SMTPPort:          getEnv("SMTP_PORT", "587"),
 		SMTPUser:          getEnv("SMTP_USER", ""),
 		SMTPPass:          getEnv("SMTP_PASS", ""),
-		NotificationEmail: getEnv("NOTIFICATION_EMAIL", ""),
 		ResendAPIKey:      getEnv("RESEND_API_KEY", ""),
 		ResendFromEmail:   getEnv("RESEND_FROM_EMAIL", "onboarding@resend.dev"),
 		FrontendURL:       getEnv("FRONTEND_URL", "http://localhost:3000"),

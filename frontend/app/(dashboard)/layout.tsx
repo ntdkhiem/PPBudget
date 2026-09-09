@@ -126,10 +126,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     { href: "/transactions", label: "Transactions", icon: ReceiptText },
     { href: "/budgets", label: "Budgets", icon: PieChart },
     { href: "/subscriptions", label: "Subscriptions", icon: Repeat },
-    { href: "/settings", label: "Settings", icon: Settings },
     { href: "/settings/categories", label: "Categories", icon: Tag },
     { href: "/settings/rules", label: "Rules", icon: SlidersHorizontal },
     { href: "/settings/importer", label: "Data Importer", icon: Database },
+    { href: "/settings", label: "Settings", icon: Settings },
   ];
 
   return (

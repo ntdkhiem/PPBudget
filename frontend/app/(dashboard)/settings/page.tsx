@@ -9,6 +9,7 @@ import {
   Database,
   Download,
   AlertTriangle,
+  Mail,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,19 @@ export default function SettingsPage() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isTestingEmail, setIsTestingEmail] = useState(false);
+
+  const handleTestEmail = async () => {
+    try {
+      setIsTestingEmail(true);
+      await apiFetch("/settings/test-email", { method: "POST" }, token);
+      toast.success("Test email sent successfully! Please check your inbox.");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to send test email");
+    } finally {
+      setIsTestingEmail(false);
+    }
+  };
 
   useEffect(() => {
     const jwt = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
@@ -199,6 +213,35 @@ export default function SettingsPage() {
             >
               <Download className="h-4 w-4" />
               {isExporting ? "Exporting..." : "Export Transactions (CSV)"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Email Notifications */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
+          <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl">
+            <Mail className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Email Notifications</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Test your email delivery</p>
+          </div>
+        </div>
+        <div className="p-6">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+            <div className="text-sm text-slate-600 dark:text-slate-400 max-w-lg leading-relaxed">
+              Send a test email notification to verify your SMTP or Resend configuration.
+            </div>
+            <Button
+              onClick={handleTestEmail}
+              disabled={isTestingEmail}
+              variant="outline"
+              className="flex items-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl shadow-sm shrink-0"
+            >
+              <Mail className="h-4 w-4" />
+              {isTestingEmail ? "Sending..." : "Send Test Email"}
             </Button>
           </div>
         </div>

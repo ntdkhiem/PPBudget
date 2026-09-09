@@ -932,3 +932,20 @@ func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(txn)
 }
+
+
+func (h *Handler) TestEmailNotification(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	err := h.svc.SendTestEmail(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to send test email: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Test email sent successfully"})
+}
