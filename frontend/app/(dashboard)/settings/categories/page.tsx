@@ -114,13 +114,13 @@ export default function CategoriesPage() {
             type="text"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
-            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             autoFocus
           />
           <select
             value={editType}
             onChange={(e) => setEditType(e.target.value as any)}
-            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <option value="expense">Expense</option>
             <option value="income">Income</option>

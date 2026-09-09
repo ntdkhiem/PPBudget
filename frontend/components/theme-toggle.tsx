@@ -28,7 +28,7 @@ export function ThemeToggle() {
         onClick={() => setTheme("light")}
         className={`flex-1 flex justify-center py-2 rounded-md transition-all duration-200 ${
           theme === "light"
-            ? "bg-white dark:bg-slate-700 text-indigo-600 shadow-sm"
+            ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm"
             : "text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-300"
         }`}
         aria-label="Light mode"
@@ -39,7 +39,7 @@ export function ThemeToggle() {
         onClick={() => setTheme("system")}
         className={`flex-1 flex justify-center py-2 rounded-md transition-all duration-200 ${
           theme === "system"
-            ? "bg-white dark:bg-slate-700 text-indigo-600 shadow-sm"
+            ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm"
             : "text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-300"
         }`}
         aria-label="System default mode"
@@ -50,7 +50,7 @@ export function ThemeToggle() {
         onClick={() => setTheme("dark")}
         className={`flex-1 flex justify-center py-2 rounded-md transition-all duration-200 ${
           theme === "dark"
-            ? "bg-white dark:bg-slate-700 text-indigo-600 shadow-sm"
+            ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm"
             : "text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-300"
         }`}
         aria-label="Dark mode"

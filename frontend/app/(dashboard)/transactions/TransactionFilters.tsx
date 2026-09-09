@@ -84,7 +84,7 @@ export default function TransactionFilters({
                 <label key={category.id} className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
                   <input 
                     type="checkbox" 
-                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer"
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer dark:checked:text-indigo-400"
                     checked={selectedCategories.includes(category.id)}
                     onChange={() => toggleCategory(category.id)}
                   />
@@ -123,7 +123,7 @@ export default function TransactionFilters({
                 <label key={account.id} className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
                   <input 
                     type="checkbox" 
-                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer"
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer dark:checked:text-indigo-400"
                     checked={selectedAccounts.includes(account.id)}
                     onChange={() => toggleAccount(account.id)}
                   />

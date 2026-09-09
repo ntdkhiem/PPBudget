@@ -92,7 +92,7 @@ export default function AccountDetailPage() {
           <input 
             type="text" 
             placeholder="Search description..." 
-            className="bg-transparent outline-none w-full text-sm"
+            className="bg-transparent outline-none w-full text-sm text-slate-900 dark:text-white"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
