@@ -180,3 +180,22 @@ func (r *Repository) rolloverBudgets(ctx context.Context, userID string, targetM
 	_, err = r.pool.Exec(ctx, queryCopy, targetStart, targetEnd, userID, *latestStart)
 	return err
 }
+
+func (r *Repository) ListAllBudgets(ctx context.Context, userID string) ([]domain.Budget, error) {
+	query := `SELECT id, name, category_id, amount, period_type, start_date, end_date FROM budgets WHERE user_id = $1`
+	rows, err := r.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var budgets []domain.Budget
+	for rows.Next() {
+		var b domain.Budget
+		if err := rows.Scan(&b.ID, &b.Name, &b.CategoryID, &b.Amount, &b.PeriodType, &b.StartDate, &b.EndDate); err != nil {
+			return nil, err
+		}
+		budgets = append(budgets, b)
+	}
+	return budgets, nil
+}

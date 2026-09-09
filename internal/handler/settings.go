@@ -103,3 +103,24 @@ func (h *Handler) DeleteUserAccount(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "account deleted"})
 }
+
+// ExportAllDataJSON exports all user data in JSON format
+func (h *Handler) ExportAllDataJSON(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	data, err := h.svc.ExportAllData(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to export data")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="ppbudget_backup.json"`)
+
+	json.NewEncoder(w).Encode(data)
+}
+

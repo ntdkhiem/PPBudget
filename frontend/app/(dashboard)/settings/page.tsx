@@ -100,6 +100,37 @@ export default function SettingsPage() {
     }
   };
 
+  const handleExportAllData = async () => {
+    try {
+      setIsExporting(true);
+      const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
+      const res = await fetch(`${backendUrl}/settings/export/all`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to export backup data");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ppbudget_backup_${new Date().toISOString().split("T")[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success("Backup Export successful");
+    } catch (err: any) {
+      toast.error(err.message || "Export failed");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleDeleteAccount = async () => {
     if (!window.confirm("Are you absolutely sure? This will permanently delete all your financial data.")) {
       return;
@@ -201,7 +232,7 @@ export default function SettingsPage() {
           </div>
         </div>
         <div className="p-6">
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between mb-4">
             <div className="text-sm text-slate-600 dark:text-slate-400 max-w-lg leading-relaxed">
               Download a complete CSV export of all your transactions. This includes dates, amounts, categories, and account information.
             </div>
@@ -213,6 +244,20 @@ export default function SettingsPage() {
             >
               <Download className="h-4 w-4" />
               {isExporting ? "Exporting..." : "Export Transactions (CSV)"}
+            </Button>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between border-t border-slate-100 dark:border-slate-800 pt-4">
+            <div className="text-sm text-slate-600 dark:text-slate-400 max-w-lg leading-relaxed">
+              Download a complete JSON backup of all your data. This includes transactions, accounts, budgets, rules, and subscriptions.
+            </div>
+            <Button
+              onClick={handleExportAllData}
+              disabled={isExporting}
+              variant="outline"
+              className="flex items-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl shadow-sm shrink-0"
+            >
+              <Database className="h-4 w-4" />
+              {isExporting ? "Exporting..." : "Full Backup (JSON)"}
             </Button>
           </div>
         </div>
