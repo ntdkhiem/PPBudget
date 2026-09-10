@@ -13,6 +13,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { format } from "date-fns";
+import { PageContainer } from "@/components/page-container";
 
 // Types
 interface SimpleFinAccount {
@@ -246,7 +247,7 @@ export default function SimpleFinImporterWizard() {
   );
 
   return (
-    <div className="max-w-3xl mx-auto py-10 px-4">
+    <PageContainer maxWidth="4xl">
       <div className="mb-10 text-center">
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-500/25 mb-4">
           <Database className="w-8 h-8" />
@@ -623,6 +624,6 @@ export default function SimpleFinImporterWizard() {
 
         </AnimatePresence>
       </div>
-    </div>
+    </PageContainer>
   );
 }

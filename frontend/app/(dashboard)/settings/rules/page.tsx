@@ -11,6 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PageContainer } from "@/components/page-container";
+import { PageHeader } from "@/components/page-header";
 
 function RulesContent() {
   const queryClient = useQueryClient();
@@ -18,6 +21,7 @@ function RulesContent() {
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<Partial<Rule> | null>(null);
+  const [ruleToDelete, setRuleToDelete] = useState<string | null>(null);
 
   // Apply to Past State
   const [runOnPast, setRunOnPast] = useState(false);
@@ -140,20 +144,18 @@ function RulesContent() {
   if (loadingRules) return <div className="p-8 text-center text-slate-500">Loading rules...</div>;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-12">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 mb-2">Rules Engine</h1>
-          <p className="text-slate-500 text-lg">Automate your finances with powerful, sleek matching rules.</p>
-        </div>
+    <PageContainer maxWidth="5xl">
+      <PageHeader 
+        title="Rules Engine" 
+        description="Automate your finances with powerful, sleek matching rules."
+      >
         <Button 
           onClick={openCreate}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg hover:shadow-xl transition-all rounded-full px-6 py-6 h-auto flex items-center gap-2"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 h-11 shadow-md shadow-indigo-500/20 flex items-center gap-2 transition-all active:scale-95"
         >
-          <Plus size={20} />
-          <span className="font-semibold">Create Rule</span>
+          <Plus size={18} className="mr-1" /> Add Rule
         </Button>
-      </div>
+      </PageHeader>
 
       <div className="space-y-6 mt-8">
         {rules?.length === 0 ? (
@@ -220,9 +222,7 @@ function RulesContent() {
                       variant="ghost" 
                       size="icon"
                       onClick={() => {
-                        if (confirm("Are you sure you want to delete this rule?")) {
-                          deleteMutation.mutate(rule.id!);
-                        }
+                        setRuleToDelete(rule.id!);
                       }}
                       className="h-8 w-8 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-500/10"
                     >
@@ -235,6 +235,23 @@ function RulesContent() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!ruleToDelete}
+        onOpenChange={(open) => !open && setRuleToDelete(null)}
+        title="Delete Rule"
+        description="Are you sure you want to delete this rule? This action cannot be undone."
+        confirmText="Delete Rule"
+        isDestructive={true}
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (ruleToDelete) {
+            deleteMutation.mutate(ruleToDelete, {
+              onSuccess: () => setRuleToDelete(null)
+            });
+          }
+        }}
+      />
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-[90vw] h-[90vh] overflow-y-auto bg-white dark:bg-slate-900/95 backdrop-blur-xl border-slate-200 dark:border-slate-800 shadow-2xl p-0 flex flex-col">
@@ -478,7 +495,7 @@ function RulesContent() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }
 

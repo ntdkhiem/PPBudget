@@ -14,6 +14,10 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PageContainer } from "@/components/page-container";
+import { DashboardCard } from "@/components/dashboard-card";
+import { PageHeader } from "@/components/page-header";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -32,6 +36,7 @@ export default function SettingsPage() {
     rules: true,
     subscriptions: true,
   });
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   const handleTestEmail = async () => {
     try {
@@ -141,9 +146,6 @@ export default function SettingsPage() {
   };
 
   const handleDeleteAccount = async () => {
-    if (!window.confirm("Are you absolutely sure? This will permanently delete all your financial data.")) {
-      return;
-    }
 
     try {
       setIsDeleting(true);
@@ -160,31 +162,27 @@ export default function SettingsPage() {
     } catch (err: any) {
       toast.error(err.message || "Failed to delete account");
       setIsDeleting(false);
+      setIsDeleteConfirmOpen(false);
     }
   };
 
   return (
-    <div className="flex-1 p-6 md:p-8 max-w-6xl mx-auto space-y-8">
-      {/* Header */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-            <ShieldCheck className="h-6 w-6" />
+    <PageContainer maxWidth="6xl">
+      <PageHeader 
+        title={
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+            Settings & Preferences
           </div>
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-heading">
-              Settings & Preferences
-            </h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Manage your personal tenant security, webhooks, automation rules, and data connections.
-            </p>
-          </div>
-        </div>
-      </div>
+        }
+        description="Manage your personal tenant security, webhooks, automation rules, and data connections."
+      />
 
 
       {/* Security */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
+      <DashboardCard className="p-0 overflow-hidden">
         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
           <div className="p-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl">
             <Lock className="h-5 w-5" />
@@ -227,10 +225,10 @@ export default function SettingsPage() {
             </div>
           </form>
         </div>
-      </div>
+      </DashboardCard>
 
       {/* Data Management */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
+      <DashboardCard className="p-0 overflow-hidden">
         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
           <div className="p-2 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl">
             <Database className="h-5 w-5" />
@@ -285,10 +283,10 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-      </div>
+      </DashboardCard>
 
       {/* Email Notifications */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
+      <DashboardCard className="p-0 overflow-hidden">
         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
           <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl">
             <Mail className="h-5 w-5" />
@@ -314,37 +312,46 @@ export default function SettingsPage() {
             </Button>
           </div>
         </div>
-      </div>
+      </DashboardCard>
 
       {/* Danger Zone */}
-      <div className="bg-red-50/50 dark:bg-red-950/10 border border-red-200 dark:border-red-900/50 rounded-2xl shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-red-100 dark:border-red-900/30 flex items-center gap-3">
-          <div className="p-2 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-xl">
+      <DashboardCard className="p-0 overflow-hidden bg-rose-50/50 dark:bg-rose-950/10 border-rose-200 dark:border-rose-900/50">
+        <div className="p-6 border-b border-rose-100 dark:border-rose-900/30 flex items-center gap-3">
+          <div className="p-2 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-xl">
             <AlertTriangle className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-red-700 dark:text-red-400">Danger Zone</h2>
-            <p className="text-xs text-red-600/80 dark:text-red-400/80">Irreversible account actions</p>
+            <h2 className="text-lg font-bold text-rose-700 dark:text-rose-400">Danger Zone</h2>
+            <p className="text-xs text-rose-600/80 dark:text-rose-400/80">Irreversible account actions</p>
           </div>
         </div>
         <div className="p-6">
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-            <div className="text-sm text-red-700/90 dark:text-red-400/90 max-w-lg font-medium">
+            <div className="text-sm text-rose-700/90 dark:text-rose-400/90 max-w-lg font-medium">
               Permanently delete your account and all associated financial data. This action cannot be undone.
             </div>
             <Button
-              onClick={handleDeleteAccount}
+              onClick={() => setIsDeleteConfirmOpen(true)}
               disabled={isDeleting}
               variant="destructive"
-              className="bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-sm shrink-0"
+              className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-sm shrink-0"
             >
               {isDeleting ? "Deleting..." : "Delete Account"}
             </Button>
           </div>
         </div>
-      </div>
+      </DashboardCard>
 
-
-    </div>
+      <ConfirmDialog
+        open={isDeleteConfirmOpen}
+        onOpenChange={setIsDeleteConfirmOpen}
+        title="Delete Account"
+        description="Are you absolutely sure? This will permanently delete all your financial data and cannot be undone."
+        confirmText="Yes, Delete Account"
+        isDestructive={true}
+        isLoading={isDeleting}
+        onConfirm={handleDeleteAccount}
+      />
+    </PageContainer>
   );
 }

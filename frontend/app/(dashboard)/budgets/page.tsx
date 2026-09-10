@@ -15,6 +15,10 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageContainer } from "@/components/page-container";
+import { DashboardCard } from "@/components/dashboard-card";
+import { PageHeader } from "@/components/page-header";
 
 export default function BudgetsPage() {
   const queryClient = useQueryClient();
@@ -118,31 +122,38 @@ export default function BudgetsPage() {
   const globalRemaining = Math.max(0, totalLimit - totalSpent);
   
   const isOverPacing = globalProgress > monthProgress;
+  
+  const handleAddBudgetOpenChange = (open: boolean) => {
+    if (!open) {
+      if (newCategoryId || newLimit) {
+        if (window.confirm("Are you sure you want to cancel? Any unsaved changes will be lost.")) {
+          setIsAddModalOpen(false);
+          setNewCategoryId("");
+          setNewLimit("");
+        }
+      } else {
+        setIsAddModalOpen(false);
+      }
+    } else {
+      setIsAddModalOpen(true);
+    }
+  };
 
   if (loadingBudgets) return <div className="p-8 text-center text-slate-500">Loading budgets...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 pb-12">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100 mb-2">Budgets</h1>
-          <p className="text-slate-500">Track and manage your spending limits.</p>
+    <PageContainer>
+      <PageHeader title="Budgets" description="Track and manage your spending limits.">
+        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-1 shadow-sm mr-2">
+          <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900 dark:text-slate-100"><ChevronLeft size={18}/></Button>
+          <span className="font-semibold w-24 text-center text-slate-700 dark:text-slate-300">{format(currentMonth, 'MMM yyyy')}</span>
+          <Button variant="ghost" size="icon" onClick={nextMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900 dark:text-slate-100"><ChevronRight size={18}/></Button>
         </div>
-        
-        <div className="flex items-center gap-4">
-          <div className="flex items-center bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 px-2 py-1.5">
-            <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900 dark:text-slate-100"><ChevronLeft size={18}/></Button>
-            <span className="font-semibold text-sm w-32 text-center text-slate-800 dark:text-slate-100">
-              {format(currentMonth, "MMMM yyyy")}
-            </span>
-            <Button variant="ghost" size="icon" onClick={nextMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900 dark:text-slate-100"><ChevronRight size={18}/></Button>
-          </div>
-
-          <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm rounded-xl px-5 h-11 transition-all active:scale-95 flex items-center gap-2">
-                <Plus size={18} /> New Budget
-              </Button>
+        <Dialog open={isAddModalOpen} onOpenChange={handleAddBudgetOpenChange}>
+          <DialogTrigger asChild>
+            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 h-11 shadow-md shadow-indigo-500/20 flex items-center gap-2 transition-all active:scale-95">
+              <Plus size={18} /> New Budget
+            </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[425px]">
               <DialogHeader>
@@ -231,8 +242,7 @@ export default function BudgetsPage() {
               </div>
             </DialogContent>
           </Dialog>
-        </div>
-      </div>
+      </PageHeader>
 
       {/* Global Month Overview */}
       <motion.div 
@@ -467,6 +477,6 @@ export default function BudgetsPage() {
           })
         )}
       </div>
-    </div>
+    </PageContainer>
   );
 }

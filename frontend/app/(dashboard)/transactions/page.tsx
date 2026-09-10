@@ -77,6 +77,8 @@ import { toast } from "sonner";
 import { Plus, Trash2, Loader2, Edit2, CheckCircle2, SearchX, Inbox, ExternalLink, Check, ChevronsUpDown, Repeat, Search, ListFilter, ArrowRightLeft, XCircle, ChevronDown, Wallet, Unlink, Link, X } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { DashboardCard } from "@/components/dashboard-card";
+import { PageHeader } from "@/components/page-header";
 
 
 
@@ -545,25 +547,18 @@ export default function TransactionsPage() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="space-y-6 pb-10">
-      <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
-        <div>
-          <h1 className="text-4xl font-bold font-heading text-slate-900 dark:text-white mb-2">Transactions</h1>
-          <p className="text-slate-500 dark:text-slate-400">View and manage your transactions.</p>
-        </div>
-        
-        <div className="flex gap-3">
-          <Button 
-            variant="outline"
-            asChild
-            className="rounded-full shadow-md text-amber-600 border-amber-200 hover:bg-amber-50 flex items-center gap-2 px-6 bg-white dark:bg-slate-900"
-          >
-            <a href="/review">
-              <Inbox className="h-4 w-4" /> 
-              Needs Review {unreviewedTransactions?.length ? `(${unreviewedTransactions.length})` : ''}
-            </a>
-          </Button>
-
-          <AddTransactionDialog
+      <PageHeader title="Transactions" description="View and manage your transactions.">
+        <Button 
+          variant="outline"
+          asChild
+          className="rounded-xl shadow-sm text-amber-600 border-amber-200 hover:bg-amber-50 flex items-center gap-2 px-5 h-11 bg-white dark:bg-slate-900 transition-all active:scale-95"
+        >
+          <a href="/review">
+            <Inbox className="h-4 w-4" /> 
+            Needs Review {unreviewedTransactions?.length ? `(${unreviewedTransactions.length})` : ''}
+          </a>
+        </Button>
+        <AddTransactionDialog
           isOpen={isAddOpen}
           onOpenChange={setIsAddOpen}
           onSubmit={handleCreateSubmit}
@@ -572,8 +567,7 @@ export default function TransactionsPage() {
           categories={categories}
           subscriptions={subscriptions}
         />
-        </div>
-      </div>
+      </PageHeader>
 
       <TransactionFilters 
         searchQuery={searchQuery}
@@ -636,8 +630,8 @@ export default function TransactionsPage() {
                           Clear Filters
                         </Button>
                       ) : (
-                        <Button onClick={() => setIsAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md">
-                          <Plus className="mr-2 h-4 w-4" /> Add Transaction
+                        <Button onClick={() => setIsAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 h-11 shadow-md shadow-indigo-500/20 transition-all active:scale-95 flex items-center gap-2">
+                          <Plus className="h-4 w-4" /> Add Transaction
                         </Button>
                       )
                     }

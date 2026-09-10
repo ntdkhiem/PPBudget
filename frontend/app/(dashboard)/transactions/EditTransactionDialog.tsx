@@ -222,9 +222,22 @@ export default function EditTransactionDialog({
   setPaidBy,
   transactions,
 }: EditTransactionDialogProps) {
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      if (window.confirm("Are you sure you want to cancel? Any unsaved changes will be lost.")) {
+        onOpenChange(false);
+      }
+    } else {
+      onOpenChange(true);
+    }
+  };
+
   return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-[95vw] w-full h-[95vh] sm:max-w-5xl rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-white dark:bg-slate-900/95 dark:bg-slate-900/95 backdrop-blur-xl flex flex-col p-8 overflow-hidden">
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+        <DialogContent 
+          onInteractOutside={(e) => e.preventDefault()}
+          className="max-w-[95vw] w-full h-[95vh] sm:max-w-5xl rounded-3xl border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-white dark:bg-slate-900/95 dark:bg-slate-900/95 backdrop-blur-xl flex flex-col p-8 overflow-hidden"
+        >
           <DialogHeader className="mb-6 shrink-0">
             <DialogTitle className="text-3xl font-bold font-heading text-slate-900 dark:text-white">Edit Transaction</DialogTitle>
             <DialogDescription className="text-lg">Update the details of this transaction.</DialogDescription>
@@ -307,7 +320,7 @@ export default function EditTransactionDialog({
                   </div>
                 </div>
                 <div className="pt-8 flex gap-4 shrink-0">
-                  <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="flex-1 rounded-xl py-8 text-xl border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800">
+                  <Button type="button" variant="outline" onClick={() => handleOpenChange(false)} className="flex-1 rounded-xl py-8 text-xl border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800">
                     Cancel
                   </Button>
                   <Button 

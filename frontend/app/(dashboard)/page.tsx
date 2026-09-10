@@ -17,6 +17,9 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet, ShieldCheck, Inbox, CalendarClock, AlertCircle } from "lucide-react";
+import { PageContainer } from "@/components/page-container";
+import { DashboardCard } from "@/components/dashboard-card";
+import { PageHeader } from "@/components/page-header";
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -146,14 +149,10 @@ export default function DashboardPage() {
   const savingsRate = inPeriod > 0 ? ((inPeriod - outPeriod) / inPeriod) * 100 : 0;
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="space-y-8">
+    <PageContainer maxWidth="6xl">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="space-y-8">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold font-heading text-slate-900 dark:text-white">Dashboard Overview</h1>
-          <p className="text-slate-500 dark:text-slate-400">Quick access to your finances.</p>
-        </div>
-      </div>
+      <PageHeader title="Dashboard Overview" description="Quick access to your finances." />
 
       {/* Summary Boxes */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -351,7 +350,7 @@ export default function DashboardPage() {
         <div className="lg:col-span-2 space-y-6">
           
           {/* Recent Transactions Widget */}
-          <div className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
+          <DashboardCard className="">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
                 <ReceiptText className="h-5 w-5 text-indigo-600" />
@@ -386,10 +385,10 @@ export default function DashboardPage() {
             ) : (
               <p className="text-sm text-slate-500 text-center py-6">No recent transactions found.</p>
             )}
-          </div>
+          </DashboardCard>
 
           {/* Active Budgets Widget */}
-          <div className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60">
+          <DashboardCard className="">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
                 <PieChart className="h-5 w-5 text-indigo-600" />
@@ -422,7 +421,7 @@ export default function DashboardPage() {
             ) : (
               <p className="text-sm text-slate-500 text-center py-6">No active budgets for this month.</p>
             )}
-          </div>
+          </DashboardCard>
 
         </div>
 
@@ -430,7 +429,7 @@ export default function DashboardPage() {
         <div className="space-y-6">
           
           {/* Top Spending Categories Widget */}
-          <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800">
+          <DashboardCard className="">
             <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-4">Top Spending</h2>
             {expensesByCategory.length > 0 ? (
               <div className="flex flex-col items-center">
@@ -471,11 +470,11 @@ export default function DashboardPage() {
             ) : (
               <p className="text-sm text-slate-500 text-center py-6">No expenses found.</p>
             )}
-          </div>
+          </DashboardCard>
 
 
           {/* Savings Rate Trend */}
-          <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800">
+          <DashboardCard className="">
             <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-2">Savings Rate</h2>
             <div className="flex items-end gap-3">
               <span className={`text-4xl font-extrabold tracking-tight ${savingsRate >= 20 ? 'text-emerald-600 dark:text-emerald-400' : savingsRate > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
@@ -485,10 +484,10 @@ export default function DashboardPage() {
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
               You saved {formatCurrency(Math.max(0, inPeriod - outPeriod))} out of {formatCurrency(inPeriod)} income this period.
             </p>
-          </div>
+          </DashboardCard>
 
           {/* Subscriptions Stub */}
-          <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800">
+          <DashboardCard className="">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
                 <Repeat className="h-5 w-5 text-indigo-600" />
@@ -502,12 +501,10 @@ export default function DashboardPage() {
                 Manage Subscriptions
               </Button>
             </Link>
-          </div>
-
+          </DashboardCard>
         </div>
       </div>
-
-
     </motion.div>
+    </PageContainer>
   );
 }

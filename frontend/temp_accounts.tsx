@@ -12,10 +12,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Wallet, CreditCard, Plus, ReceiptText, ArrowUpRight } from "lucide-react";
 import { toast } from "sonner";
-import { EmptyState } from "@/components/ui/empty-state";
-import { PageContainer } from "@/components/page-container";
-import { DashboardCard } from "@/components/dashboard-card";
-import { PageHeader } from "@/components/page-header";
 
 export default function AccountsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -153,11 +149,15 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="pb-10">
-      <PageHeader title="Accounts" description="Manage your assets and liabilities.">
+      <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
+        <div>
+          <h1 className="text-4xl font-bold font-heading text-slate-900 dark:text-white mb-2">Accounts</h1>
+          <p className="text-slate-500 dark:text-slate-400">Manage your assets and liabilities.</p>
+        </div>
         
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 h-11 shadow-md shadow-indigo-500/20 flex items-center gap-2 transition-all active:scale-95">
+            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-6 shadow-md shadow-indigo-500/20 flex items-center gap-2">
               <Plus className="h-4 w-4" /> Add Account
             </Button>
           </DialogTrigger>
@@ -238,7 +238,7 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
             )}
           </DialogContent>
         </Dialog>
-      </PageHeader>
+      </div>
 
       <div className="space-y-12">
         <section>

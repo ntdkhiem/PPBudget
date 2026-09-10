@@ -15,6 +15,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
+import { PageContainer } from "@/components/page-container";
+import { DashboardCard } from "@/components/dashboard-card";
+import { PageHeader } from "@/components/page-header";
 
 export default function CategoriesPage() {
   const queryClient = useQueryClient();
@@ -196,27 +199,25 @@ export default function CategoriesPage() {
     return (
       <div className="mb-8">
         <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4 px-2">{title}</h3>
-        <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <DashboardCard className="p-0 overflow-hidden">
           <div className="grid grid-cols-1 divide-y divide-slate-100 dark:divide-slate-800">
             <AnimatePresence>
               {list.map(renderCategoryItem)}
             </AnimatePresence>
           </div>
-        </div>
+        </DashboardCard>
       </div>
     );
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 pb-12">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-2">Categories</h1>
-          <p className="text-slate-500 text-lg">Organize your spending into custom groups.</p>
-        </div>
-      </div>
+    <PageContainer maxWidth="4xl">
+      <PageHeader 
+        title="Categories" 
+        description="Organize your spending into custom groups." 
+      />
 
-      <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm mb-8 flex flex-col sm:flex-row gap-4 items-center">
+      <DashboardCard className="mb-8 flex flex-col sm:flex-row gap-4 items-center">
         <div className="p-3 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-xl hidden sm:block">
           <Tag className="h-5 w-5" />
         </div>
@@ -239,11 +240,11 @@ export default function CategoriesPage() {
         <Button
           onClick={() => newCatName && createMutation.mutate({ name: newCatName, type: newCatType })}
           disabled={createMutation.isPending || !newCatName}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-6 py-6"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 h-11 shadow-md shadow-indigo-500/20 flex items-center gap-2 transition-all active:scale-95"
         >
-          <Plus size={20} className="mr-2" /> Add
+          <Plus size={18} /> Add
         </Button>
-      </div>
+      </DashboardCard>
 
       <div>
         {categories?.length === 0 ? (
@@ -297,6 +298,6 @@ export default function CategoriesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }

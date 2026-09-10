@@ -15,6 +15,10 @@ import Link from "next/link";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { format, parseISO, formatDistanceToNow, isPast, isToday } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageContainer } from "@/components/page-container";
+import { DashboardCard } from "@/components/dashboard-card";
+import { PageHeader } from "@/components/page-header";
 
 function SubscriptionsContent() {
   const queryClient = useQueryClient();
@@ -150,20 +154,15 @@ function SubscriptionsContent() {
   }, 0);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-12">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 mb-2">Recurring Payments</h1>
-          <p className="text-slate-500 text-lg">Manage recurring payments and track expected costs.</p>
-        </div>
+    <PageContainer>
+      <PageHeader title="Recurring Payments" description="Manage recurring payments and track expected costs.">
         <Button 
           onClick={() => handleOpenSub()}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg hover:shadow-xl transition-all rounded-full px-6 py-6 h-auto flex items-center gap-2"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/20 rounded-xl px-5 h-11 flex items-center gap-2 transition-all active:scale-95"
         >
-          <Plus size={20} />
-          <span className="font-semibold">Add Subscription</span>
+          <Plus size={18} /> Add Subscription
         </Button>
-      </div>
+      </PageHeader>
 
       <div className="bg-white dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="grid grid-cols-1 divide-y divide-slate-100 dark:divide-slate-800">
@@ -328,7 +327,7 @@ function SubscriptionsContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }
 

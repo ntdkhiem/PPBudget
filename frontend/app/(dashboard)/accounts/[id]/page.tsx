@@ -6,6 +6,8 @@ import { useState, useMemo } from "react";
 import { apiFetch, Transaction, Category } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Plus, Search, Calendar, Filter, X } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PageHeader } from "@/components/page-header";
 
 export default function AccountDetailPage() {
   const params = useParams();
@@ -88,7 +90,7 @@ export default function AccountDetailPage() {
       {/* Filtering Bar */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-lg shadow mb-6 flex flex-wrap gap-4 items-center">
         <div className="flex items-center bg-gray-100 rounded px-3 py-2 flex-1 min-w-[200px]">
-          <Search size={18} className="text-gray-500 mr-2" />
+          <Search size={18} className="text-slate-500 dark:text-slate-400 mr-2" />
           <input 
             type="text" 
             placeholder="Search description..." 
@@ -98,13 +100,13 @@ export default function AccountDetailPage() {
           />
         </div>
         <div className="flex items-center gap-2">
-          <Calendar size={18} className="text-gray-500" />
+          <Calendar size={18} className="text-slate-500 dark:text-slate-400" />
           <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="border rounded px-2 py-1 text-sm" />
-          <span className="text-gray-500">-</span>
+          <span className="text-slate-500 dark:text-slate-400">-</span>
           <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="border rounded px-2 py-1 text-sm" />
         </div>
         <div className="flex items-center gap-2 border rounded px-3 py-1 bg-white dark:bg-slate-900">
-          <Filter size={18} className="text-gray-500" />
+          <Filter size={18} className="text-slate-500 dark:text-slate-400" />
           <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className="outline-none text-sm bg-transparent">
             <option value="">All Categories</option>
             {categories?.map(c => (
@@ -116,30 +118,30 @@ export default function AccountDetailPage() {
 
       {/* Transactions Table */}
       <div className="bg-white dark:bg-slate-900 rounded-lg shadow overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+          <thead className="bg-slate-50 dark:bg-slate-900/50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Date</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Description</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Category</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Amount</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Balance</th>
             </tr>
           </thead>
-          <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-200">
+          <tbody className="bg-white dark:bg-slate-900 divide-y divide-slate-200 dark:divide-slate-800">
             {filteredTxns.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-gray-500">No transactions found.</td>
+                <td colSpan={5} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">No transactions found.</td>
               </tr>
             )}
             {filteredTxns.map((txn) => {
               const isEditing = editingTxn === txn.id;
               return (
-                <tr key={txn.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => !isEditing && startEdit(txn)}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                <tr key={txn.id} className="hover:bg-slate-50 dark:bg-slate-900/50 cursor-pointer" onClick={() => !isEditing && startEdit(txn)}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-white">
                     {formatDate(txn.date)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-white">
                     {isEditing ? (
                       <input 
                         type="text" 
@@ -152,7 +154,7 @@ export default function AccountDetailPage() {
                       txn.description
                     )}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-white">
                     {isEditing ? (
                       <select 
                         value={editCatId} 
@@ -165,22 +167,22 @@ export default function AccountDetailPage() {
                         ))}
                       </select>
                     ) : (
-                      <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs">
+                      <span className="bg-gray-100 text-slate-700 dark:text-slate-300 px-2 py-1 rounded text-xs">
                         {categories?.find(c => c.id === txn.category_id)?.name || "Uncategorized"}
                       </span>
                     )}
                   </td>
-                  <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${txn.amount < 0 ? "text-red-600" : "text-green-600"}`}>
+                  <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                     {formatCurrency(txn.amount)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-gray-900">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-slate-900 dark:text-white">
                     {formatCurrency(txn.running_balance || 0)}
                   </td>
                   {isEditing && (
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                       <div className="flex gap-2 justify-end">
-                        <button onClick={(e) => { e.stopPropagation(); saveEdit(txn.id); }} className="text-green-600 font-bold hover:underline">Save</button>
-                        <button onClick={(e) => { e.stopPropagation(); setEditingTxn(null); }} className="text-gray-500 font-bold hover:underline">Cancel</button>
+                        <button onClick={(e) => { e.stopPropagation(); saveEdit(txn.id); }} className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline">Save</button>
+                        <button onClick={(e) => { e.stopPropagation(); setEditingTxn(null); }} className="text-slate-500 dark:text-slate-400 font-bold hover:underline">Cancel</button>
                       </div>
                     </td>
                   )}
@@ -225,19 +227,19 @@ function ManualEntryModal({ accountId, onClose, token }: { accountId: string, on
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-slate-900 p-6 rounded-lg shadow-xl w-96 relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-800"><X size={20}/></button>
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-slate-900 dark:text-white"><X size={20}/></button>
         <h2 className="text-xl font-bold mb-4">Add Transaction</h2>
         <div className="flex flex-col gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description</label>
             <input type="text" value={desc} onChange={e => setDesc(e.target.value)} className="w-full border rounded p-2" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Amount ($)</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Amount ($)</label>
             <input type="number" step="0.01" value={amt} onChange={e => setAmt(e.target.value)} className="w-full border rounded p-2" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full border rounded p-2" />
           </div>
           <button 
