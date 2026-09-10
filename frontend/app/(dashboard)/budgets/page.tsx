@@ -35,17 +35,34 @@ export default function BudgetsPage() {
   const [expectedPaycheckStr, setExpectedPaycheckStr] = useState("");
   const [isEditingPaycheck, setIsEditingPaycheck] = useState(false);
 
+  const { data: paycheckData, isLoading: loadingPaycheck } = useQuery<{value: string}>({
+    queryKey: ["setting", "expected_paycheck"],
+    queryFn: () => apiFetch<{value: string}>("/settings/values/expected_paycheck", {}, token),
+  });
+
   useEffect(() => {
-    const saved = localStorage.getItem("ppbudget_expected_paycheck");
-    if (saved) setExpectedPaycheckStr(saved);
-  }, []);
+    if (paycheckData?.value) {
+      setExpectedPaycheckStr(paycheckData.value);
+    }
+  }, [paycheckData]);
 
   const expectedPaycheck = parseFloat(expectedPaycheckStr) || 0;
   const expectedPaycheckCents = expectedPaycheck * 100;
 
+  const savePaycheckMutation = useMutation({
+    mutationFn: (value: string) => apiFetch("/settings/values/expected_paycheck", {
+      method: "PUT",
+      body: JSON.stringify({ value })
+    }, token),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setting", "expected_paycheck"] });
+      setIsEditingPaycheck(false);
+      toast.success("Expected paycheck saved");
+    }
+  });
+
   const handleSavePaycheck = () => {
-    localStorage.setItem("ppbudget_expected_paycheck", expectedPaycheckStr);
-    setIsEditingPaycheck(false);
+    savePaycheckMutation.mutate(expectedPaycheckStr);
   };
 
   // New Budget Modal State

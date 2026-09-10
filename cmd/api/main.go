@@ -111,6 +111,8 @@ func main() {
 			r.Use(middleware.RequireJWT(cfg.JWTSecret))
 
 			// Settings
+			r.Get("/settings/values/{key}", h.GetUserSettingValue)
+			r.Put("/settings/values/{key}", h.SetUserSettingValue)
 
 			r.Post("/settings/password", h.ChangePassword)
 			r.Get("/settings/export/transactions", h.ExportTransactionsCSV)

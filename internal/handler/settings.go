@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"ntdkhiem/ppbudget-go/internal/auth"
 	"ntdkhiem/ppbudget-go/internal/middleware"
 )
@@ -129,5 +131,43 @@ func (h *Handler) ExportAllDataJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="ppbudget_backup.json"`)
 
 	json.NewEncoder(w).Encode(data)
+}
+
+// GetUserSettingValue returns a specific setting value for the user
+func (h *Handler) GetUserSettingValue(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	key := chi.URLParam(r, "key")
+	val, err := h.svc.GetUserSetting(r.Context(), userID, key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get setting")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"value": val})
+}
+
+// SetUserSettingValue sets a specific setting value for the user
+func (h *Handler) SetUserSettingValue(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	key := chi.URLParam(r, "key")
+	var req struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+	if err := h.svc.SetUserSetting(r.Context(), userID, key, req.Value); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set setting")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

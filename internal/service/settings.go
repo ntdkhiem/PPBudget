@@ -5,6 +5,14 @@ import (
 	"ntdkhiem/ppbudget-go/internal/repository"
 )
 
+func (s *Service) GetUserSetting(ctx context.Context, userID, key string) (string, error) {
+	return s.repo.GetUserSetting(ctx, userID, key)
+}
+
+func (s *Service) SetUserSetting(ctx context.Context, userID, key, value string) error {
+	return s.repo.SetUserSetting(ctx, userID, key, value)
+}
+
 func (s *Service) ExportTransactions(ctx context.Context, userID string) ([]repository.ExportTransactionRow, error) {
 	return s.repo.ExportTransactions(ctx, userID)
 }
