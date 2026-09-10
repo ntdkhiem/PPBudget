@@ -454,6 +454,13 @@ func (h *Handler) CreateBudget(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
+	if budget.Bucket == "" {
+		budget.Bucket = "needs"
+	} else if budget.Bucket != "needs" && budget.Bucket != "wants" && budget.Bucket != "savings" {
+		writeError(w, http.StatusBadRequest, "invalid bucket")
+		return
+	}
+
 	if err := h.svc.CreateBudget(r.Context(), userID, &budget); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create budget")
 		return
@@ -474,6 +481,13 @@ func (h *Handler) UpdateBudget(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
+	if budget.Bucket == "" {
+		budget.Bucket = "needs"
+	} else if budget.Bucket != "needs" && budget.Bucket != "wants" && budget.Bucket != "savings" {
+		writeError(w, http.StatusBadRequest, "invalid bucket")
+		return
+	}
+
 	budget.ID = id
 	if err := h.svc.UpdateBudget(r.Context(), userID, &budget); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {

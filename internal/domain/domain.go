@@ -106,6 +106,7 @@ type Budget struct {
 	PeriodType string      `json:"period_type"`
 	StartDate  time.Time   `json:"start_date"`
 	EndDate    time.Time   `json:"end_date"`
+	Bucket     string      `json:"bucket"`
 	CreatedAt  time.Time   `json:"created_at"`
 	UpdatedAt  time.Time   `json:"updated_at"`
 }

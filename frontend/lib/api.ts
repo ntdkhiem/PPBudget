@@ -101,6 +101,7 @@ export interface Budget {
   period_type: string;
   start_date: string;
   end_date: string;
+  bucket?: "needs" | "wants" | "savings";
 }
 
 export interface BudgetSummary extends Budget {

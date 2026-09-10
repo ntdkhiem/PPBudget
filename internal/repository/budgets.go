@@ -17,10 +17,10 @@ func (r *Repository) CreateBudget(ctx context.Context, budget *domain.Budget) er
 		}
 	}
 	query := `
-		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at, updated_at
+		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, bucket, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at, updated_at
 	`
-	err := r.pool.QueryRow(ctx, query, budget.Name, budget.CategoryID, budget.Amount.ToInt64(), budget.PeriodType, budget.StartDate, budget.EndDate, budget.UserID).
+	err := r.pool.QueryRow(ctx, query, budget.Name, budget.CategoryID, budget.Amount.ToInt64(), budget.PeriodType, budget.StartDate, budget.EndDate, budget.Bucket, budget.UserID).
 		Scan(&budget.ID, &budget.CreatedAt, &budget.UpdatedAt)
 	return err
 }
@@ -32,10 +32,10 @@ func (r *Repository) UpdateBudget(ctx context.Context, budget *domain.Budget) er
 		}
 	}
 	query := `
-		UPDATE budgets SET name = $1, category_id = $2, amount = $3, period_type = $4, start_date = $5, end_date = $6, updated_at = NOW()
-		WHERE id = $7 AND user_id = $8 RETURNING updated_at
+		UPDATE budgets SET name = $1, category_id = $2, amount = $3, period_type = $4, start_date = $5, end_date = $6, bucket = $7, updated_at = NOW()
+		WHERE id = $8 AND user_id = $9 RETURNING updated_at
 	`
-	err := r.pool.QueryRow(ctx, query, budget.Name, budget.CategoryID, budget.Amount.ToInt64(), budget.PeriodType, budget.StartDate, budget.EndDate, budget.ID, budget.UserID).
+	err := r.pool.QueryRow(ctx, query, budget.Name, budget.CategoryID, budget.Amount.ToInt64(), budget.PeriodType, budget.StartDate, budget.EndDate, budget.Bucket, budget.ID, budget.UserID).
 		Scan(&budget.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -107,7 +107,7 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, month
 			  AND b.end_date >= $2::date
 			GROUP BY b.id
 		)
-		SELECT b.id, b.user_id, b.name, b.category_id, b.amount as amount_cents, b.period_type, b.start_date, b.end_date, b.created_at, b.updated_at,
+		SELECT b.id, b.user_id, b.name, b.category_id, b.amount as amount_cents, b.period_type, b.start_date, b.end_date, b.bucket, b.created_at, b.updated_at,
 		       s.spent_total,
 			   (b.end_date - b.start_date) + 1 as total_days,
 			   (LEAST(CURRENT_DATE, b.end_date) - b.start_date) + 1 as elapsed_days
@@ -130,7 +130,7 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, month
 		var totalDays int32
 		var elapsedDays int32
 
-		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.CategoryID, &amountCents, &s.PeriodType, &s.StartDate, &s.EndDate, &s.CreatedAt, &s.UpdatedAt, &spentTotal, &totalDays, &elapsedDays); err != nil {
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.CategoryID, &amountCents, &s.PeriodType, &s.StartDate, &s.EndDate, &s.Bucket, &s.CreatedAt, &s.UpdatedAt, &spentTotal, &totalDays, &elapsedDays); err != nil {
 			return nil, err
 		}
 
@@ -172,8 +172,8 @@ func (r *Repository) rolloverBudgets(ctx context.Context, userID string, targetM
 	}
 
 	queryCopy := `
-		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, user_id, created_at, updated_at)
-		SELECT name, category_id, amount, period_type, $1, $2, $3, NOW(), NOW()
+		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, bucket, user_id, created_at, updated_at)
+		SELECT name, category_id, amount, period_type, $1, $2, bucket, $3, NOW(), NOW()
 		FROM budgets
 		WHERE user_id = $3 AND start_date = $4 AND period_type != 'one_time'
 	`
@@ -182,7 +182,7 @@ func (r *Repository) rolloverBudgets(ctx context.Context, userID string, targetM
 }
 
 func (r *Repository) ListAllBudgets(ctx context.Context, userID string) ([]domain.Budget, error) {
-	query := `SELECT id, name, category_id, amount, period_type, start_date, end_date FROM budgets WHERE user_id = $1`
+	query := `SELECT id, name, category_id, amount, period_type, start_date, end_date, bucket FROM budgets WHERE user_id = $1`
 	rows, err := r.pool.Query(ctx, query, userID)
 	if err != nil {
 		return nil, err
@@ -192,7 +192,7 @@ func (r *Repository) ListAllBudgets(ctx context.Context, userID string) ([]domai
 	var budgets []domain.Budget
 	for rows.Next() {
 		var b domain.Budget
-		if err := rows.Scan(&b.ID, &b.Name, &b.CategoryID, &b.Amount, &b.PeriodType, &b.StartDate, &b.EndDate); err != nil {
+		if err := rows.Scan(&b.ID, &b.Name, &b.CategoryID, &b.Amount, &b.PeriodType, &b.StartDate, &b.EndDate, &b.Bucket); err != nil {
 			return nil, err
 		}
 		budgets = append(budgets, b)
