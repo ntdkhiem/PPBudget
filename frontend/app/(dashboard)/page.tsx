@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet, ShieldCheck, Inbox, CalendarClock, AlertCircle, TrendingUp, Activity, AlertTriangle, PlusCircle, X, CheckCircle2 } from "lucide-react";
+import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet, ShieldCheck, Inbox, CalendarClock, AlertCircle, TrendingUp, Activity, AlertTriangle, PlusCircle, X, CheckCircle2, PartyPopper } from "lucide-react";
 import { PageContainer } from "@/components/page-container";
 import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
@@ -245,6 +245,87 @@ export default function DashboardPage() {
       {/* Header */}
       <PageHeader title="Dashboard Overview" description="Quick access to your finances." />
 
+      {/* 1. Insights & Alerts Widget */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="relative overflow-hidden border border-slate-200 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-3xl shadow-sm hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-500 flex flex-col p-6">
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20 pointer-events-none -z-10" />
+          
+          <div className="flex flex-row items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-bold font-heading text-slate-900 dark:text-white">
+                Insights & Alerts
+              </h2>
+            </div>
+            {insights.length > 0 && (
+              <div className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400">
+                {insights.length} updates
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 space-y-3 overflow-y-auto pr-2" style={{ maxHeight: '350px' }}>
+            <AnimatePresence>
+              {insights.map((insight) => {
+                const isHigh = insight.severity === 'high';
+                const isMed = insight.severity === 'medium';
+                
+                const borderColor = isHigh ? 'border-l-rose-500' : isMed ? 'border-l-amber-500' : 'border-l-blue-500';
+                const Icon = insight.type === 'anomaly' ? AlertTriangle : insight.type === 'subscription' ? PlusCircle : Inbox;
+                const iconColor = isHigh ? 'text-rose-500' : isMed ? 'text-amber-500' : 'text-blue-500';
+                const iconBg = isHigh ? 'bg-rose-100 dark:bg-rose-500/20' : isMed ? 'bg-amber-100 dark:bg-amber-500/20' : 'bg-blue-100 dark:bg-blue-500/20';
+
+                return (
+                  <motion.div 
+                    key={insight.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, height: 0, marginBottom: 0, scale: 0.9 }}
+                    className={`group relative flex flex-col p-4 bg-white dark:bg-slate-800/80 rounded-xl shadow-sm border-l-4 ${borderColor} border-y border-r border-slate-100 dark:border-y-slate-700 dark:border-r-slate-700`}
+                  >
+                    {insight.dismissable && (
+                      <button 
+                        onClick={() => dismissInsightMutation.mutate(insight.id)}
+                        className="absolute top-2 right-2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
+                        title="Dismiss"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                    
+                    <div className="flex items-start gap-3">
+                      <div className={`mt-0.5 p-2 rounded-full flex-shrink-0 ${iconBg} ${iconColor}`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 pr-6">
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-1">{insight.title}</h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-3">
+                          {formatDescription(insight.description)}
+                        </p>
+                        {insight.action_url && (
+                          <Link href={insight.action_url} className="mt-2 inline-flex items-center px-4 py-2 text-xs font-semibold bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-lg hover:opacity-90 transition-opacity">
+                            Resolve Action
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+            
+            {insights.length === 0 && !loadingInsights && (
+              <div className="flex flex-col items-center justify-center py-10 text-slate-500">
+                <PartyPopper className="w-12 h-12 mb-3 text-emerald-500/80 animate-bounce" />
+                <p className="text-base font-bold text-slate-900 dark:text-white">All caught up!</p>
+                <p className="text-sm">You have zero pending alerts. Great job!</p>
+              </div>
+            )}
+          </div>
+        </motion.div>
+
       {/* Net Worth Progression Full Width */}
       <DashboardCard className="mb-8">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-6 gap-4">
@@ -410,85 +491,7 @@ export default function DashboardPage() {
 
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        {/* 1. Insights & Alerts Widget */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="relative overflow-hidden border border-slate-200 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-3xl shadow-sm hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-500 flex flex-col p-6">
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20 pointer-events-none -z-10" />
-          
-          <div className="flex flex-row items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400">
-                <AlertCircle className="w-5 h-5" />
-              </div>
-              <h2 className="text-lg font-bold font-heading text-slate-900 dark:text-white">
-                Insights & Alerts
-              </h2>
-            </div>
-            {insights.length > 0 && (
-              <div className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400">
-                {insights.length} updates
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1 space-y-3 overflow-y-auto pr-2" style={{ maxHeight: '350px' }}>
-            <AnimatePresence>
-              {insights.map((insight) => {
-                const isHigh = insight.severity === 'high';
-                const isMed = insight.severity === 'medium';
-                
-                const borderColor = isHigh ? 'border-l-rose-500' : isMed ? 'border-l-amber-500' : 'border-l-blue-500';
-                const Icon = insight.type === 'anomaly' ? AlertTriangle : insight.type === 'subscription' ? PlusCircle : Inbox;
-                const iconColor = isHigh ? 'text-rose-500' : isMed ? 'text-amber-500' : 'text-blue-500';
-                const iconBg = isHigh ? 'bg-rose-100 dark:bg-rose-500/20' : isMed ? 'bg-amber-100 dark:bg-amber-500/20' : 'bg-blue-100 dark:bg-blue-500/20';
-
-                return (
-                  <motion.div 
-                    key={insight.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, height: 0, marginBottom: 0, scale: 0.9 }}
-                    className={`group relative flex flex-col p-4 bg-white dark:bg-slate-800/80 rounded-xl shadow-sm border-l-4 ${borderColor} border-y border-r border-slate-100 dark:border-y-slate-700 dark:border-r-slate-700`}
-                  >
-                    {insight.dismissable && (
-                      <button 
-                        onClick={() => dismissInsightMutation.mutate(insight.id)}
-                        className="absolute top-2 right-2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
-                        title="Dismiss"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                    
-                    <div className="flex items-start gap-3">
-                      <div className={`mt-0.5 p-2 rounded-full flex-shrink-0 ${iconBg} ${iconColor}`}>
-                        <Icon className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 pr-6">
-                        <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-1">{insight.title}</h4>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-3">
-                          {formatDescription(insight.description)}
-                        </p>
-                        {insight.action_url && (
-                          <Link href={insight.action_url} className="inline-flex items-center text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 group/link">
-                            Resolve Action <ArrowRight className="w-3 h-3 ml-1 group-hover/link:translate-x-1 transition-transform" />
-                          </Link>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
-            
-            {insights.length === 0 && !loadingInsights && (
-              <div className="flex flex-col items-center justify-center py-10 text-slate-500">
-                <CheckCircle2 className="w-10 h-10 mb-2 text-emerald-500/50" />
-                <p className="text-sm font-medium">No insights at this time.</p>
-              </div>
-            )}
-          </div>
-        </motion.div>
+        
 
         {/* 2. Upcoming Subscriptions Widget */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="relative overflow-hidden border border-slate-200 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-3xl shadow-sm hover:shadow-xl hover:shadow-purple-500/5 hover:-translate-y-1 transition-all duration-500 ease-out flex flex-col p-6">

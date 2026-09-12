@@ -2,7 +2,8 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState, ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiFetch, Insight } from "@/lib/api";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { LayoutDashboard, ReceiptText, ListChecks, PieChart, Settings, SlidersHorizontal, LogOut, Wallet, Database, Repeat, Menu, Tag } from "lucide-react";
@@ -20,9 +21,10 @@ interface SidebarContentProps {
   setDate: any;
   handleLogout: () => void;
   navItems: Array<{ href: string; label: string; icon: any }>;
+  insightsCount: number;
 }
 
-const SidebarContent = ({ pathname, date, setDate, handleLogout, navItems }: SidebarContentProps) => (
+const SidebarContent = ({ pathname, date, setDate, handleLogout, navItems, insightsCount }: SidebarContentProps) => (
   <div className="flex flex-col h-full bg-white dark:bg-slate-900/80 backdrop-blur-xl border-r border-slate-200 dark:border-slate-800 p-4 shadow-sm">
     <div className="flex items-center gap-3 mb-6 pl-2">
       <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-indigo-500/30">
@@ -70,9 +72,14 @@ const SidebarContent = ({ pathname, date, setDate, handleLogout, navItems }: Sid
               />
             )}
             <Icon className={`relative z-10 h-5 w-5 ${isActive ? "text-indigo-600" : "text-slate-500 group-hover:text-indigo-500 transition-colors"}`} />
-            <span className={`relative z-10 ${isActive ? "text-indigo-700 dark:text-indigo-300 font-semibold" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:text-slate-100 dark:group-hover:text-slate-200"}`}>
+            <span className={`relative z-10 flex-1 ${isActive ? "text-indigo-700 dark:text-indigo-300 font-semibold" : "text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:text-slate-100 dark:group-hover:text-slate-200"}`}>
               {item.label}
             </span>
+            {item.label === "Dashboard" && insightsCount > 0 && (
+              <div className="relative z-10 bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full min-w-5 text-center shadow-sm">
+                {insightsCount}
+              </div>
+            )}
           </Link>
         );
       })}
@@ -110,8 +117,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     setIsMobileMenuOpen(false);
   }, [pathname]);
 
-  if (!isAuthed) return null;
-
   const queryClient = useQueryClient();
 
   const handleLogout = () => {
@@ -131,6 +136,17 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     { href: "/settings/importer", label: "Data Importer", icon: Database },
     { href: "/settings", label: "Settings", icon: Settings },
   ];
+
+  const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
+  const { data: insights } = useQuery<Insight[]>({
+    queryKey: ["reports", "insights"],
+    queryFn: () => apiFetch<Insight[]>("/reports/insights", {}, token),
+    enabled: isAuthed && !!token,
+  });
+
+  const insightsCount = insights?.length || 0;
+
+  if (!isAuthed) return null;
 
   return (
     <div className="flex flex-col md:flex-row min-h-screen bg-slate-50 dark:bg-slate-950 font-sans">
@@ -153,7 +169,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </SheetTrigger>
           <SheetContent side="left" className="w-72 p-0 border-none">
              <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
-             <SidebarContent pathname={pathname} date={date} setDate={setDate} handleLogout={handleLogout} navItems={navItems} />
+             <SidebarContent pathname={pathname} date={date} setDate={setDate} handleLogout={handleLogout} navItems={navItems} insightsCount={insightsCount} />
           </SheetContent>
         </Sheet>
         </div>
@@ -161,7 +177,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-64 flex-col fixed inset-y-0 z-40">
-        <SidebarContent pathname={pathname} date={date} setDate={setDate} handleLogout={handleLogout} navItems={navItems} />
+        <SidebarContent pathname={pathname} date={date} setDate={setDate} handleLogout={handleLogout} navItems={navItems} insightsCount={insightsCount} />
       </aside>
 
       {/* Main Content Area */}
