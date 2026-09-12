@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet, ShieldCheck, Inbox, CalendarClock, AlertCircle, TrendingUp, Activity, AlertTriangle, PlusCircle, X, CheckCircle2, PartyPopper } from "lucide-react";
 import { PageContainer } from "@/components/page-container";
+import { StatCard } from "@/components/stat-card";
 import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
 
@@ -457,22 +458,68 @@ export default function DashboardPage() {
         </motion.div>
 
           {/* Savings Rate Trend */}
-          <DashboardCard className="">
-            <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-2">Savings Rate</h2>
-            <div className="flex items-end gap-3">
-              <span className={`text-4xl font-extrabold tracking-tight ${savingsRate >= 20 ? 'text-emerald-600 dark:text-emerald-400' : savingsRate > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                {savingsRate.toFixed(1)}%
-              </span>
+        <StatCard 
+          title="Savings Rate"
+          icon={Wallet}
+          iconColorClass="text-amber-600 dark:text-amber-400"
+          iconBgClass="bg-amber-50 dark:bg-amber-500/10"
+          delay={0.5}
+        >
+          {inPeriod > 0 ? (
+            <div className="flex flex-col items-center">
+              <div className="relative h-40 w-full mt-2 flex flex-col items-center justify-center">
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
+                  <span className={`text-2xl font-extrabold tracking-tight ${savingsRate >= 20 ? 'text-emerald-600 dark:text-emerald-400' : savingsRate > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                    {savingsRate.toFixed(1)}%
+                  </span>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Saved</span>
+                </div>
+                <ResponsiveContainer width="100%" height="100%" className="z-0">
+                  <RechartsPieChart>
+                    <Pie
+                      data={[
+                        { name: "Saved", value: Math.max(0, inPeriod - outPeriod) },
+                        { name: "Spent", value: Math.min(inPeriod, outPeriod) }
+                      ]}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={55}
+                      outerRadius={75}
+                      paddingAngle={2}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      <Cell fill={savingsRate >= 20 ? '#10b981' : savingsRate > 0 ? '#6366f1' : '#f43f5e'} />
+                      <Cell fill="#cbd5e1" />
+                    </Pie>
+                    <RechartsTooltip 
+                      formatter={(value: any) => formatCurrency(Number(value) || 0)}
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: 'var(--tw-prose-body, white)' }}
+                      itemStyle={{ color: 'inherit' }}
+                    />
+                  </RechartsPieChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-4 text-center">
+                You saved {formatCurrency(Math.max(0, inPeriod - outPeriod))} out of {formatCurrency(inPeriod)} income this period.
+              </p>
             </div>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-              You saved {formatCurrency(Math.max(0, inPeriod - outPeriod))} out of {formatCurrency(inPeriod)} income this period.
-            </p>
-          </DashboardCard>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-sm text-slate-500 text-center py-6">No income this period.</p>
+            </div>
+          )}
+        </StatCard>
 
           {/* Top Spending Categories Widget (RESTORED) */}
-          <DashboardCard className="min-w-0">
-            <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-4">Top Spending</h2>
-            {expensesByCategory.length > 0 ? (
+        <StatCard 
+          title="Top Spending"
+          icon={CreditCard}
+          iconColorClass="text-rose-600 dark:text-rose-400"
+          iconBgClass="bg-rose-50 dark:bg-rose-500/10"
+          delay={0.7}
+        >
+          {expensesByCategory.length > 0 ? (
               <div className="flex flex-col gap-3">
                 {expensesByCategory.map((entry, idx) => {
                   const maxVal = expensesByCategory[0].value;
@@ -503,7 +550,7 @@ export default function DashboardPage() {
             ) : (
               <p className="text-sm text-slate-500 text-center py-6">No expenses found.</p>
             )}
-          </DashboardCard>
+        </StatCard>
 
 
       </div>
