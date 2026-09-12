@@ -22,7 +22,7 @@ import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
 
 const xAxisFormatter = (val: string) => new Date(val).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
-const yAxisFormatter = (val: number) => formatCurrency(val);
+const yAxisFormatter = (val: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(val / 100);
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -312,6 +312,9 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   </motion.div>
+
+      
+
                 );
               })}
             </AnimatePresence>
@@ -362,7 +365,7 @@ export default function DashboardPage() {
         <div className="h-72 w-full" role="img" aria-label="Net Worth Progression Chart">
           {netWorthData && netWorthData.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={netWorthData} margin={{ top: 30, right: 30, left: 30, bottom: 30 }}>
+              <AreaChart data={netWorthData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorNetWorth" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
@@ -380,7 +383,6 @@ export default function DashboardPage() {
                   tick={{ fill: '#64748b', fontSize: 12 }}
                   minTickGap={30}
                   padding={{ left: 10, right: 10 }}
-                  label={{ value: 'Timeline', position: 'insideBottom', offset: -15, fill: '#64748b', fontSize: 12, fontWeight: 500 }}
                 />
                 <YAxis 
                   domain={yDomain}
@@ -388,11 +390,10 @@ export default function DashboardPage() {
                   stroke="#94a3b8" 
                   tickLine={{ stroke: '#94a3b8', strokeOpacity: 0.5 }} 
                   axisLine={{ stroke: '#94a3b8', strokeOpacity: 0.5 }} 
-                  width={100}
+                  width={65}
                   tick={{ fill: '#64748b', fontSize: 12 }}
-                  label={{ value: 'Total Net Worth', angle: -90, position: 'insideLeft', offset: 0, fill: '#64748b', fontSize: 12, fontWeight: 500, style: { textAnchor: 'middle' } }}
                 />
-                <RechartsTooltip content={<CustomTooltip />} />
+                <RechartsTooltip content={<CustomTooltip />} cursor={{ stroke: 'var(--slate-200)', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Area 
                   type="monotone" 
                   dataKey="net_worth" 
@@ -415,7 +416,7 @@ export default function DashboardPage() {
       </DashboardCard>
 
       {/* Summary Boxes */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-6">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><ArrowUpRight className="w-16 h-16 text-indigo-600" /></div>
           <div className="flex items-center gap-3 mb-4">
@@ -438,27 +439,6 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white dark:bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Repeat className="w-16 h-16 text-rose-600" /></div>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="bg-rose-50 dark:bg-rose-500/10 p-2 rounded-xl text-rose-600 dark:text-rose-400"><Repeat className="w-5 h-5" /></div>
-            <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 font-heading">SUBSCRIPTIONS TO PAY</h3>
-          </div>
-          <div className="flex flex-col gap-1">
-            <div className="text-2xl font-bold font-heading text-slate-900 dark:text-white">
-              {loadingSummary ? <Skeleton className="h-8 w-24" /> : formatCurrency(Math.max(0, (summary?.subscriptions_to_pay || 0) - (summary?.subscriptions_paid || 0)))}
-            </div>
-            <div className="text-sm font-medium flex items-center gap-2 text-slate-500 dark:text-slate-400">
-              {loadingSummary ? <Skeleton className="h-4 w-32" /> : (
-                <>
-                  Paid: <span className="text-emerald-600 dark:text-emerald-500 font-semibold">{formatCurrency(summary?.subscriptions_paid || 0)}</span>
-                  <span className="text-slate-300 dark:text-slate-700 dark:text-slate-300">/</span>
-                  Total: <span className="text-slate-600 dark:text-slate-300 font-semibold">{formatCurrency(summary?.subscriptions_to_pay || 0)}</span>
-                </>
-              )}
-            </div>
-          </div>
-        </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white dark:bg-slate-900/80 backdrop-blur-xl p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><ShieldCheck className="w-16 h-16 text-emerald-600" /></div>
@@ -476,16 +456,6 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 rounded-3xl shadow-xl shadow-indigo-500/20 border border-indigo-400/30 relative overflow-hidden group text-white">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><CreditCard className="w-16 h-16" /></div>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="bg-white dark:bg-slate-900/20 backdrop-blur-sm p-2 rounded-xl text-indigo-100"><CreditCard className="w-5 h-5" /></div>
-            <h3 className="text-sm font-medium text-indigo-100 font-heading">NET WORTH</h3>
-          </div>
-          <div className="text-2xl font-bold font-heading">
-            {loadingSummary ? <Skeleton className="h-8 w-24 bg-white dark:bg-slate-900/20" /> : formatCurrency(summary?.net_worth || 0)}
-          </div>
-        </motion.div>
       </div>
 
 
@@ -493,6 +463,18 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         
 
+          {/* Savings Rate Trend */}
+          <DashboardCard className="">
+            <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-2">Savings Rate</h2>
+            <div className="flex items-end gap-3">
+              <span className={`text-4xl font-extrabold tracking-tight ${savingsRate >= 20 ? 'text-emerald-600 dark:text-emerald-400' : savingsRate > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                {savingsRate.toFixed(1)}%
+              </span>
+            </div>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+              You saved {formatCurrency(Math.max(0, inPeriod - outPeriod))} out of {formatCurrency(inPeriod)} income this period.
+            </p>
+          </DashboardCard>
         {/* 2. Upcoming Subscriptions Widget */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="relative overflow-hidden border border-slate-200 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-3xl shadow-sm hover:shadow-xl hover:shadow-purple-500/5 hover:-translate-y-1 transition-all duration-500 ease-out flex flex-col p-6">
           <div className="absolute inset-0 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20 pointer-events-none -z-10" />
@@ -594,41 +576,6 @@ export default function DashboardPage() {
             )}
           </DashboardCard>
 
-          {/* Active Budgets Widget */}
-          <DashboardCard className="">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
-                <PieChart className="h-5 w-5 text-indigo-600" />
-                <h2 className="text-lg font-bold font-heading">Active Budgets ({currentMonthStr})</h2>
-              </div>
-              <Link href="/budgets" className="text-sm font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1 group">
-                Manage <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
-              </Link>
-            </div>
-            
-            {loadingBudgets ? (
-              <div className="space-y-4">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
-            ) : activeBudgets.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {activeBudgets.map((b) => {
-                  const categoryName = categories?.find(c => c.id === b.category_id)?.name || b.name || "Unknown";
-                  const percent = b.amount_cents > 0 ? Math.min((b.spent_total / b.amount_cents) * 100, 100) : 0;
-                  const isOver = b.spent_total > b.amount_cents;
-                  return (
-                    <div key={b.id} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="font-semibold text-slate-700 dark:text-slate-300">{categoryName}</span>
-                        <span className="text-sm text-slate-500 font-medium">{formatCurrency(b.spent_total)} / {formatCurrency(b.amount_cents)}</span>
-                      </div>
-                      <Progress value={percent} className={`h-2 ${isOver ? 'bg-rose-100 [&>div]:bg-rose-600' : ''}`} />
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500 text-center py-6">No active budgets for this month.</p>
-            )}
-          </DashboardCard>
 
         </div>
 
@@ -680,35 +627,7 @@ export default function DashboardPage() {
           </DashboardCard>
 
 
-          {/* Savings Rate Trend */}
-          <DashboardCard className="">
-            <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-2">Savings Rate</h2>
-            <div className="flex items-end gap-3">
-              <span className={`text-4xl font-extrabold tracking-tight ${savingsRate >= 20 ? 'text-emerald-600 dark:text-emerald-400' : savingsRate > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                {savingsRate.toFixed(1)}%
-              </span>
-            </div>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-              You saved {formatCurrency(Math.max(0, inPeriod - outPeriod))} out of {formatCurrency(inPeriod)} income this period.
-            </p>
-          </DashboardCard>
 
-          {/* Subscriptions Stub */}
-          <DashboardCard className="">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
-                <Repeat className="h-5 w-5 text-indigo-600" />
-                <h2 className="text-lg font-bold font-heading">Subscriptions</h2>
-              </div>
-            </div>
-            
-            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Manage all your recurring payments, track expected costs, and view payment history.</p>
-            <Link href="/subscriptions">
-              <Button className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium">
-                Manage Subscriptions
-              </Button>
-            </Link>
-          </DashboardCard>
         </div>
       </div>
     </motion.div>
