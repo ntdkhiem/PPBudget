@@ -121,8 +121,10 @@ export interface Subscription {
 }
 
 export interface NetWorthDataPoint {
-  date: string;
-  value: number; // cents
+  month: string;
+  assets: number;
+  liabilities: number;
+  net_worth: number;
 }
 
 export interface SpendingDataPoint {

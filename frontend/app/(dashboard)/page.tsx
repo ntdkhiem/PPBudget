@@ -5,7 +5,7 @@ import { apiFetch, Account, NetWorthDataPoint, Transaction, BudgetSummary, Categ
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import Link from "next/link";
-import { AreaChart, Area, ResponsiveContainer, YAxis, PieChart as RechartsPieChart, Pie, Cell, Tooltip as RechartsTooltip } from "recharts";
+import { AreaChart, Area, ResponsiveContainer, YAxis, PieChart as RechartsPieChart, Pie, Cell, Tooltip as RechartsTooltip, XAxis, CartesianGrid } from "recharts";
 import { motion } from "framer-motion";
 import { useState, useMemo } from "react";
 import { format, subMonths } from "date-fns";
@@ -16,10 +16,29 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet, ShieldCheck, Inbox, CalendarClock, AlertCircle } from "lucide-react";
+import { ArrowRight, ReceiptText, PieChart, Repeat, CreditCard, Plus, ArrowUpRight, Wallet, ShieldCheck, Inbox, CalendarClock, AlertCircle, TrendingUp, Activity } from "lucide-react";
 import { PageContainer } from "@/components/page-container";
 import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
+
+const xAxisFormatter = (val: string) => new Date(val).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+const yAxisFormatter = (val: number) => formatCurrency(val);
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-white dark:bg-slate-800 p-3 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700/60">
+        <p className="text-slate-500 dark:text-slate-400 text-xs mb-1 font-medium">
+          {new Date(label).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })}
+        </p>
+        <p className="font-bold text-slate-900 dark:text-white font-heading">
+          {formatCurrency(Number(payload[0].value))}
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -46,9 +65,8 @@ export default function DashboardPage() {
   });
 
   const { data: netWorthData } = useQuery<NetWorthDataPoint[]>({
-    queryKey: ["reports", "net-worth", queryParams],
-    queryFn: () => apiFetch<NetWorthDataPoint[]>(`/reports/net-worth?${queryParams}`, {}, token),
-    select: (data) => data.map(d => ({ ...d, value: d.value / 100 })),
+    queryKey: ["reports", "net-worth", "6-months"],
+    queryFn: () => apiFetch<NetWorthDataPoint[]>("/reports/net-worth", {}, token),
   });
 
   const { data: transactions, isLoading: loadingTxns } = useQuery<Transaction[]>({
@@ -116,6 +134,18 @@ export default function DashboardPage() {
     }).sort((a, b) => new Date(a.next_billing_date).getTime() - new Date(b.next_billing_date).getTime());
   }, [subscriptions]);
 
+  const yDomain = useMemo<[number, number] | ['auto', 'auto']>(() => {
+    if (!netWorthData || netWorthData.length === 0) return ['auto', 'auto'];
+    const firstValue = netWorthData[0].net_worth;
+    const { minVal, maxVal } = netWorthData.reduce((acc, curr) => ({
+      minVal: curr.net_worth < acc.minVal ? curr.net_worth : acc.minVal,
+      maxVal: curr.net_worth > acc.maxVal ? curr.net_worth : acc.maxVal
+    }), { minVal: firstValue, maxVal: firstValue });
+
+    const maxDiff = Math.max(Math.abs(maxVal - firstValue), Math.abs(minVal - firstValue), Math.abs(firstValue * 0.1), 10000);
+    return [firstValue - maxDiff * 1.1, firstValue + maxDiff * 1.1];
+  }, [netWorthData]);
+
   if (loadingAccounts) {
     return (
       <div className="space-y-10">
@@ -148,11 +178,77 @@ export default function DashboardPage() {
   const outPeriod = summary?.out_period || 0;
   const savingsRate = inPeriod > 0 ? ((inPeriod - outPeriod) / inPeriod) * 100 : 0;
 
+
+
   return (
     <PageContainer maxWidth="6xl">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="space-y-8">
       {/* Header */}
       <PageHeader title="Dashboard Overview" description="Quick access to your finances." />
+
+      {/* Net Worth Progression Full Width */}
+      <DashboardCard className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+            <TrendingUp className="h-5 w-5 text-indigo-600" />
+            <h2 className="text-lg font-bold font-heading">Net Worth Progression</h2>
+          </div>
+        </div>
+        
+        <div className="h-72 w-full" role="img" aria-label="Net Worth Progression Chart">
+          {netWorthData && netWorthData.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={netWorthData} margin={{ top: 30, right: 30, left: 30, bottom: 30 }}>
+                <defs>
+                  <linearGradient id="colorNetWorth" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-slate-200 dark:text-slate-800" />
+                <XAxis 
+                  dataKey="month" 
+                  tickFormatter={xAxisFormatter}
+                  stroke="#94a3b8" 
+                  tickLine={{ stroke: '#94a3b8', strokeOpacity: 0.5 }} 
+                  axisLine={{ stroke: '#94a3b8', strokeOpacity: 0.5 }} 
+                  dy={10}
+                  tick={{ fill: '#64748b', fontSize: 12 }}
+                  minTickGap={30}
+                  padding={{ left: 10, right: 10 }}
+                  label={{ value: 'Timeline', position: 'insideBottom', offset: -15, fill: '#64748b', fontSize: 12, fontWeight: 500 }}
+                />
+                <YAxis 
+                  domain={yDomain}
+                  tickFormatter={yAxisFormatter}
+                  stroke="#94a3b8" 
+                  tickLine={{ stroke: '#94a3b8', strokeOpacity: 0.5 }} 
+                  axisLine={{ stroke: '#94a3b8', strokeOpacity: 0.5 }} 
+                  width={100}
+                  tick={{ fill: '#64748b', fontSize: 12 }}
+                  label={{ value: 'Total Net Worth', angle: -90, position: 'insideLeft', offset: 0, fill: '#64748b', fontSize: 12, fontWeight: 500, style: { textAnchor: 'middle' } }}
+                />
+                <RechartsTooltip content={<CustomTooltip />} />
+                <Area 
+                  type="monotone" 
+                  dataKey="net_worth" 
+                  stroke="#6366f1" 
+                  strokeWidth={3}
+                  fillOpacity={1} 
+                  fill="url(#colorNetWorth)"
+                  dot={false} 
+                  activeDot={{ r: 6, fill: "#6366f1", stroke: "white", strokeWidth: 2 }} 
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex flex-col h-full items-center justify-center text-slate-500 gap-3">
+              <Activity className="w-12 h-12 text-slate-300 dark:text-slate-700" />
+              <p className="text-sm font-medium">No net worth data available</p>
+            </div>
+          )}
+        </div>
+      </DashboardCard>
 
       {/* Summary Boxes */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -227,6 +323,8 @@ export default function DashboardPage() {
           </div>
         </motion.div>
       </div>
+
+
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         {/* 1. Needs Review Inbox Widget */}
