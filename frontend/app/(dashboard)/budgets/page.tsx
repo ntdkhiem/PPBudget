@@ -135,6 +135,8 @@ export default function BudgetsPage() {
 
   const daysInMonth = getDaysInMonth(currentMonth);
   const today = new Date();
+  const currentMonthStart = startOfMonth(today);
+  const isFutureMonth = currentMonth > currentMonthStart;
   const currentDay = isSameMonth(today, currentMonth) ? getDate(today) : (today > currentMonth ? daysInMonth : 1);
   const daysRemaining = daysInMonth - currentDay + 1;
 
@@ -241,35 +243,37 @@ export default function BudgetsPage() {
                 </Button>
               </motion.div>
             ) : (
-              <motion.div
-                key="view"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className="flex gap-1"
-              >
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={() => { setEditingId(card.catId); setEditLimit((card.limit / 100).toString()); setEditBucket(card.bucket as "needs" | "wants" | "savings"); }}
-                  className="text-slate-400 hover:text-indigo-600 h-8 w-8"
+              !isFutureMonth && (
+                <motion.div
+                  key="view"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className="flex gap-1"
                 >
-                  <Edit2 size={14} />
-                </Button>
-                {card.budgetId && (
                   <Button
                     size="icon-sm"
                     variant="ghost"
-                    onClick={() => {
-                      setBudgetToDelete(card.budgetId as string);
-                      setDeleteModalOpen(true);
-                    }}
-                    className="text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 h-8 w-8"
+                    onClick={() => { setEditingId(card.catId); setEditLimit((card.limit / 100).toString()); setEditBucket(card.bucket as "needs" | "wants" | "savings"); }}
+                    className="text-slate-400 hover:text-indigo-600 h-8 w-8"
                   >
-                    <Trash2 size={14} />
+                    <Edit2 size={14} />
                   </Button>
-                )}
-              </motion.div>
+                  {card.budgetId && (
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setBudgetToDelete(card.budgetId as string);
+                        setDeleteModalOpen(true);
+                      }}
+                      className="text-slate-400 hover:text-red-500 h-8 w-8"
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  )}
+                </motion.div>
+              )
             )}
           </AnimatePresence>
         </div>
@@ -364,17 +368,21 @@ export default function BudgetsPage() {
 
   return (
     <PageContainer>
-      <PageHeader title="Budgets" description="Calibrate your budget to your paycheck with a 50/30/20 strategy.">
+      <PageHeader 
+        title="Budgets" 
+        description={isFutureMonth ? "Viewing future projections. Return to the current month to make structural edits." : "Calibrate your budget to your paycheck with a 50/30/20 strategy."}
+      >
         <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-1 shadow-sm mr-2">
           <Button variant="ghost" size="icon" onClick={prevMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900 dark:text-slate-100"><ChevronLeft size={18}/></Button>
           <span className="font-semibold w-24 text-center text-slate-700 dark:text-slate-300">{format(currentMonth, 'MMM yyyy')}</span>
           <Button variant="ghost" size="icon" onClick={nextMonth} className="h-8 w-8 text-slate-500 hover:text-slate-900 dark:text-slate-100"><ChevronRight size={18}/></Button>
         </div>
-        <Dialog open={isAddModalOpen} onOpenChange={handleAddBudgetOpenChange}>
-          <DialogTrigger asChild>
-            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 h-11 shadow-md shadow-indigo-500/20 flex items-center gap-2 transition-all active:scale-95">
-              <Plus size={18} /> New Budget
-            </Button>
+        {!isFutureMonth && (
+          <Dialog open={isAddModalOpen} onOpenChange={handleAddBudgetOpenChange}>
+            <DialogTrigger asChild>
+              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 h-11 shadow-md shadow-indigo-500/20 flex items-center gap-2 transition-all active:scale-95">
+                <Plus size={18} /> New Budget
+              </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[425px]">
               <DialogHeader>
@@ -440,6 +448,7 @@ export default function BudgetsPage() {
               </div>
             </DialogContent>
           </Dialog>
+        )}
 
           <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
             <DialogContent className="sm:max-w-[425px]">

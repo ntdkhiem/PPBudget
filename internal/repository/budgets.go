@@ -31,18 +31,37 @@ func (r *Repository) UpdateBudget(ctx context.Context, budget *domain.Budget) er
 			return err
 		}
 	}
-	query := `
-		UPDATE budgets SET name = $1, category_id = $2, amount = $3, period_type = $4, start_date = $5, end_date = $6, bucket = $7, updated_at = NOW()
-		WHERE id = $8 AND user_id = $9 RETURNING updated_at
-	`
-	err := r.pool.QueryRow(ctx, query, budget.Name, budget.CategoryID, budget.Amount.ToInt64(), budget.PeriodType, budget.StartDate, budget.EndDate, budget.Bucket, budget.ID, budget.UserID).
-		Scan(&budget.UpdatedAt)
-	if err != nil {
-		if err == pgx.ErrNoRows {
+	
+	if budget.PeriodType == "monthly" {
+		query := `
+			UPDATE budgets SET name = $1, amount = $2, bucket = $3, period_type = $4, updated_at = NOW()
+			WHERE user_id = $5 AND category_id = $6 AND start_date >= $7
+		`
+		tag, err := r.pool.Exec(ctx, query, budget.Name, budget.Amount.ToInt64(), budget.Bucket, budget.PeriodType, budget.UserID, budget.CategoryID, budget.StartDate)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
 			return apperrors.ErrNotFound
 		}
-		return err
+		// Also update the specific budget ID just in case it doesn't match the category/date condition (e.g. if start_date was changed, which shouldn't happen, but let's be safe)
+		r.pool.Exec(ctx, `UPDATE budgets SET name = $1, category_id = $2, amount = $3, period_type = $4, start_date = $5, end_date = $6, bucket = $7, updated_at = NOW() WHERE id = $8 AND user_id = $9`,
+			budget.Name, budget.CategoryID, budget.Amount.ToInt64(), budget.PeriodType, budget.StartDate, budget.EndDate, budget.Bucket, budget.ID, budget.UserID)
+	} else {
+		query := `
+			UPDATE budgets SET name = $1, category_id = $2, amount = $3, period_type = $4, start_date = $5, end_date = $6, bucket = $7, updated_at = NOW()
+			WHERE id = $8 AND user_id = $9 RETURNING updated_at
+		`
+		err := r.pool.QueryRow(ctx, query, budget.Name, budget.CategoryID, budget.Amount.ToInt64(), budget.PeriodType, budget.StartDate, budget.EndDate, budget.Bucket, budget.ID, budget.UserID).
+			Scan(&budget.UpdatedAt)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return apperrors.ErrNotFound
+			}
+			return err
+		}
 	}
+
 	return nil
 }
 
@@ -75,13 +94,28 @@ func (r *Repository) DeleteBudget(ctx context.Context, userID, id string, allMon
 	return nil
 }
 
-func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, month time.Time) ([]domain.BudgetSummary, error) {
-	// Auto-rollover budgets if none exist for this month
-	var count int
-	targetStart := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
-	err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM budgets WHERE user_id = $1 AND start_date = $2", userID, targetStart).Scan(&count)
-	if err == nil && count == 0 {
-		_ = r.rolloverBudgets(ctx, userID, month)
+func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, targetMonth time.Time) ([]domain.BudgetSummary, error) {
+	now := time.Now()
+	currentMonthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	targetMonthStart := time.Date(targetMonth.Year(), targetMonth.Month(), 1, 0, 0, 0, 0, time.UTC)
+	targetMonthEnd := targetMonthStart.AddDate(0, 1, -1)
+
+	isFuture := targetMonthStart.After(currentMonthStart)
+	budgetTemplateMonth := targetMonthStart
+
+	if isFuture {
+		var latestStart *time.Time
+		err := r.pool.QueryRow(ctx, "SELECT MAX(start_date) FROM budgets WHERE user_id = $1 AND start_date <= $2", userID, currentMonthStart).Scan(&latestStart)
+		if err == nil && latestStart != nil {
+			budgetTemplateMonth = *latestStart
+		}
+	} else {
+		// Auto-rollover budgets if none exist for this month
+		var count int
+		err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM budgets WHERE user_id = $1 AND start_date = $2", userID, targetMonthStart).Scan(&count)
+		if err == nil && count == 0 {
+			_ = r.rolloverBudgets(ctx, userID, targetMonthStart)
+		}
 	}
 
 	query := `
@@ -100,23 +134,24 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, month
 			SELECT b.id as budget_id, COALESCE(SUM(ABS(t.eff_amount)), 0) as spent_total
 			FROM budgets b
 			LEFT JOIN effective_transactions t ON t.category_id = b.category_id 
-				AND t.date >= b.start_date 
-				AND t.date <= b.end_date
+				AND t.date >= $3::date 
+				AND t.date <= $4::date
 			WHERE b.user_id = $1
-			  AND b.start_date <= $2::date + INTERVAL '1 month - 1 day'
-			  AND b.end_date >= $2::date
+			  AND b.start_date = $2::date
 			GROUP BY b.id
 		)
 		SELECT b.id, b.user_id, b.name, b.category_id, b.amount as amount_cents, b.period_type, b.start_date, b.end_date, b.bucket, b.created_at, b.updated_at,
 		       s.spent_total,
-			   (b.end_date - b.start_date) + 1 as total_days,
-			   (LEAST(CURRENT_DATE, b.end_date) - b.start_date) + 1 as elapsed_days
+			   ($4::date - $3::date) + 1 as total_days,
+			   (LEAST(CURRENT_DATE, $4::date) - $3::date) + 1 as elapsed_days
 		FROM budgets b
 		JOIN budget_spent s ON b.id = s.budget_id
-		WHERE b.user_id = $1
+		WHERE b.user_id = $1 
+		  AND b.start_date = $2::date
+		  AND ($2::date = $3::date OR b.period_type != 'one_time')
 		ORDER BY b.start_date DESC
 	`
-	rows, err := r.pool.Query(ctx, query, userID, month)
+	rows, err := r.pool.Query(ctx, query, userID, budgetTemplateMonth, targetMonthStart, targetMonthEnd)
 	if err != nil {
 		return nil, err
 	}
