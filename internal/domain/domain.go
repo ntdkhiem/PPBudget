@@ -38,7 +38,6 @@ type Transaction struct {
 	Notes              *string           `json:"notes,omitempty"`
 	IsReviewed         bool              `json:"is_reviewed"`
 	IsReconciled       bool              `json:"is_reconciled"`
-	TransferID         *string           `json:"transfer_id,omitempty"`
 	SimplefinAccountID *string           `json:"simplefin_account_id,omitempty"`
 	SubscriptionID     *string           `json:"subscription_id,omitempty"`
 	PaysFor            []TransactionLink `json:"pays_for,omitempty"`

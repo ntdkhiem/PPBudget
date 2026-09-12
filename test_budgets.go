@@ -15,7 +15,7 @@ func main() {
 		panic(err)
 	}
 	repo := repository.New(pool)
-	
+
 	month, _ := time.Parse("2006-01", "2026-07")
 	summaries, err := repo.GetBudgetsSummary(context.Background(), repository.DefaultUserID, month)
 	if err != nil {

@@ -10,7 +10,7 @@ func (r *Repository) SearchTransactions(ctx context.Context, userID string, quer
 	q := `
         SELECT 
             t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, a.simplefin_id as simplefin_account_id
+            t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id, a.simplefin_id as simplefin_account_id
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE t.user_id = $1 AND t.deleted_at IS NULL AND t.search_vector @@ websearch_to_tsquery('english', $2)
@@ -29,13 +29,13 @@ func (r *Repository) SearchTransactions(ctx context.Context, userID string, quer
 		var amount int64
 		var catID *string
 		var notes *string
-		var transferID *string
+
 		var sfAccountID *string
 		var subID *string
 
 		err := rows.Scan(
 			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &sfAccountID,
+			&notes, &t.IsReviewed, &t.IsReconciled, &subID, &sfAccountID,
 		)
 		if err != nil {
 			return nil, err
@@ -44,7 +44,7 @@ func (r *Repository) SearchTransactions(ctx context.Context, userID string, quer
 		t.Amount = money.Money(amount)
 		t.CategoryID = catID
 		t.Notes = notes
-		t.TransferID = transferID
+
 		t.SimplefinAccountID = sfAccountID
 		t.SubscriptionID = subID
 		txns = append(txns, t)

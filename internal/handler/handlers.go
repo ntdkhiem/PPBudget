@@ -27,33 +27,6 @@ func New(svc *service.Service, logger *slog.Logger, cfg *config.Config) *Handler
 	return &Handler{svc: svc, logger: logger, cfg: cfg}
 }
 
-
-func (h *Handler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.GetUserID(r.Context())
-	if !ok || userID == "" {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	var req service.TransferRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON payload")
-		return
-	}
-
-	err := h.svc.CreateTransfer(r.Context(), userID, req)
-	if err != nil {
-		if errors.Is(err, apperrors.ErrInvalidInput) {
-			writeError(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to create transfer")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, map[string]string{"status": "transfer created"})
-}
-
 func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok || userID == "" {
@@ -677,13 +650,13 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		AccountID           string  `json:"account_id"`
-		Amount              int64   `json:"amount"`
-		Date                string  `json:"date"`
-		Description         string  `json:"description"`
-		Notes               *string `json:"notes"`
-		CategoryID          *string `json:"category_id"`
-		SubscriptionID      *string `json:"subscription_id"`
+		AccountID      string  `json:"account_id"`
+		Amount         int64   `json:"amount"`
+		Date           string  `json:"date"`
+		Description    string  `json:"description"`
+		Notes          *string `json:"notes"`
+		CategoryID     *string `json:"category_id"`
+		SubscriptionID *string `json:"subscription_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
@@ -946,7 +919,6 @@ func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(txn)
 }
-
 
 func (h *Handler) TestEmailNotification(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())

@@ -11,7 +11,8 @@ It securely connects to your bank accounts, imports your transactions automatica
 - **Automated Bank Sync:** Integrates with SimpleFin to automatically pull transactions from your credit cards and bank accounts.
 - **Rules-Based Auto-Categorization:** Create powerful rules (e.g., *If description contains 'Uber', set category to 'Travel'*) that execute automatically during every import.
 - **Net Worth Tracking:** Automatically snapshots your account balances over time to visualize your net worth trajectory.
-- **Budgeting Engine:** Create time-bound budgets and instantly track your spending velocity against your allocated limits.
+- **Budgeting Engine:** Features a 3-column layout based on the Needs/Wants/Savings (50/30/20 strategy) to instantly track your spending velocity. It uses a "Phantom Budgets" architecture that natively supports future month projections without duplicating database rows.
+- **Paycheck Calibration Tool:** Align your budgets and available funds with your actual paycheck schedules.
 - **Smart Subscription Tracking:** Detects recurring subscriptions and forecasts your upcoming bills.
 - **Linked Transactions:** Handle credit card payments or reimbursements by linking transactions so they don't skew your actual spending/income reports.
 - **Email Notifications:** Get daily HTML email summaries of new transactions imported and auto-categorized while you sleep.

@@ -36,7 +36,6 @@ func (r *Repository) SetUserSetting(ctx context.Context, userID, key, value stri
 	return err
 }
 
-
 // GetUserSettings fetches a user setting by userID and key
 func (r *Repository) GetUserSettings(ctx context.Context, userID, key string) (string, error) {
 	return r.GetUserSetting(ctx, userID, key)

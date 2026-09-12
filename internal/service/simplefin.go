@@ -602,7 +602,7 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 			s.logger.Error("failed to send import notification email via SMTP", "error", err, "user_id", userID)
 			return err
 		}
-		
+
 		s.logger.Info("import notification email sent via SMTP", "count", len(txns), "user_id", userID)
 		return nil
 	}
@@ -693,7 +693,6 @@ func (s *Service) UpdateSimplefinAutoSync(ctx context.Context, userID string, en
 		return err
 	}
 }
-
 
 func (s *Service) SendTestEmail(ctx context.Context, userID string) error {
 	userEmail, _ := s.repo.GetUserSetting(ctx, userID, "notification_email")

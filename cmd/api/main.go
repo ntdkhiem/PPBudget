@@ -93,7 +93,6 @@ func main() {
 		// Cron webhook (Protected by X-API-Key natively in handler)
 		r.Post("/import/simplefin/cron", h.SimpleFinCronTrigger)
 
-
 		// Importer endpoints
 		r.Group(func(r chi.Router) {
 			// This could be JWT protected, but the prompt didn't specify. We'll protect it with JWT for now.
@@ -138,7 +137,6 @@ func main() {
 			r.Post("/transactions/bulk/delete", h.BulkDeleteTransactions)
 
 			// Transfers
-			r.Post("/transfers", h.CreateTransfer)
 
 			// Categories
 			r.Get("/categories", h.ListCategories)

@@ -13,7 +13,6 @@ import (
 	"ntdkhiem/ppbudget-go/internal/middleware"
 )
 
-
 // ChangePassword allows the user to change their password
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
@@ -170,4 +169,3 @@ func (h *Handler) SetUserSettingValue(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
-

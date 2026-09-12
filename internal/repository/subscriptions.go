@@ -104,4 +104,3 @@ func (r *Repository) RolloverSubscriptions(ctx context.Context, userID string) {
 	`
 	_, _ = r.pool.Exec(ctx, queryYearly, userID)
 }
-

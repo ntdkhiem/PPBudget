@@ -12,7 +12,6 @@ import (
 
 	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -99,45 +98,12 @@ func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, u
 	return id, true, nil
 }
 
-// CreateTransfer creates two linked transactions
-func (r *Repository) CreateTransfer(ctx context.Context, userID, fromAccountID, toAccountID string, amount money.Money, date time.Time, description string) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	if err := r.checkOwnership(ctx, tx, "accounts", fromAccountID, userID); err != nil {
-		return err
-	}
-	if err := r.checkOwnership(ctx, tx, "accounts", toAccountID, userID); err != nil {
-		return err
-	}
-
-	transferID := uuid.New().String()
-
-	query := `
-        INSERT INTO transactions (account_id, amount, date, description, transfer_id, is_reviewed, user_id)
-        VALUES ($1, $2, $3, $4, $5, true, $6), ($7, $8, $3, $4, $5, true, $6)
-    `
-	// From account gets negative (outflow), To account gets positive (inflow)
-	_, err = tx.Exec(ctx, query,
-		fromAccountID, -amount.ToInt64(),
-		transferID, description, userID,
-		toAccountID, amount.ToInt64())
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
-}
-
 func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionFilter) ([]domain.TransactionWithBalance, error) {
 	// Base query
 	query := `
         SELECT 
             t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id,
+            t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id,
             (a.initial_balance + SUM(t.amount) OVER (PARTITION BY t.account_id ORDER BY t.date, t.id)) as running_balance,
             (t.amount 
              - COALESCE(pays_for_agg.total_amount, 0)
@@ -243,7 +209,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 		var balance int64
 		var catID *string
 		var notes *string
-		var transferID *string
+
 		var subID *string
 		var effectiveAmount int64
 		var paysForJson []byte
@@ -251,7 +217,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 
 		err := rows.Scan(
 			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID,
+			&notes, &t.IsReviewed, &t.IsReconciled, &subID,
 			&balance, &effectiveAmount, &paysForJson, &paidByJson,
 		)
 		if err != nil {
@@ -262,7 +228,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 		t.RunningBalance = money.Money(balance)
 		t.CategoryID = catID
 		t.Notes = notes
-		t.TransferID = transferID
+
 		t.SubscriptionID = subID
 		t.EffectiveAmount = money.Money(effectiveAmount)
 		if err := json.Unmarshal(paysForJson, &t.PaysFor); err != nil {
@@ -281,7 +247,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, userID stri
 	query := `
         SELECT 
             t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
-            t.notes, t.is_reviewed, t.is_reconciled, t.transfer_id, t.subscription_id, a.simplefin_id as simplefin_account_id,
+            t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id, a.simplefin_id as simplefin_account_id,
             (t.amount 
              - COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
              + COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0)
@@ -327,7 +293,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, userID stri
 		var amount int64
 		var catID *string
 		var notes *string
-		var transferID *string
+
 		var sfAccountID *string
 		var subID *string
 		var effectiveAmount int64
@@ -336,7 +302,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, userID stri
 
 		err := rows.Scan(
 			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-			&notes, &t.IsReviewed, &t.IsReconciled, &transferID, &subID, &sfAccountID,
+			&notes, &t.IsReviewed, &t.IsReconciled, &subID, &sfAccountID,
 			&effectiveAmount, &paysForJson, &paidByJson,
 		)
 		if err != nil {
@@ -346,7 +312,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, userID stri
 		t.Amount = money.Money(amount)
 		t.CategoryID = catID
 		t.Notes = notes
-		t.TransferID = transferID
+
 		t.SimplefinAccountID = sfAccountID
 		t.SubscriptionID = subID
 		t.EffectiveAmount = money.Money(effectiveAmount)
@@ -759,11 +725,35 @@ func (r *Repository) GetReportsSummary(ctx context.Context, userID string, start
 	var summary domain.ReportsSummary
 
 	queryInOut := `
+		WITH linked_amounts AS (
+			SELECT 
+				t.id,
+				t.amount,
+				(t.amount 
+				 - COALESCE(pays_for_agg.total_amount, 0)
+				 + COALESCE(paid_by_agg.total_amount, 0)
+				) as effective_amount,
+				c.type as category_type
+			FROM transactions t
+			LEFT JOIN categories c ON t.category_id = c.id
+			LEFT JOIN LATERAL (
+				SELECT SUM(l.amount) as total_amount
+				FROM transaction_links l
+				WHERE l.source_transaction_id = t.id
+			) pays_for_agg ON true
+			LEFT JOIN LATERAL (
+				SELECT SUM(l.amount) as total_amount
+				FROM transaction_links l
+				WHERE l.target_transaction_id = t.id
+			) paid_by_agg ON true
+			WHERE t.user_id = $1 AND t.date >= $2 AND t.date <= $3 
+			  AND t.deleted_at IS NULL
+		)
 		SELECT 
-			COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as in_period,
-			COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as out_period
-		FROM transactions
-		WHERE user_id = $1 AND date >= $2 AND date <= $3 AND deleted_at IS NULL AND transfer_id IS NULL
+			COALESCE(SUM(CASE WHEN effective_amount > 0 THEN effective_amount ELSE 0 END), 0) as in_period,
+			COALESCE(SUM(CASE WHEN effective_amount < 0 THEN ABS(effective_amount) ELSE 0 END), 0) as out_period
+		FROM linked_amounts
+		WHERE category_type IS NULL OR category_type != 'transfer'
 	`
 	var inPeriod, outPeriod int64
 	err := r.pool.QueryRow(ctx, queryInOut, userID, startDate, endDate).Scan(&inPeriod, &outPeriod)
@@ -854,7 +844,7 @@ func (r *Repository) GetReportsSummary(ctx context.Context, userID string, start
 func (r *Repository) GetTransaction(ctx context.Context, userID, id string) (*domain.Transaction, error) {
 	q := `
 		SELECT t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description,
-		       t.transfer_id, t.is_reviewed, 
+		       t.is_reviewed, 
 		       t.is_reconciled, t.notes, t.subscription_id,
 		       a.simplefin_id as simplefin_account_id,
 		       (t.amount 
@@ -896,10 +886,10 @@ func (r *Repository) GetTransaction(ctx context.Context, userID, id string) (*do
 	var amount int64
 	var effectiveAmount int64
 	var paysForJSON, paidByJSON []byte
-	var catID, transferID, notes, sfAccountID, subID *string
+	var catID, notes, sfAccountID, subID *string
 	err := row.Scan(
 		&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
-		&transferID, &t.IsReviewed, &t.IsReconciled,
+		&t.IsReviewed, &t.IsReconciled,
 		&notes, &subID, &sfAccountID,
 		&effectiveAmount, &paysForJSON, &paidByJSON,
 	)
@@ -911,7 +901,7 @@ func (r *Repository) GetTransaction(ctx context.Context, userID, id string) (*do
 	}
 	t.Amount = money.Money(amount)
 	t.EffectiveAmount = money.Money(effectiveAmount)
-	
+
 	if len(paysForJSON) > 0 {
 		if err := json.Unmarshal(paysForJSON, &t.PaysFor); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal pays_for: %w", err)
@@ -924,7 +914,7 @@ func (r *Repository) GetTransaction(ctx context.Context, userID, id string) (*do
 	}
 
 	t.CategoryID = catID
-	t.TransferID = transferID
+
 	t.Notes = notes
 	t.SubscriptionID = subID
 	t.SimplefinAccountID = sfAccountID

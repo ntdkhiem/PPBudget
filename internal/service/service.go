@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"fmt"
+
 	"log/slog"
 	"strings"
 	"sync"
@@ -12,8 +12,6 @@ import (
 	"ntdkhiem/ppbudget-go/internal/domain"
 	"ntdkhiem/ppbudget-go/internal/repository"
 	"ntdkhiem/ppbudget-go/pkg/money"
-
-	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 )
 
 type Service struct {
@@ -43,31 +41,6 @@ func (s *Service) GetNextAutoSync() time.Time {
 
 func (s *Service) GetTransaction(ctx context.Context, userID, id string) (*domain.Transaction, error) {
 	return s.repo.GetTransaction(ctx, userID, id)
-}
-
-type TransferRequest struct {
-	FromAccountID string `json:"from_account_id"`
-	ToAccountID   string `json:"to_account_id"`
-	Amount        string `json:"amount"`
-	Date          string `json:"date"`
-	Description   string `json:"description"`
-}
-
-func (s *Service) CreateTransfer(ctx context.Context, userID string, req TransferRequest) error {
-	amount, err := money.NewFromString(req.Amount)
-	if err != nil {
-		return fmt.Errorf("%w: invalid amount", apperrors.ErrInvalidInput)
-	}
-	if amount.ToInt64() <= 0 {
-		return fmt.Errorf("%w: transfer amount must be positive", apperrors.ErrInvalidInput)
-	}
-
-	date, err := time.Parse("2006-01-02", req.Date)
-	if err != nil {
-		return fmt.Errorf("%w: invalid date format", apperrors.ErrInvalidInput)
-	}
-
-	return s.repo.CreateTransfer(ctx, userID, req.FromAccountID, req.ToAccountID, amount, date, req.Description)
 }
 
 func (s *Service) ListTransactions(ctx context.Context, f domain.TransactionFilter) ([]domain.TransactionWithBalance, error) {

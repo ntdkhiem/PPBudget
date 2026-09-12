@@ -31,7 +31,7 @@ func (r *Repository) UpdateBudget(ctx context.Context, budget *domain.Budget) er
 			return err
 		}
 	}
-	
+
 	if budget.PeriodType == "monthly" {
 		query := `
 			UPDATE budgets SET name = $1, amount = $2, bucket = $3, period_type = $4, updated_at = NOW()
