@@ -456,13 +456,6 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
-      </div>
-
-
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        
-
           {/* Savings Rate Trend */}
           <DashboardCard className="">
             <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-2">Savings Rate</h2>
@@ -475,6 +468,99 @@ export default function DashboardPage() {
               You saved {formatCurrency(Math.max(0, inPeriod - outPeriod))} out of {formatCurrency(inPeriod)} income this period.
             </p>
           </DashboardCard>
+
+          {/* Top Spending Categories Widget (RESTORED) */}
+          <DashboardCard className="min-w-0">
+            <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-4">Top Spending</h2>
+            {expensesByCategory.length > 0 ? (
+              <div className="flex flex-col gap-3">
+                {expensesByCategory.map((entry, idx) => {
+                  const maxVal = expensesByCategory[0].value;
+                  const pct = maxVal > 0 ? (entry.value / maxVal) * 100 : 0;
+                  const color = COLORS[idx % COLORS.length];
+                  return (
+                    <div key={entry.name} className="relative w-full h-10 rounded-lg overflow-hidden flex items-center bg-slate-50 dark:bg-slate-800/30">
+                      {/* The Bar */}
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{ duration: 1, ease: "easeOut" }}
+                        className="absolute top-0 left-0 h-full rounded-r-lg"
+                        style={{ backgroundColor: color, opacity: 0.2 }}
+                      />
+                      {/* The Text Overlay */}
+                      <div className="relative z-10 flex justify-between w-full px-3 text-sm font-semibold">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+                          <span className="text-slate-700 dark:text-slate-200">{entry.name}</span>
+                        </div>
+                        <span className="text-slate-900 dark:text-white">{formatCurrency(entry.value)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 text-center py-6">No expenses found.</p>
+            )}
+          </DashboardCard>
+
+
+      </div>
+
+
+
+
+      {/* Main Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Left Column: Transactions & Budgets */}
+        <div className="lg:col-span-2 space-y-6">
+          
+          {/* Recent Transactions Widget */}
+          <DashboardCard className="">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+                <ReceiptText className="h-5 w-5 text-indigo-600" />
+                <h2 className="text-lg font-bold font-heading">Recent Transactions</h2>
+              </div>
+              <Link href="/transactions" className="text-sm font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1 group">
+                View All <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+              </Link>
+            </div>
+            
+            {loadingTxns ? (
+              <div className="space-y-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            ) : recentTransactions.length > 0 ? (
+              <div className="space-y-3">
+                {recentTransactions.map((txn) => (
+                  <div key={txn.id} className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-xl transition-colors group cursor-pointer gap-4">
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                      <div className="h-10 w-10 shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-slate-500">
+                        {txn.description.trim().charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-slate-900 dark:text-white truncate">{txn.description.replace(/\s+/g, ' ').trim()}</p>
+                        <p className="text-xs text-slate-500 truncate">{formatDate(txn.date)} &bull; {(txn.category_id ? categories?.find(c => c.id === txn.category_id)?.name : null) || "Uncategorized"}</p>
+                      </div>
+                    </div>
+                    <span className={`font-bold font-heading shrink-0 ${txn.amount < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      {txn.amount > 0 ? "+" : ""}{formatCurrency(txn.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 text-center py-6">No recent transactions found.</p>
+            )}
+          </DashboardCard>
+
+
+        </div>
+
+        {/* Right Column: Mini Charts & Subscriptions */}
+        <div className="space-y-6">
+          
         {/* 2. Upcoming Subscriptions Widget */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="relative overflow-hidden border border-slate-200 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-3xl shadow-sm hover:shadow-xl hover:shadow-purple-500/5 hover:-translate-y-1 transition-all duration-500 ease-out flex flex-col p-6">
           <div className="absolute inset-0 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20 pointer-events-none -z-10" />
@@ -530,101 +616,6 @@ export default function DashboardPage() {
             </Link>
           </div>
         </motion.div>
-      </div>
-
-      {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Column: Transactions & Budgets */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          {/* Recent Transactions Widget */}
-          <DashboardCard className="">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
-                <ReceiptText className="h-5 w-5 text-indigo-600" />
-                <h2 className="text-lg font-bold font-heading">Recent Transactions</h2>
-              </div>
-              <Link href="/transactions" className="text-sm font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1 group">
-                View All <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
-              </Link>
-            </div>
-            
-            {loadingTxns ? (
-              <div className="space-y-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-            ) : recentTransactions.length > 0 ? (
-              <div className="space-y-3">
-                {recentTransactions.map((txn) => (
-                  <div key={txn.id} className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-xl transition-colors group cursor-pointer gap-4">
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                      <div className="h-10 w-10 shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-slate-500">
-                        {txn.description.trim().charAt(0).toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-900 dark:text-white truncate">{txn.description.replace(/\s+/g, ' ').trim()}</p>
-                        <p className="text-xs text-slate-500 truncate">{formatDate(txn.date)} &bull; {(txn.category_id ? categories?.find(c => c.id === txn.category_id)?.name : null) || "Uncategorized"}</p>
-                      </div>
-                    </div>
-                    <span className={`font-bold font-heading shrink-0 ${txn.amount < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                      {txn.amount > 0 ? "+" : ""}{formatCurrency(txn.amount)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500 text-center py-6">No recent transactions found.</p>
-            )}
-          </DashboardCard>
-
-
-        </div>
-
-        {/* Right Column: Mini Charts & Subscriptions */}
-        <div className="space-y-6">
-          
-          {/* Top Spending Categories Widget */}
-          <DashboardCard className="">
-            <h2 className="text-lg font-bold font-heading text-slate-800 dark:text-slate-200 mb-4">Top Spending</h2>
-            {expensesByCategory.length > 0 ? (
-              <div className="flex flex-col items-center">
-                <div className="w-full h-48">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <RechartsPieChart>
-                      <Pie
-                        data={expensesByCategory}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={2}
-                        dataKey="value"
-                        stroke="none"
-                      >
-                        {expensesByCategory.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip 
-                        formatter={(value: any) => formatCurrency(Number(value) || 0)}
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: 'var(--tw-prose-body, white)' }}
-                        itemStyle={{ color: 'inherit' }}
-                      />
-                    </RechartsPieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="flex flex-wrap gap-3 justify-center mt-2">
-                  {expensesByCategory.map((entry, idx) => (
-                    <div key={entry.name} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 font-medium">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                      <span>{entry.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500 text-center py-6">No expenses found.</p>
-            )}
-          </DashboardCard>
 
 
 
