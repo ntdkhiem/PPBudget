@@ -935,3 +935,42 @@ func (h *Handler) TestEmailNotification(w http.ResponseWriter, r *http.Request) 
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Test email sent successfully"})
 }
+
+
+
+func (h *Handler) GetInsights(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	insights, err := h.svc.GetInsights(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get insights")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, insights)
+}
+
+func (h *Handler) DismissInsight(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	
+	insightID := chi.URLParam(r, "id")
+	if insightID == "" {
+		writeError(w, http.StatusBadRequest, "Missing insight ID")
+		return
+	}
+
+	if err := h.svc.DismissInsight(r.Context(), insightID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to dismiss insight")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

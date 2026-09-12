@@ -288,3 +288,11 @@ func (s *Service) GetSpendingByCategory(ctx context.Context, userID string, star
 func (s *Service) GetReportsSummary(ctx context.Context, userID string, startDate, endDate time.Time) (*domain.ReportsSummary, error) {
 	return s.repo.GetReportsSummary(ctx, userID, startDate, endDate)
 }
+
+func (s *Service) GetInsights(ctx context.Context, userID string) ([]domain.Insight, error) {
+	return s.repo.GetInsights(ctx, userID)
+}
+
+func (s *Service) DismissInsight(ctx context.Context, insightID string) error {
+	return s.repo.DismissInsight(ctx, insightID)
+}

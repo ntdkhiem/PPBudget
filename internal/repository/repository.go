@@ -920,3 +920,55 @@ func (r *Repository) GetTransaction(ctx context.Context, userID, id string) (*do
 	t.SimplefinAccountID = sfAccountID
 	return &t, nil
 }
+
+func (r *Repository) GetInsights(ctx context.Context, userID string) ([]domain.Insight, error) {
+	insights := []domain.Insight{}
+
+	// 1. Uncategorized Transactions (Needs Review)
+	var uncategorizedCount int
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM transactions WHERE user_id = $1 AND category_id IS NULL AND amount < 0 AND deleted_at IS NULL`, userID).Scan(&uncategorizedCount)
+	if err == nil && uncategorizedCount > 0 {
+		insights = append(insights, domain.Insight{
+			ID:          "uncategorized_txns",
+			Type:        "action_item",
+			Severity:    "medium",
+			Title:       "Needs Review",
+			Description: fmt.Sprintf("You have %d uncategorized transactions.", uncategorizedCount),
+			ActionURL:   "/transactions?category=none",
+			Dismissable: false,
+		})
+	}
+
+	// 2. New Subscriptions (last 30 days)
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, name, amount 
+		FROM subscriptions 
+		WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '30 days' AND deleted_at IS NULL
+		AND id NOT IN (SELECT insight_id FROM user_insight_dismissals)
+	`, userID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id, name string
+			var amount int64
+			if err := rows.Scan(&id, &name, &amount); err == nil {
+				insights = append(insights, domain.Insight{
+					ID:          id,
+					Type:        "subscription",
+					Severity:    "low",
+					Title:       "New Subscription Detected",
+					Description: fmt.Sprintf("You recently added a %s subscription.", name),
+					ActionURL:   "/subscriptions",
+					Dismissable: true,
+				})
+			}
+		}
+	}
+
+	return insights, nil
+}
+
+func (r *Repository) DismissInsight(ctx context.Context, insightID string) error {
+	_, err := r.pool.Exec(ctx, `INSERT INTO user_insight_dismissals (insight_id) VALUES ($1)`, insightID)
+	return err
+}
