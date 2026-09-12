@@ -64,9 +64,30 @@ export default function DashboardPage() {
     queryFn: () => apiFetch<DashboardSummary>(`/reports/summary?${queryParams}`, {}, token),
   });
 
+  type TimeRange = '1M' | '3M' | '6M' | '1Y' | 'ALL';
+  const [netWorthRange, setNetWorthRange] = useState<TimeRange>('6M');
+
+  const netWorthQueryParams = useMemo(() => {
+    const params = new URLSearchParams();
+    const end = new Date();
+    let start = new Date();
+    
+    switch(netWorthRange) {
+      case '1M': start.setMonth(start.getMonth() - 1); break;
+      case '3M': start.setMonth(start.getMonth() - 3); break;
+      case '6M': start.setMonth(start.getMonth() - 6); break;
+      case '1Y': start.setFullYear(start.getFullYear() - 1); break;
+      case 'ALL': start.setFullYear(start.getFullYear() - 10); break;
+    }
+    
+    params.append('start_date', format(start, 'yyyy-MM-dd'));
+    params.append('end_date', format(end, 'yyyy-MM-dd'));
+    return params.toString();
+  }, [netWorthRange]);
+
   const { data: netWorthData } = useQuery<NetWorthDataPoint[]>({
-    queryKey: ["reports", "net-worth", "6-months"],
-    queryFn: () => apiFetch<NetWorthDataPoint[]>("/reports/net-worth", {}, token),
+    queryKey: ["reports", "net-worth", netWorthRange],
+    queryFn: () => apiFetch<NetWorthDataPoint[]>(`/reports/net-worth?${netWorthQueryParams}`, {}, token),
   });
 
   const { data: transactions, isLoading: loadingTxns } = useQuery<Transaction[]>({
@@ -146,6 +167,15 @@ export default function DashboardPage() {
     return [firstValue - maxDiff * 1.1, firstValue + maxDiff * 1.1];
   }, [netWorthData]);
 
+  const { currentNetWorth, delta, deltaPercent } = useMemo(() => {
+    if (!netWorthData || netWorthData.length < 2) return { currentNetWorth: 0, delta: 0, deltaPercent: 0 };
+    const curr = netWorthData[netWorthData.length - 1].net_worth;
+    const prev = netWorthData[0].net_worth;
+    const d = curr - prev;
+    const dp = prev > 0 ? (d / prev) * 100 : 0;
+    return { currentNetWorth: curr, delta: d, deltaPercent: dp };
+  }, [netWorthData]);
+
   if (loadingAccounts) {
     return (
       <div className="space-y-10">
@@ -188,13 +218,37 @@ export default function DashboardPage() {
 
       {/* Net Worth Progression Full Width */}
       <DashboardCard className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
-            <TrendingUp className="h-5 w-5 text-indigo-600" />
-            <h2 className="text-lg font-bold font-heading">Net Worth Progression</h2>
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-6 gap-4">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+              <TrendingUp className="h-5 w-5 text-indigo-600" />
+              <h2 className="text-lg font-bold font-heading">Net Worth Progression</h2>
+            </div>
+            
+            {netWorthData && netWorthData.length > 1 && (
+              <div className="flex items-baseline gap-3 mt-1">
+                <span className="text-3xl font-bold font-heading text-slate-900 dark:text-white">
+                  {formatCurrency(currentNetWorth)}
+                </span>
+                <span className={`text-sm font-medium flex items-center ${delta >= 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-rose-600 dark:text-rose-500'}`}>
+                  {delta >= 0 ? '+' : ''}{formatCurrency(delta)} ({delta >= 0 ? '+' : ''}{deltaPercent.toFixed(1)}%)
+                </span>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-lg self-start">
+            {(['1M', '3M', '6M', '1Y', 'ALL'] as const).map(range => (
+              <button 
+                key={range}
+                onClick={() => setNetWorthRange(range)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${netWorthRange === range ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+              >
+                {range}
+              </button>
+            ))}
           </div>
         </div>
-        
         <div className="h-72 w-full" role="img" aria-label="Net Worth Progression Chart">
           {netWorthData && netWorthData.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
