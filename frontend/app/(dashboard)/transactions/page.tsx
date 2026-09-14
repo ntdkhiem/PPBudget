@@ -527,7 +527,7 @@ export default function TransactionsPage() {
   }, []);
 
   const handleNextPage = () => {
-    if (transactions && transactions.length === 50) {
+    if (transactions && transactions.length === 100) {
       const last = transactions[transactions.length - 1];
       setCursorStack([...cursorStack, { date: last.date, id: last.id }]);
     }
@@ -696,7 +696,7 @@ export default function TransactionsPage() {
               variant="outline"
               size="sm"
               onClick={handleNextPage}
-              disabled={!transactions || transactions.length < 50 || isLoading}
+              disabled={!transactions || transactions.length < 100 || isLoading}
               className="text-slate-600 dark:text-slate-300"
             >
               Next
