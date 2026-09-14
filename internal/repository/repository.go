@@ -104,19 +104,17 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
         SELECT 
             t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
             t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id,
-            (a.initial_balance + SUM(t.amount) OVER (PARTITION BY t.account_id ORDER BY t.date, t.id)) as running_balance,
-            (t.amount 
+            (t.amount
              - COALESCE(pays_for_agg.total_amount, 0)
              + COALESCE(paid_by_agg.total_amount, 0)
             ) as effective_amount,
             COALESCE(pays_for_agg.json_data, '[]'::json) as pays_for,
             COALESCE(paid_by_agg.json_data, '[]'::json) as paid_by
         FROM transactions t
-        JOIN accounts a ON t.account_id = a.id
         LEFT JOIN LATERAL (
             SELECT SUM(l.amount) as total_amount,
                    json_agg(json_build_object(
-                       'transaction_id', l.target_transaction_id, 
+                       'transaction_id', l.target_transaction_id,
                        'amount', l.amount,
                        'description', tt.description,
                        'date', to_char(tt.date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
@@ -128,7 +126,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
         LEFT JOIN LATERAL (
             SELECT SUM(l.amount) as total_amount,
                    json_agg(json_build_object(
-                       'transaction_id', l.source_transaction_id, 
+                       'transaction_id', l.source_transaction_id,
                        'amount', l.amount,
                        'description', st.description,
                        'date', to_char(st.date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
@@ -195,6 +193,32 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 	}
 
 	query += " ORDER BY t.date DESC, t.id DESC LIMIT 100"
+
+	// Running balance is computed after filtering and paging, so it never depends on the
+	// filters. account_balance_at runs once per (account, date) on the page; within a day
+	// the last-displayed transaction (highest id) equals that day's end-of-day balance.
+	query = `
+        WITH page AS (` + query + `),
+        day_balance AS (
+            SELECT d.account_id, d.date, account_balance_at(d.account_id, d.date) AS balance
+            FROM (SELECT DISTINCT account_id, date FROM page) d
+        )
+        SELECT
+            p.id, p.user_id, p.account_id, p.category_id, p.amount, p.date, p.description,
+            p.notes, p.is_reviewed, p.is_reconciled, p.subscription_id,
+            (db.balance - COALESCE((
+                SELECT SUM(x.amount)
+                FROM transactions x
+                WHERE x.account_id = p.account_id
+                  AND x.date = p.date
+                  AND x.id > p.id
+                  AND x.deleted_at IS NULL
+            ), 0))::bigint AS running_balance,
+            p.effective_amount, p.pays_for, p.paid_by
+        FROM page p
+        JOIN day_balance db ON db.account_id = p.account_id AND db.date = p.date
+        ORDER BY p.date DESC, p.id DESC
+    `
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -358,15 +382,43 @@ func (r *Repository) MarkReviewed(ctx context.Context, userID, txnID string, cat
 	return nil
 }
 
+// accountSelectFrom selects the columns read by scanAccount from `accounts a`.
+// current_balance comes from account_balance_at; balance_as_of/balance_source come from
+// the latest non-opening snapshot (NULL when the account only has an opening snapshot).
+// Callers append WHERE (which must filter on a.user_id) and ORDER BY clauses.
+const accountSelectFrom = `
+	SELECT a.id, a.user_id, a.name, a.type, a.currency, a.simplefin_id, a.created_at, a.updated_at,
+	       account_balance_at(a.id, 'infinity'::date) AS current_balance,
+	       ls.as_of_date AS balance_as_of,
+	       ls.source AS balance_source
+	FROM accounts a
+	LEFT JOIN LATERAL (
+		SELECT s.as_of_date, s.source
+		FROM account_balance_snapshots s
+		WHERE s.account_id = a.id
+		  AND s.user_id = a.user_id
+		  AND s.source <> 'opening'
+		ORDER BY s.as_of_date DESC
+		LIMIT 1
+	) ls ON true
+`
+
+func scanAccount(row pgx.Row) (domain.Account, error) {
+	var a domain.Account
+	var currentBalance int64
+	err := row.Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Currency, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt,
+		&currentBalance, &a.BalanceAsOf, &a.BalanceSource)
+	if err != nil {
+		return a, err
+	}
+	a.CurrentBalance = money.Money(currentBalance)
+	return a, nil
+}
+
 // ListAccounts fetches all accounts for a user
 func (r *Repository) ListAccounts(ctx context.Context, userID string) ([]domain.Account, error) {
-	query := `
-		SELECT a.id, a.user_id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
-		       COALESCE(SUM(t.amount), 0) + a.initial_balance as current_balance
-		FROM accounts a
-		LEFT JOIN transactions t ON a.id = t.account_id AND t.deleted_at IS NULL AND t.user_id = $1
+	query := accountSelectFrom + `
 		WHERE a.user_id = $1
-		GROUP BY a.id
 		ORDER BY a.name ASC
 	`
 	rows, err := r.pool.Query(ctx, query, userID)
@@ -377,17 +429,13 @@ func (r *Repository) ListAccounts(ctx context.Context, userID string) ([]domain.
 
 	var accounts []domain.Account
 	for rows.Next() {
-		var a domain.Account
-		var balance, currentBalance int64
-		err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance)
+		a, err := scanAccount(rows)
 		if err != nil {
 			return nil, err
 		}
-		a.InitialBalance = money.Money(balance)
-		a.CurrentBalance = money.Money(currentBalance)
 		accounts = append(accounts, a)
 	}
-	return accounts, nil
+	return accounts, rows.Err()
 }
 
 // Categories
@@ -449,47 +497,70 @@ func (r *Repository) ListCategories(ctx context.Context, userID string) ([]domai
 
 // Accounts
 
-func (r *Repository) CreateAccount(ctx context.Context, userID, name, accType, currency string, initialBalance int64) error {
-	query := `INSERT INTO accounts (name, type, currency, initial_balance, user_id) VALUES ($1, $2, $3, $4, $5)`
-	_, err := r.pool.Exec(ctx, query, name, accType, currency, initialBalance, userID)
-	return err
+// CreateAccount inserts the account and its opening balance snapshot in one transaction.
+func (r *Repository) CreateAccount(ctx context.Context, userID, name, accType, currency string, openingBalance int64) (string, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var id string
+	query := `INSERT INTO accounts (name, type, currency, user_id) VALUES ($1, $2, $3, $4) RETURNING id`
+	if err := tx.QueryRow(ctx, query, name, accType, currency, userID).Scan(&id); err != nil {
+		return "", fmt.Errorf("failed to create account: %w", err)
+	}
+
+	if err := r.SetOpeningBalance(ctx, tx, userID, id, money.Money(openingBalance)); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("failed to commit account creation: %w", err)
+	}
+	return id, nil
 }
 
 func (r *Repository) GetAccount(ctx context.Context, userID, id string) (*domain.Account, error) {
-	query := `
-		SELECT a.id, a.user_id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
-		       COALESCE(SUM(t.amount), 0) + a.initial_balance as current_balance
-		FROM accounts a
-		LEFT JOIN transactions t ON a.id = t.account_id AND t.deleted_at IS NULL AND t.user_id = $2
+	query := accountSelectFrom + `
 		WHERE a.id = $1 AND a.user_id = $2
-		GROUP BY a.id
 	`
-	var a domain.Account
-	var balance, currentBalance int64
-	err := r.pool.QueryRow(ctx, query, id, userID).Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance)
+	a, err := scanAccount(r.pool.QueryRow(ctx, query, id, userID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apperrors.ErrNotFound
 		}
 		return nil, err
 	}
-	a.InitialBalance = money.Money(balance)
-	a.CurrentBalance = money.Money(currentBalance)
 	return &a, nil
 }
 
-func (r *Repository) UpdateAccount(ctx context.Context, userID, id, name, accType, currency string, initialBalance int64) error {
-	query := `
-		UPDATE accounts 
-		SET name = $1, type = $2, currency = $3, initial_balance = $4, updated_at = NOW()
-		WHERE id = $5 AND user_id = $6
-	`
-	tag, err := r.pool.Exec(ctx, query, name, accType, currency, initialBalance, id, userID)
+// UpdateAccount leaves the opening snapshot untouched when openingBalance is nil.
+func (r *Repository) UpdateAccount(ctx context.Context, userID, id, name, accType, currency string, openingBalance *int64) error {
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// An empty currency keeps the existing one; the edit form doesn't send it.
+	query := `UPDATE accounts SET name = $1, type = $2, currency = COALESCE(NULLIF($3, ''), currency), updated_at = NOW() WHERE id = $4 AND user_id = $5`
+	tag, err := tx.Exec(ctx, query, name, accType, currency, id, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update account: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return apperrors.ErrNotFound
+	}
+
+	if openingBalance != nil {
+		if err := r.SetOpeningBalance(ctx, tx, userID, id, money.Money(*openingBalance)); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit account update: %w", err)
 	}
 	return nil
 }
@@ -648,19 +719,18 @@ func (r *Repository) GetNetWorthTrend(ctx context.Context, userID string, startD
 			FROM generate_series(date_trunc('month', $2::timestamp), date_trunc('month', $3::timestamp), '1 month'::interval) d
 		),
 		balances AS (
-			SELECT 
-				d.end_of_month as month,
+			SELECT
+				d.end_of_month AS month,
 				a.type,
-				a.initial_balance + COALESCE(SUM(t.amount), 0) as balance
+				account_balance_at(a.id, LEAST(d.end_of_month, CURRENT_DATE)) AS balance
 			FROM dates d
-			CROSS JOIN (SELECT * FROM accounts WHERE user_id = $1) a
-			LEFT JOIN transactions t ON t.account_id = a.id AND t.date <= d.end_of_month AND t.deleted_at IS NULL AND t.user_id = $1
-			GROUP BY d.end_of_month, a.id, a.type, a.initial_balance
+			CROSS JOIN accounts a
+			WHERE a.user_id = $1 AND a.type IN ('asset', 'liability')
 		)
-		SELECT 
+		SELECT
 			month,
-			SUM(CASE WHEN type = 'asset' THEN balance ELSE 0 END) as assets,
-			SUM(CASE WHEN type = 'liability' THEN balance ELSE 0 END) as liabilities
+			COALESCE(SUM(balance) FILTER (WHERE type = 'asset'), 0)::bigint AS assets,
+			COALESCE(SUM(balance) FILTER (WHERE type = 'liability'), 0)::bigint AS liabilities
 		FROM balances
 		GROUP BY month
 		ORDER BY month ASC
@@ -818,18 +888,11 @@ func (r *Repository) GetReportsSummary(ctx context.Context, userID string, start
 	}
 	summary.LeftToSpend = money.Money(allocated - spent)
 
+	// Signed convention: liabilities are negative, so net worth is a plain sum.
 	queryNetWorth := `
-		WITH acc_balances AS (
-			SELECT a.id, a.type, a.initial_balance + COALESCE(SUM(t.amount), 0) as balance
-			FROM accounts a
-			LEFT JOIN transactions t ON t.account_id = a.id AND t.deleted_at IS NULL AND t.user_id = $1
-			WHERE a.user_id = $1
-			GROUP BY a.id, a.type, a.initial_balance
-		)
-		SELECT 
-			COALESCE(SUM(CASE WHEN type = 'asset' THEN balance ELSE 0 END), 0) -
-			COALESCE(SUM(CASE WHEN type = 'liability' THEN balance ELSE 0 END), 0) as net_worth
-		FROM acc_balances
+		SELECT COALESCE(SUM(account_balance_at(a.id, 'infinity'::date)), 0)::bigint AS net_worth
+		FROM accounts a
+		WHERE a.user_id = $1 AND a.type IN ('asset', 'liability')
 	`
 	var netWorth int64
 	err = r.pool.QueryRow(ctx, queryNetWorth, userID).Scan(&netWorth)

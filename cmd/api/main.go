@@ -125,6 +125,9 @@ func main() {
 			r.Get("/accounts/{id}", h.GetAccount)
 			r.Put("/accounts/{id}", h.UpdateAccount)
 			r.Delete("/accounts/{id}", h.DeleteAccount)
+			r.Get("/accounts/{id}/balances", h.ListBalanceSnapshots)
+			r.Post("/accounts/{id}/balances", h.RecordManualBalance)
+			r.Delete("/accounts/{id}/balances/{snapshotId}", h.DeleteBalanceSnapshot)
 
 			// Transactions
 			r.Get("/transactions", h.ListTransactions)

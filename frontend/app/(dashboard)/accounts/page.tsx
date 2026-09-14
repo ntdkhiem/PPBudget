@@ -3,23 +3,35 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, Account } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Wallet, CreditCard, Plus, ReceiptText, ArrowUpRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
+import { Wallet, CreditCard, Plus, ReceiptText, ArrowUpRight, RefreshCw, History } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageContainer } from "@/components/page-container";
 import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
+import { UpdateBalanceDialog } from "@/components/update-balance-dialog";
+
+const STALE_DAYS = 3;
+
+function isStale(balanceAsOf: string): boolean {
+  const asOf = new Date(balanceAsOf);
+  const diffMs = Date.now() - asOf.getTime();
+  return diffMs > STALE_DAYS * 24 * 60 * 60 * 1000;
+}
 
 export default function AccountsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
+  const [balanceAccount, setBalanceAccount] = useState<Account | null>(null);
   const queryClient = useQueryClient();
   const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
 
@@ -29,7 +41,7 @@ export default function AccountsPage() {
   });
 
   const createAccountMutation = useMutation({
-    mutationFn: (newAccount: { name: string; type: string; initial_balance: number }) =>
+    mutationFn: (newAccount: { name: string; type: string; opening_balance: number }) =>
       apiFetch<Account>("/accounts", {
         method: "POST",
         body: JSON.stringify(newAccount),
@@ -45,10 +57,10 @@ export default function AccountsPage() {
   });
 
   const updateAccountMutation = useMutation({
-    mutationFn: (data: { id: string; name: string; type: string; initial_balance: number }) =>
+    mutationFn: (data: { id: string; name: string; type: string }) =>
       apiFetch<Account>(`/accounts/${data.id}`, {
         method: "PUT",
-        body: JSON.stringify({ name: data.name, type: data.type, initial_balance: data.initial_balance }),
+        body: JSON.stringify({ name: data.name, type: data.type }),
       }, token),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
@@ -80,10 +92,10 @@ export default function AccountsPage() {
     const formData = new FormData(e.currentTarget);
     const name = formData.get("name") as string;
     const type = formData.get("type") as string;
-    const balanceStr = formData.get("initial_balance") as string;
-    const initial_balance = Math.round(parseFloat(balanceStr) * 100);
+    const balanceStr = formData.get("opening_balance") as string;
+    const opening_balance = Math.round(parseFloat(balanceStr) * 100);
 
-    createAccountMutation.mutate({ name, type, initial_balance });
+    createAccountMutation.mutate({ name, type, opening_balance });
   };
 
   const handleEditAccount = (e: React.FormEvent<HTMLFormElement>) => {
@@ -92,10 +104,8 @@ export default function AccountsPage() {
     const formData = new FormData(e.currentTarget);
     const name = formData.get("name") as string;
     const type = formData.get("type") as string;
-    const balanceStr = formData.get("initial_balance") as string;
-    const initial_balance = Math.round(parseFloat(balanceStr) * 100);
 
-    updateAccountMutation.mutate({ id: selectedAccount.id, name, type, initial_balance });
+    updateAccountMutation.mutate({ id: selectedAccount.id, name, type });
   };
 
   const assets = accounts?.filter((a) => a.type === "asset") || [];
@@ -103,12 +113,12 @@ export default function AccountsPage() {
   const expenses = accounts?.filter((a) => a.type === "expense") || [];
   const incomes = accounts?.filter((a) => a.type === "income") || [];
 
-  const totalAssets = assets.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
-  const totalLiabilities = liabilities.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
-  const totalExpenses = expenses.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
-  const totalIncomes = incomes.reduce((sum, a) => sum + (a.current_balance ?? a.initial_balance), 0);
+  const totalAssets = assets.reduce((sum, a) => sum + a.current_balance, 0);
+  const totalLiabilities = liabilities.reduce((sum, a) => sum + a.current_balance, 0);
+  const totalExpenses = expenses.reduce((sum, a) => sum + a.current_balance, 0);
+  const totalIncomes = incomes.reduce((sum, a) => sum + a.current_balance, 0);
 
-const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number; onClick: () => void }) => {
+const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Account; idx: number; onClick: () => void; onUpdateBalance: () => void }) => {
   let colorClass = "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:bg-slate-800 dark:text-slate-400";
   let Icon = Wallet;
   if (account.type === 'asset') {
@@ -124,6 +134,8 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
     colorClass = "bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400";
     Icon = ArrowUpRight;
   }
+
+  const showStale = account.balance_source === "simplefin" && !!account.balance_as_of && isStale(account.balance_as_of);
 
   return (
     <motion.div
@@ -142,8 +154,36 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
       <div>
         <h3 className="text-lg font-medium mb-2 text-slate-600 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{account.name}</h3>
         <p className={`text-3xl font-bold font-heading tracking-tight text-slate-900 dark:text-white`}>
-          {formatCurrency(account.current_balance ?? account.initial_balance)}
+          {formatCurrency(account.current_balance)}
         </p>
+        {account.balance_as_of && (
+          <div className="mt-1 flex items-center gap-2">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              as of {formatDate(account.balance_as_of)} &middot; {account.balance_source === "simplefin" ? "SimpleFin" : "Manual"}
+            </p>
+            {showStale && (
+              <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 border-0">
+                Stale
+              </Badge>
+            )}
+          </div>
+        )}
+        <div className="mt-3 flex items-center gap-4">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onUpdateBalance(); }}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
+          >
+            <RefreshCw className="h-3 w-3" /> Update balance
+          </button>
+          <Link
+            href={`/accounts/${account.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
+          >
+            <History className="h-3 w-3" /> View history
+          </Link>
+        </div>
       </div>
     </motion.div>
   );
@@ -185,8 +225,8 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="initial_balance" className="text-slate-700 dark:text-slate-300">Initial Balance ($)</Label>
-                <Input id="initial_balance" name="initial_balance" type="number" step="0.01" placeholder="0.00" required className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
+                <Label htmlFor="opening_balance" className="text-slate-700 dark:text-slate-300">Opening Balance ($)</Label>
+                <Input id="opening_balance" name="opening_balance" type="number" step="0.01" placeholder="0.00" required className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
               </div>
               <div className="pt-4">
                 <Button type="submit" disabled={createAccountMutation.isPending} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-6 text-lg font-medium shadow-md shadow-indigo-500/20">
@@ -222,10 +262,6 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-initial_balance" className="text-slate-700 dark:text-slate-300">Initial Balance ($)</Label>
-                  <Input id="edit-initial_balance" name="initial_balance" type="number" step="0.01" defaultValue={(selectedAccount.initial_balance / 100).toFixed(2)} required className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
-                </div>
                 <div className="pt-4 flex gap-3">
                   <Button type="button" variant="destructive" onClick={() => deleteAccountMutation.mutate(selectedAccount.id)} disabled={deleteAccountMutation.isPending || updateAccountMutation.isPending} className="rounded-xl py-6 font-medium">
                     {deleteAccountMutation.isPending ? "..." : "Delete"}
@@ -260,7 +296,7 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {assets.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} onUpdateBalance={() => setBalanceAccount(account)} />
               ))}
             </div>
           )}
@@ -285,7 +321,7 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {liabilities.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} onUpdateBalance={() => setBalanceAccount(account)} />
               ))}
             </div>
           )}
@@ -310,7 +346,7 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {incomes.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} onUpdateBalance={() => setBalanceAccount(account)} />
               ))}
             </div>
           )}
@@ -335,13 +371,22 @@ const AccountCard = ({ account, idx, onClick }: { account: Account; idx: number;
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {expenses.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} onUpdateBalance={() => setBalanceAccount(account)} />
               ))}
             </div>
           )}
         </section>
 
       </div>
+
+      {balanceAccount && (
+        <UpdateBalanceDialog
+          accountId={balanceAccount.id}
+          accountName={balanceAccount.name}
+          open={!!balanceAccount}
+          onOpenChange={(open) => !open && setBalanceAccount(null)}
+        />
+      )}
     </motion.div>
   );
 }

@@ -10,7 +10,7 @@ It securely connects to your bank accounts, imports your transactions automatica
 
 - **Automated Bank Sync:** Integrates with SimpleFin to automatically pull transactions from your credit cards and bank accounts.
 - **Rules-Based Auto-Categorization:** Create powerful rules (e.g., *If description contains 'Uber', set category to 'Travel'*) that execute automatically during every import.
-- **Net Worth Tracking:** Automatically snapshots your account balances over time to visualize your net worth trajectory.
+- **Net Worth Tracking:** Records balance snapshots at every SimpleFin sync (~12 hours), anchoring investment accounts to their current market value. Manual accounts can be updated with the "Update balance" action to reflect their current state.
 - **Budgeting Engine:** Features a 3-column layout based on the Needs/Wants/Savings (50/30/20 strategy) to instantly track your spending velocity. It uses a "Phantom Budgets" architecture that natively supports future month projections without duplicating database rows.
 - **Paycheck Calibration Tool:** Align your budgets and available funds with your actual paycheck schedules.
 - **Smart Subscription Tracking:** Detects recurring subscriptions and forecasts your upcoming bills.
@@ -101,7 +101,8 @@ The entire architecture is designed to cost nothing, with the exception of the d
 # Create a local postgres database
 psql -c 'CREATE DATABASE ppbudget;'
 
-# The backend will automatically run migrations on startup
+# Apply database migrations (required before starting the API)
+make migrate-up
 ```
 
 ### 2. Backend (Go)

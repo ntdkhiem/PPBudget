@@ -27,9 +27,9 @@ func TestRequireJWT(t *testing.T) {
 			http.Error(w, "user_id not in context", http.StatusInternalServerError)
 			return
 		}
-		rawUserID := r.Context().Value("user_id")
+		rawUserID := r.Context().Value(UserIDKey)
 		if rawUserID != userID {
-			http.Error(w, "raw user_id mismatch", http.StatusInternalServerError)
+			http.Error(w, "typed user_id key mismatch", http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)

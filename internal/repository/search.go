@@ -80,13 +80,8 @@ func (r *Repository) SearchCategories(ctx context.Context, userID string, query 
 }
 
 func (r *Repository) SearchAccounts(ctx context.Context, userID string, query string, limit int) ([]domain.Account, error) {
-	q := `
-		SELECT a.id, a.user_id, a.name, a.type, a.currency, a.initial_balance, a.simplefin_id, a.created_at, a.updated_at,
-		       COALESCE(SUM(t.amount), 0) + a.initial_balance as current_balance
-		FROM accounts a
-		LEFT JOIN transactions t ON a.id = t.account_id AND t.deleted_at IS NULL AND t.user_id = $1
+	q := accountSelectFrom + `
 		WHERE a.user_id = $1 AND a.name ILIKE '%' || $2 || '%'
-		GROUP BY a.id
 		ORDER BY a.name <-> $2
 		LIMIT $3
 	`
@@ -98,16 +93,13 @@ func (r *Repository) SearchAccounts(ctx context.Context, userID string, query st
 
 	var accounts []domain.Account
 	for rows.Next() {
-		var a domain.Account
-		var balance, currentBalance int64
-		if err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Currency, &balance, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt, &currentBalance); err != nil {
+		a, err := scanAccount(rows)
+		if err != nil {
 			return nil, err
 		}
-		a.InitialBalance = money.Money(balance)
-		a.CurrentBalance = money.Money(currentBalance)
 		accounts = append(accounts, a)
 	}
-	return accounts, nil
+	return accounts, rows.Err()
 }
 
 func (r *Repository) SearchSubscriptions(ctx context.Context, userID string, query string, limit int) ([]domain.Subscription, error) {

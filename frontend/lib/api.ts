@@ -34,10 +34,27 @@ export async function apiFetch<T>(
 // Types matching the Go backend
 export interface Account {
   id: string;
+  user_id?: string;
   name: string;
   type: "asset" | "liability" | "income" | "expense" | "equity";
-  initial_balance: number; // cents
-  current_balance?: number; // cents
+  currency?: string;
+  current_balance: number; // cents, signed (liabilities negative)
+  balance_as_of?: string; // "YYYY-MM-DDT00:00:00Z" — latest non-opening snapshot
+  balance_source?: "simplefin" | "manual";
+  simplefin_id?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BalanceSnapshot {
+  id: string;
+  account_id: string;
+  as_of_date: string | null; // null = opening
+  balance: number; // cents
+  available_balance?: number;
+  source: "opening" | "simplefin" | "manual";
+  reported_at?: string;
+  created_at: string;
 }
 
 export interface Transaction {

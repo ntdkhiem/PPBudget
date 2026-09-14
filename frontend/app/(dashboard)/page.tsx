@@ -198,6 +198,19 @@ export default function DashboardPage() {
     return [firstValue - maxDiff * 1.1, firstValue + maxDiff * 1.1];
   }, [netWorthData]);
 
+  const netWorthCaption = useMemo(() => {
+    const netWorthAccounts = (accounts || []).filter((a) => a.type === "asset" || a.type === "liability");
+    const asOfDates = netWorthAccounts
+      .map((a) => a.balance_as_of)
+      .filter((d): d is string => !!d);
+    const base = `Based on ${netWorthAccounts.length} account${netWorthAccounts.length === 1 ? "" : "s"}`;
+    if (asOfDates.length === 0) {
+      return base;
+    }
+    const oldest = asOfDates.reduce((min, d) => (d < min ? d : min), asOfDates[0]);
+    return `${base} · balances as of ${formatDate(oldest)}`;
+  }, [accounts]);
+
   const { currentNetWorth, delta, deltaPercent } = useMemo(() => {
     if (!netWorthData || netWorthData.length < 2) return { currentNetWorth: 0, delta: 0, deltaPercent: 0 };
     const curr = netWorthData[netWorthData.length - 1].net_worth;
@@ -218,10 +231,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  const netWorth = accounts?.reduce((acc, a) => {
-    return a.type === "asset" ? acc + a.initial_balance : acc - a.initial_balance;
-  }, 0) || 0;
 
   const recentTransactions = transactions?.slice(0, 5) || [];
   const activeBudgets = budgets?.slice(0, 4) || [];
@@ -259,7 +268,8 @@ export default function DashboardPage() {
               <TrendingUp className="h-5 w-5 text-indigo-600" />
               <h2 className="text-lg font-bold font-heading">Net Worth Progression</h2>
             </div>
-            
+            <p className="text-xs text-slate-500 dark:text-slate-400">{netWorthCaption}</p>
+
             {netWorthData && netWorthData.length > 1 && (
               <div className="flex items-baseline gap-3 mt-1">
                 <span className="text-3xl font-bold font-heading text-slate-900 dark:text-white">

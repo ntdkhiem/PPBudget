@@ -34,11 +34,40 @@ type SimplefinFetchAccountsResponse struct {
 }
 
 type SFAccount struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
-	Currency     string          `json:"currency"`
-	Balance      string          `json:"balance"`
-	Transactions []sfTransaction `json:"transactions,omitempty"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Currency         string          `json:"currency"`
+	Balance          string          `json:"balance"`
+	BalanceDate      int64           `json:"balance-date"`
+	AvailableBalance string          `json:"available-balance,omitempty"`
+	Transactions     []sfTransaction `json:"transactions,omitempty"`
+}
+
+// snapshotFromSFAccount derives balance-snapshot fields from a SimpleFin account payload.
+// It returns an error only when the reported balance itself is missing or unparseable;
+// the available balance is best-effort and never fails the snapshot.
+func snapshotFromSFAccount(acc SFAccount, now time.Time) (balance money.Money, available *money.Money, asOf time.Time, reportedAt time.Time, err error) {
+	balance, err = money.NewFromString(acc.Balance)
+	if err != nil {
+		return 0, nil, time.Time{}, time.Time{}, fmt.Errorf("unparseable balance %q: %w", acc.Balance, err)
+	}
+
+	if acc.AvailableBalance != "" {
+		if avail, aerr := money.NewFromString(acc.AvailableBalance); aerr == nil {
+			available = &avail
+		}
+	}
+
+	if acc.BalanceDate != 0 {
+		reportedAt = time.Unix(acc.BalanceDate, 0).UTC()
+	} else {
+		reportedAt = now.UTC()
+	}
+
+	y, m, d := reportedAt.Date()
+	asOf = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+
+	return balance, available, asOf, reportedAt, nil
 }
 
 type sfTransaction struct {
@@ -305,11 +334,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 
 			var targetAccountID string
 			if mappedAccountID == "new" {
-				balance, err := money.NewFromString(acc.Balance)
-				if err != nil {
-					balance = money.Money(0)
-				}
-				newID, err := s.repo.UpsertSimplefinAccount(bgCtx, userID, acc.ID, acc.Name, acc.Currency, balance.ToInt64())
+				newID, err := s.repo.UpsertSimplefinAccount(bgCtx, userID, acc.ID, acc.Name, acc.Currency)
 				if err != nil {
 					s.logger.Error("failed to create account", "error", err, "sf_id", acc.ID, "user_id", userID)
 					continue
@@ -370,6 +395,17 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 
 			if err := tx.Commit(bgCtx); err != nil {
 				s.logger.Error("failed to commit tx", "error", err)
+				continue
+			}
+
+			// Record the bank-reported balance for this sync. This runs after the
+			// transaction commit (never inside it) because in pgx a failed statement
+			// aborts the whole tx, which would discard the imported transactions.
+			balance, available, asOf, reportedAt, err := snapshotFromSFAccount(acc, time.Now())
+			if err != nil {
+				s.logger.Error("failed to parse balance for snapshot", "error", err, "sf_id", acc.ID, "user_id", userID)
+			} else if err := s.repo.UpsertBalanceSnapshot(bgCtx, nil, userID, targetAccountID, asOf, balance, available, domain.BalanceSourceSimplefin, &reportedAt); err != nil {
+				s.logger.Error("failed to upsert balance snapshot", "error", err, "sf_id", acc.ID, "user_id", userID)
 			}
 		}
 

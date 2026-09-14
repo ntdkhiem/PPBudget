@@ -6,16 +6,16 @@ import (
 	"time"
 )
 
-func (r *Repository) UpsertSimplefinAccount(ctx context.Context, userID, sfID, name, currency string, balance int64) (string, error) {
+func (r *Repository) UpsertSimplefinAccount(ctx context.Context, userID, sfID, name, currency string) (string, error) {
 	query := `
-		INSERT INTO accounts (name, type, currency, initial_balance, simplefin_id, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (simplefin_id) DO UPDATE 
+		INSERT INTO accounts (name, type, currency, simplefin_id, user_id)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (simplefin_id) DO UPDATE
 		SET name = EXCLUDED.name, currency = EXCLUDED.currency, updated_at = NOW()
 		RETURNING id
 	`
 	var id string
-	err := r.pool.QueryRow(ctx, query, name, "asset", currency, balance, sfID, userID).Scan(&id)
+	err := r.pool.QueryRow(ctx, query, name, "asset", currency, sfID, userID).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("failed to upsert simplefin account: %w", err)
 	}

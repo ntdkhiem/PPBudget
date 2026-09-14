@@ -178,7 +178,7 @@
                         <ul>
                             <li><strong>Account Name:</strong> A recognizable label (e.g., <code>Main Checking</code> or <code>Sapphire Credit Card</code>).</li>
                             <li><strong>Account Type:</strong> Select <strong>Asset</strong> or <strong>Liability</strong>.</li>
-                            <li><strong>Initial Balance ($):</strong> The starting balance on your statement (e.g., <code>2500.00</code> for cash/checking, or current balance owed on a credit card).</li>
+                            <li><strong>Opening Balance ($):</strong> The starting balance on your statement. For assets (checking, savings, investments), enter a positive amount. For liabilities (credit cards, loans), enter the amount owed as a negative value (e.g., <code>-1500.00</code> for a credit card balance of $1,500 owed).</li>
                         </ul>
                     </li>
                     <li>Click <strong>Create Account</strong>.</li>
@@ -190,6 +190,30 @@
                 <div class="callout-content">
                     <strong>Preparing for Automated Bank Sync:</strong> If you plan to link your real bank accounts with <strong>SimpleFin</strong>, you can create your accounts here first or have them automatically configured when syncing. Read the <a href="simplefin-importer.html">SimpleFin Importer Guide</a> for full details.
                 </div>
+            </div>
+
+            <div class="instruction-block">
+                <h3>Updating Account Balance</h3>
+                <p>For accounts not synced via SimpleFin (e.g., manually tracked investments, cash, or brokerage accounts you manage elsewhere), use the <strong>Update balance</strong> action:</p>
+                <ol class="step-list">
+                    <li>Go to the <strong>Accounts</strong> page.</li>
+                    <li>Click <strong>Update balance</strong> on the account's card.</li>
+                    <li>Enter the current balance amount in the dialog (positive for assets, negative for liabilities).</li>
+                    <li>Optionally specify a date if the balance is for a past date; otherwise it defaults to today.</li>
+                    <li>Click <strong>Save Balance</strong>.</li>
+                </ol>
+                <p>This records a manual snapshot of your account's balance, anchoring all subsequent transactions from that point forward. Investment accounts updated this way will reflect your current positions until the next update.</p>
+            </div>
+
+            <div class="instruction-block">
+                <h3>Balance History</h3>
+                <p>Each account page includes a <strong>Balance History</strong> section showing all recorded balance snapshots (opening balance, SimpleFin syncs, and manual updates). This view displays:</p>
+                <ul class="feature-list">
+                    <li><strong>Date:</strong> When the balance was recorded.</li>
+                    <li><strong>Balance Amount:</strong> The snapshot value.</li>
+                    <li><strong>Source:</strong> How it was recorded (Opening, SimpleFin sync, or Manual update).</li>
+                    <li><strong>Delete Button:</strong> Remove a manual snapshot (the opening balance cannot be deleted).</li>
+                </ul>
             </div>
         </section>
 

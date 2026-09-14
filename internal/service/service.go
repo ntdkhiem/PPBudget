@@ -119,16 +119,16 @@ func (s *Service) GetBudgetsSummary(ctx context.Context, userID string, month ti
 
 // Accounts
 
-func (s *Service) CreateAccount(ctx context.Context, userID, name, accType, currency string, initialBalance int64) error {
-	return s.repo.CreateAccount(ctx, userID, name, accType, currency, initialBalance)
+func (s *Service) CreateAccount(ctx context.Context, userID, name, accType, currency string, openingBalance int64) (string, error) {
+	return s.repo.CreateAccount(ctx, userID, name, accType, currency, openingBalance)
 }
 
 func (s *Service) GetAccount(ctx context.Context, userID, id string) (*domain.Account, error) {
 	return s.repo.GetAccount(ctx, userID, id)
 }
 
-func (s *Service) UpdateAccount(ctx context.Context, userID, id, name, accType, currency string, initialBalance int64) error {
-	return s.repo.UpdateAccount(ctx, userID, id, name, accType, currency, initialBalance)
+func (s *Service) UpdateAccount(ctx context.Context, userID, id, name, accType, currency string, openingBalance *int64) error {
+	return s.repo.UpdateAccount(ctx, userID, id, name, accType, currency, openingBalance)
 }
 
 func (s *Service) DeleteAccount(ctx context.Context, userID, id string) error {

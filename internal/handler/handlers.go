@@ -525,6 +525,14 @@ func (h *Handler) GetBudgetsSummary(w http.ResponseWriter, r *http.Request) {
 
 // --- Accounts ---
 
+var validAccountTypes = map[string]bool{
+	"asset":     true,
+	"liability": true,
+	"income":    true,
+	"expense":   true,
+	"equity":    true,
+}
+
 func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok || userID == "" {
@@ -536,22 +544,30 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		Name           string `json:"name"`
 		Type           string `json:"type"`
 		Currency       string `json:"currency"`
-		InitialBalance int64  `json:"initial_balance"`
+		OpeningBalance int64  `json:"opening_balance"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+	if strings.TrimSpace(body.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if !validAccountTypes[body.Type] {
+		writeError(w, http.StatusBadRequest, "invalid account type")
 		return
 	}
 	if body.Currency == "" {
 		body.Currency = "USD"
 	}
 
-	err := h.svc.CreateAccount(r.Context(), userID, body.Name, body.Type, body.Currency, body.InitialBalance)
+	id, err := h.svc.CreateAccount(r.Context(), userID, body.Name, body.Type, body.Currency, body.OpeningBalance)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create account")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok", "id": id})
 }
 
 func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
@@ -596,14 +612,14 @@ func (h *Handler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 		Name           string `json:"name"`
 		Type           string `json:"type"`
 		Currency       string `json:"currency"`
-		InitialBalance int64  `json:"initial_balance"`
+		OpeningBalance *int64 `json:"opening_balance"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
 
-	err := h.svc.UpdateAccount(r.Context(), userID, id, body.Name, body.Type, body.Currency, body.InitialBalance)
+	err := h.svc.UpdateAccount(r.Context(), userID, id, body.Name, body.Type, body.Currency, body.OpeningBalance)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "account not found")

@@ -3,11 +3,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useState, useMemo } from "react";
-import { apiFetch, Transaction, Category } from "@/lib/api";
+import { apiFetch, Transaction, Category, BalanceSnapshot } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { Plus, Search, Calendar, Filter, X } from "lucide-react";
+import { Plus, Search, Calendar, Filter, X, Trash2, History } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DashboardCard } from "@/components/dashboard-card";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
+
+const fieldClass =
+  "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded dark:[color-scheme:dark] [&>option]:bg-white [&>option]:text-slate-900 dark:[&>option]:bg-slate-800 dark:[&>option]:text-white";
 
 export default function AccountDetailPage() {
   const params = useParams();
@@ -25,6 +31,7 @@ export default function AccountDetailPage() {
   const [editCatId, setEditCatId] = useState("");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [snapshotToDelete, setSnapshotToDelete] = useState<BalanceSnapshot | null>(null);
 
   const { data: transactions, isLoading } = useQuery<Transaction[]>({
     queryKey: ["transactions", accountId],
@@ -35,6 +42,27 @@ export default function AccountDetailPage() {
   const { data: categories } = useQuery<Category[]>({
     queryKey: ["categories"],
     queryFn: () => apiFetch<Category[]>("/categories", {}, token),
+  });
+
+  const { data: balanceSnapshots, isLoading: loadingBalances } = useQuery<BalanceSnapshot[]>({
+    queryKey: ["accounts", accountId, "balances"],
+    queryFn: () => apiFetch<BalanceSnapshot[]>(`/accounts/${accountId}/balances`, {}, token),
+    enabled: !!accountId,
+  });
+
+  const deleteSnapshotMutation = useMutation({
+    mutationFn: (snapshotId: string) =>
+      apiFetch(`/accounts/${accountId}/balances/${snapshotId}`, {
+        method: "DELETE",
+      }, token),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts", accountId, "balances"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions", accountId] });
+      setSnapshotToDelete(null);
+      toast.success("Balance snapshot deleted");
+    },
   });
 
   const updateMutation = useMutation({
@@ -81,15 +109,15 @@ export default function AccountDetailPage() {
     });
   }, [transactions, search, fromDate, toDate, categoryId]);
 
-  if (isLoading) return <div>Loading account history...</div>;
+  if (isLoading) return <div className="text-slate-500 dark:text-slate-400">Loading account history...</div>;
 
   return (
     <div className="pb-24 relative min-h-screen">
-      <h1 className="text-3xl font-bold mb-6">Account History</h1>
-      
+      <h1 className="text-3xl font-bold mb-6 text-slate-900 dark:text-white">Account History</h1>
+
       {/* Filtering Bar */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-lg shadow mb-6 flex flex-wrap gap-4 items-center">
-        <div className="flex items-center bg-gray-100 rounded px-3 py-2 flex-1 min-w-[200px]">
+        <div className="flex items-center bg-gray-100 dark:bg-slate-800 rounded px-3 py-2 flex-1 min-w-[200px]">
           <Search size={18} className="text-slate-500 dark:text-slate-400 mr-2" />
           <input 
             type="text" 
@@ -101,13 +129,13 @@ export default function AccountDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           <Calendar size={18} className="text-slate-500 dark:text-slate-400" />
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={`${fieldClass} px-2 py-1 text-sm`} />
           <span className="text-slate-500 dark:text-slate-400">-</span>
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={`${fieldClass} px-2 py-1 text-sm`} />
         </div>
-        <div className="flex items-center gap-2 border rounded px-3 py-1 bg-white dark:bg-slate-900">
+        <div className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 rounded px-3 py-1 bg-white dark:bg-slate-900">
           <Filter size={18} className="text-slate-500 dark:text-slate-400" />
-          <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className="outline-none text-sm bg-transparent">
+          <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className="outline-none text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-white dark:[color-scheme:dark] [&>option]:bg-white [&>option]:text-slate-900 dark:[&>option]:bg-slate-900 dark:[&>option]:text-white">
             <option value="">All Categories</option>
             {categories?.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
@@ -137,7 +165,7 @@ export default function AccountDetailPage() {
             {filteredTxns.map((txn) => {
               const isEditing = editingTxn === txn.id;
               return (
-                <tr key={txn.id} className="hover:bg-slate-50 dark:bg-slate-900/50 cursor-pointer" onClick={() => !isEditing && startEdit(txn)}>
+                <tr key={txn.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer" onClick={() => !isEditing && startEdit(txn)}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-white">
                     {formatDate(txn.date)}
                   </td>
@@ -146,8 +174,8 @@ export default function AccountDetailPage() {
                       <input 
                         type="text" 
                         value={editDesc} 
-                        onChange={e => setEditDesc(e.target.value)} 
-                        className="border rounded px-2 py-1 w-full"
+                        onChange={e => setEditDesc(e.target.value)}
+                        className={`${fieldClass} px-2 py-1 w-full`}
                         autoFocus
                       />
                     ) : (
@@ -159,7 +187,7 @@ export default function AccountDetailPage() {
                       <select 
                         value={editCatId} 
                         onChange={e => setEditCatId(e.target.value)}
-                        className="border rounded px-2 py-1 w-full"
+                        className={`${fieldClass} px-2 py-1 w-full`}
                       >
                         <option value="">Uncategorized</option>
                         {categories?.map(c => (
@@ -167,7 +195,7 @@ export default function AccountDetailPage() {
                         ))}
                       </select>
                     ) : (
-                      <span className="bg-gray-100 text-slate-700 dark:text-slate-300 px-2 py-1 rounded text-xs">
+                      <span className="bg-gray-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded text-xs">
                         {categories?.find(c => c.id === txn.category_id)?.name || "Uncategorized"}
                       </span>
                     )}
@@ -192,6 +220,58 @@ export default function AccountDetailPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Balance History */}
+      <DashboardCard className="mt-6">
+        <div className="flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-200">
+          <History className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+          <h2 className="text-lg font-bold font-heading">Balance History</h2>
+        </div>
+        {loadingBalances ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400 py-4">Loading balance history...</p>
+        ) : !balanceSnapshots || balanceSnapshots.length === 0 ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400 py-4">No balance snapshots yet.</p>
+        ) : (
+          <div className="divide-y divide-slate-200 dark:divide-slate-800">
+            {balanceSnapshots.map((snap) => (
+              <div key={snap.id} className="flex items-center justify-between py-3 gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
+                    {snap.as_of_date ? formatDate(snap.as_of_date) : "Opening balance"}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {snap.source === "simplefin" ? "SimpleFin sync" : snap.source === "manual" ? "Manual update" : "Before first transaction"}
+                  </p>
+                </div>
+                <span className="font-bold font-heading text-slate-900 dark:text-white shrink-0">
+                  {formatCurrency(snap.balance)}
+                </span>
+                {snap.source !== "opening" && (
+                  <button
+                    type="button"
+                    onClick={() => setSnapshotToDelete(snap)}
+                    className="shrink-0 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                    aria-label="Delete balance snapshot"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </DashboardCard>
+
+      <ConfirmDialog
+        open={!!snapshotToDelete}
+        onOpenChange={(open) => !open && setSnapshotToDelete(null)}
+        title="Delete Balance Snapshot"
+        description={`Are you sure you want to delete this balance snapshot${snapshotToDelete ? ` from ${snapshotToDelete.as_of_date ? formatDate(snapshotToDelete.as_of_date) : "opening"}` : ""}? This cannot be undone.`}
+        confirmText="Delete"
+        isDestructive
+        isLoading={deleteSnapshotMutation.isPending}
+        onConfirm={() => snapshotToDelete && deleteSnapshotMutation.mutate(snapshotToDelete.id)}
+      />
 
       {/* FAB */}
       <button 
@@ -227,20 +307,20 @@ function ManualEntryModal({ accountId, onClose, token }: { accountId: string, on
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-slate-900 p-6 rounded-lg shadow-xl w-96 relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-slate-900 dark:text-white"><X size={20}/></button>
-        <h2 className="text-xl font-bold mb-4">Add Transaction</h2>
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-slate-900 dark:hover:text-white"><X size={20}/></button>
+        <h2 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">Add Transaction</h2>
         <div className="flex flex-col gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description</label>
-            <input type="text" value={desc} onChange={e => setDesc(e.target.value)} className="w-full border rounded p-2" />
+            <input type="text" value={desc} onChange={e => setDesc(e.target.value)} className={`${fieldClass} w-full p-2`} />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Amount ($)</label>
-            <input type="number" step="0.01" value={amt} onChange={e => setAmt(e.target.value)} className="w-full border rounded p-2" />
+            <input type="number" step="0.01" value={amt} onChange={e => setAmt(e.target.value)} className={`${fieldClass} w-full p-2`} />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Date</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full border rounded p-2" />
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`${fieldClass} w-full p-2`} />
           </div>
           <button 
             onClick={() => createMutation.mutate()} 

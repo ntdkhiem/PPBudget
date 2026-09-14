@@ -164,9 +164,15 @@
                 <ul>
                     <li>The engine pulls the last 30 days of transactions from SimpleFin.</li>
                     <li>It uses your saved <strong>Account Memory</strong> configuration to map transactions to the right accounts.</li>
+                    <li>For <strong>every mapped account</strong>, it records the current balance as reported by SimpleFin, even if there are no new transactions. This anchors investment accounts (brokerage, IRA, 401k) to their real-time market value.</li>
                     <li>It applies smart de-duplication to skip already-imported records.</li>
                     <li>It executes active <strong>Categorization Rules</strong> to organize the new transactions.</li>
                 </ul>
+            </div>
+
+            <div class="callout callout-info">
+                <h4>Stale Balance Indicator</h4>
+                <p>On the Accounts page, each SimpleFin-synced account displays a <strong>Stale</strong> badge when its last synced balance is more than 3 days old. This alerts you that the account balance may be outdated and due for a manual refresh (click <strong>Sync Now</strong> in Settings).</p>
             </div>
 
             <h3>Enabling Auto-Sync</h3>

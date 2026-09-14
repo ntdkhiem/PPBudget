@@ -20,12 +20,32 @@ type Account struct {
 	Name           string      `json:"name"`
 	Type           string      `json:"type"`
 	Currency       string      `json:"currency"`
-	InitialBalance money.Money `json:"initial_balance"`
 	CurrentBalance money.Money `json:"current_balance"`
+	BalanceAsOf    *time.Time  `json:"balance_as_of,omitempty"`
+	BalanceSource  *string     `json:"balance_source,omitempty"`
 	SimplefinID    *string     `json:"simplefin_id,omitempty"`
 	CreatedAt      time.Time   `json:"created_at"`
 	UpdatedAt      time.Time   `json:"updated_at"`
 }
+
+// BalanceSnapshot anchors an account's balance at the end of AsOfDate (UTC).
+// AsOfDate is nil for the opening snapshot, stored as '-infinity' in the database.
+type BalanceSnapshot struct {
+	ID               string       `json:"id"`
+	AccountID        string       `json:"account_id"`
+	AsOfDate         *time.Time   `json:"as_of_date"`
+	Balance          money.Money  `json:"balance"`
+	AvailableBalance *money.Money `json:"available_balance,omitempty"`
+	Source           string       `json:"source"`
+	ReportedAt       *time.Time   `json:"reported_at,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
+}
+
+const (
+	BalanceSourceOpening   = "opening"
+	BalanceSourceSimplefin = "simplefin"
+	BalanceSourceManual    = "manual"
+)
 
 type Transaction struct {
 	ID                 string            `json:"id"`
