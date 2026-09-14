@@ -3,21 +3,15 @@
 import { motion } from "framer-motion";
 import { PageContainer } from "@/components/page-container";
 import { PageHeader } from "@/components/page-header";
-import { InsightsPopover } from "@/components/insights-popover";
-import { useInsights } from "@/hooks/useInsights";
 import { NetWorthCard } from "./_components/net-worth-card";
 import { CashFlowCard, SafeToSpendCard, SavingsRateCard } from "./_components/kpi-cards";
 import { NeedsReviewCard, RecentTransactionsCard, TopSpendingCard, UpcomingBillsCard } from "./_components/list-cards";
 
 export default function DashboardPage() {
-  const { insights, dismiss } = useInsights();
-
   return (
     <PageContainer maxWidth="6xl">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-6">
-        <PageHeader title="Dashboard Overview" description="Quick access to your finances." className="mb-2">
-          <InsightsPopover insights={insights} onDismiss={dismiss} />
-        </PageHeader>
+        <PageHeader title="Dashboard Overview" description="Quick access to your finances." className="mb-2" />
 
         <NetWorthCard />
 

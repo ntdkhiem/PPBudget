@@ -164,13 +164,3 @@ export interface DashboardSummary {
   net_worth: number;
 }
 
-export interface Insight {
-    id: string;
-    type: string;
-    severity: string;
-    title: string;
-    description: string;
-    action_url?: string;
-    dismissable: boolean;
-}
-

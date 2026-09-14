@@ -181,13 +181,3 @@ type SearchResult struct {
 	Subscriptions []Subscription `json:"subscriptions"`
 }
 
-type Insight struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	Severity    string `json:"severity"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	ActionURL   string `json:"action_url,omitempty"`
-	Dismissable bool   `json:"dismissable"`
-}
-
