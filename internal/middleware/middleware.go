@@ -74,7 +74,7 @@ func RequireJWT(secret string) func(http.Handler) http.Handler {
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
-				ctx := context.WithValue(r.Context(), "user_id", userID)
+				ctx := context.WithValue(r.Context(), UserIDKey, userID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 			} else {
 				http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
@@ -85,6 +85,6 @@ func RequireJWT(secret string) func(http.Handler) http.Handler {
 
 // GetUserID extracts the user_id from context.
 func GetUserID(ctx context.Context) (string, bool) {
-	userID, ok := ctx.Value("user_id").(string)
+	userID, ok := ctx.Value(UserIDKey).(string)
 	return userID, ok && userID != ""
 }

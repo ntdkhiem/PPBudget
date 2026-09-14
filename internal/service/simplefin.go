@@ -520,7 +520,7 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 
 			amountStr := txn.Amount.String()
 			amountClass := ""
-			if strings.HasPrefix(amountStr, "-") {
+			if txn.Amount.ToInt64() < 0 {
 				amountClass = "negative"
 			} else if txn.Amount.ToInt64() > 0 {
 				amountClass = "positive"
