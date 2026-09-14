@@ -26,6 +26,7 @@ export default function AddTransactionDialog({
   categories,
   subscriptions,
 }: AddTransactionDialogProps) {
+  const trackedAccounts = accounts?.filter((a) => !a.balance_only);
   const handleOpenChange = (open: boolean) => {
     if (!open) {
       if (window.confirm("Are you sure you want to cancel? Any unsaved changes will be lost.")) {
@@ -59,7 +60,7 @@ export default function AddTransactionDialog({
                 <SelectValue placeholder="Select an account" />
               </SelectTrigger>
               <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                {accounts?.map((acc) => (
+                {trackedAccounts?.map((acc) => (
                   <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
                 ))}
               </SelectContent>

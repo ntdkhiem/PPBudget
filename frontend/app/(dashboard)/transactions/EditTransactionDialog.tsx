@@ -222,6 +222,13 @@ export default function EditTransactionDialog({
   setPaidBy,
   transactions,
 }: EditTransactionDialogProps) {
+  // Balance-only accounts don't track transactions, so they're excluded from the picker —
+  // unless the transaction being edited is already (unexpectedly) on one, in which case we
+  // keep it in the list so the select isn't left blank.
+  const trackedAccounts = accounts?.filter(
+    (a) => !a.balance_only || a.id === selectedTxn?.account_id
+  );
+
   const handleOpenChange = (open: boolean) => {
     if (!open) {
       if (window.confirm("Are you sure you want to cancel? Any unsaved changes will be lost.")) {
@@ -253,7 +260,7 @@ export default function EditTransactionDialog({
                         <SelectValue placeholder="Select an account" />
                       </SelectTrigger>
                       <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                        {accounts?.map((acc) => (
+                        {trackedAccounts?.map((acc) => (
                           <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
                         ))}
                       </SelectContent>

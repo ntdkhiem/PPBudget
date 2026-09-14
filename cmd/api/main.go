@@ -128,6 +128,7 @@ func main() {
 			r.Get("/accounts/{id}/balances", h.ListBalanceSnapshots)
 			r.Post("/accounts/{id}/balances", h.RecordManualBalance)
 			r.Delete("/accounts/{id}/balances/{snapshotId}", h.DeleteBalanceSnapshot)
+			r.Put("/accounts/{id}/balance-only", h.SetAccountBalanceOnly)
 
 			// Transactions
 			r.Get("/transactions", h.ListTransactions)

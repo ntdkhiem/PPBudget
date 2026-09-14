@@ -36,6 +36,7 @@ export default function SimpleFinImporterWizard() {
   // Step 2 State
   const [simpleFinAccounts, setSimpleFinAccounts] = useState<SimpleFinAccount[]>([]);
   const [accountMapping, setAccountMapping] = useState<Record<string, string>>({});
+  const [balanceOnly, setBalanceOnly] = useState<Record<string, boolean>>({});
 
   // Step 3 State
   const [importPending, setImportPending] = useState(false);
@@ -61,6 +62,14 @@ export default function SimpleFinImporterWizard() {
     queryKey: ["accounts"],
     queryFn: () => apiFetch<Account[]>("/accounts", {}, token),
   });
+
+  // The PPBudget account a mapping will import into. A "new" mapping resolves to the account
+  // an earlier sync already created for this SimpleFin account, if any.
+  const resolveLocalAccount = (sfAccountId: string, mapping: string | undefined) => {
+    if (mapping === "skip") return undefined;
+    if (!mapping || mapping === "new") return localAccounts?.find(la => la.simplefin_id === sfAccountId);
+    return localAccounts?.find(la => la.id === mapping);
+  };
 
   const { data: statusData } = useQuery({
     queryKey: ["simplefin-status"],
@@ -163,11 +172,15 @@ export default function SimpleFinImporterWizard() {
       const savedMapping = configData?.account_mapping || {};
 
       const initMap: Record<string, string> = {};
+      const initBalanceOnly: Record<string, boolean> = {};
       (accountsRes.sf_accounts || []).forEach(acc => {
-        initMap[acc.id] = savedMapping[acc.id] || "new";
+        const mapped = savedMapping[acc.id] || "new";
+        initMap[acc.id] = mapped;
+        initBalanceOnly[acc.id] = !!resolveLocalAccount(acc.id, mapped)?.balance_only;
       });
       setAccountMapping(initMap);
-      
+      setBalanceOnly(initBalanceOnly);
+
       setStep(2);
     } catch (err: any) {
       toast.error(err.message || "Failed to fetch accounts.");
@@ -191,11 +204,15 @@ export default function SimpleFinImporterWizard() {
       const savedMapping = configData?.account_mapping || {};
 
       const initMap: Record<string, string> = {};
+      const initBalanceOnly: Record<string, boolean> = {};
       (accountsRes.sf_accounts || []).forEach(acc => {
-        initMap[acc.id] = savedMapping[acc.id] || "new";
+        const mapped = savedMapping[acc.id] || "new";
+        initMap[acc.id] = mapped;
+        initBalanceOnly[acc.id] = !!resolveLocalAccount(acc.id, mapped)?.balance_only;
       });
       setAccountMapping(initMap);
-      
+      setBalanceOnly(initBalanceOnly);
+
       setStep(2);
       toast.success("Successfully connected to SimpleFin.");
     } catch (err: any) {
@@ -222,6 +239,7 @@ export default function SimpleFinImporterWizard() {
       await executeMutation.mutateAsync({
         access_url: accessUrl,
         account_mapping: accountMapping,
+        balance_only_accounts: Object.keys(balanceOnly).filter(id => balanceOnly[id] && accountMapping[id] !== "skip"),
         start_date: startDate ? startDate.toISOString() : undefined,
         import_pending: importPending,
         apply_rules: applyRules,
@@ -413,10 +431,15 @@ export default function SimpleFinImporterWizard() {
                         <div className="font-semibold text-slate-900 dark:text-slate-100">{sfAcc.name}</div>
                         <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">{sfAcc.org?.name} &middot; {sfAcc.currency} {sfAcc.balance}</div>
                       </div>
-                      <div className="w-full md:w-64">
+                      <div className="w-full md:w-64 space-y-2">
                         <Select
                           value={accountMapping[sfAcc.id] || "new"}
-                          onValueChange={(val) => setAccountMapping(prev => ({ ...prev, [sfAcc.id]: val }))}
+                          onValueChange={(val) => {
+                            setAccountMapping(prev => ({ ...prev, [sfAcc.id]: val }));
+                            if (val === "skip") {
+                              setBalanceOnly(prev => ({ ...prev, [sfAcc.id]: false }));
+                            }
+                          }}
                         >
                           <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 h-11 rounded-xl text-slate-900 dark:text-slate-100">
                             <SelectValue placeholder="Select mapping..." />
@@ -435,6 +458,38 @@ export default function SimpleFinImporterWizard() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {(() => {
+                          const mapping = accountMapping[sfAcc.id];
+                          const isSkip = mapping === "skip";
+                          const target = resolveLocalAccount(sfAcc.id, mapping);
+                          const alreadyBalanceOnly = !!target?.balance_only;
+                          const locked = isSkip || alreadyBalanceOnly;
+                          const checked = !isSkip && (alreadyBalanceOnly || !!balanceOnly[sfAcc.id]);
+                          return (
+                            <>
+                              <label className={`flex items-start gap-2 text-xs ${locked ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}>
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer disabled:cursor-not-allowed"
+                                  checked={checked}
+                                  disabled={locked}
+                                  onChange={(e) => setBalanceOnly(prev => ({ ...prev, [sfAcc.id]: e.target.checked }))}
+                                />
+                                <span className="text-slate-600 dark:text-slate-400">Balance only (don&apos;t import transactions)</span>
+                              </label>
+                              {alreadyBalanceOnly && !isSkip && (
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 pl-6">
+                                  Already balance-only. Turn it off from the account&apos;s settings on the Accounts page.
+                                </p>
+                              )}
+                              {checked && !alreadyBalanceOnly && target && (
+                                <p className="text-[11px] text-amber-600 dark:text-amber-400 pl-6">
+                                  Existing transactions in {target.name} will be deleted.
+                                </p>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   ))}

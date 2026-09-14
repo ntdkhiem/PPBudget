@@ -837,3 +837,457 @@ func TestAccountBalanceAtNullDateIntegration(t *testing.T) {
 		t.Errorf("account_balance_at(id, NULL) = %d, want NULL", *balance)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Balance-only accounts
+// ---------------------------------------------------------------------------
+
+func countLiveTxns(t *testing.T, pool *pgxpool.Pool, accountID string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM transactions WHERE account_id = $1 AND deleted_at IS NULL`, accountID,
+	).Scan(&n); err != nil {
+		t.Fatalf("count live txns: %v", err)
+	}
+	return n
+}
+
+// Enabling balance_only soft-deletes live transactions, removes their links
+// (including cross-account ones), and leaves the balance to snapshots.
+func TestSetAccountBalanceOnlyEnableIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+
+	userID := createTestUser(t, pool, "balance-only-enable")
+
+	accID, err := repo.CreateAccount(ctx, userID, "Roth IRA", "asset", "USD", 100000)
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	otherID, err := repo.CreateAccount(ctx, userID, "Checking", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount(other): %v", err)
+	}
+
+	buyID := insertTxn(t, pool, userID, accID, -20000, "2025-01-10", "buy")
+	insertTxn(t, pool, userID, accID, 500, "2025-01-15", "dividend")
+	oldID := insertTxn(t, pool, userID, accID, 999, "2025-01-05", "already deleted")
+	softDeleteTxn(t, pool, oldID)
+
+	otherTxnID := insertTxn(t, pool, userID, otherID, -20000, "2025-01-09", "transfer out")
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO transaction_links (source_transaction_id, target_transaction_id, amount) VALUES ($1, $2, $3)`,
+		otherTxnID, buyID, 20000,
+	); err != nil {
+		t.Fatalf("insert link: %v", err)
+	}
+
+	n, err := repo.SetAccountBalanceOnly(ctx, userID, accID, true)
+	if err != nil {
+		t.Fatalf("SetAccountBalanceOnly: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("deleted = %d, want 2", n)
+	}
+
+	txns, err := repo.ListTransactions(ctx, domain.TransactionFilter{UserID: userID, AccountID: accID})
+	if err != nil {
+		t.Fatalf("ListTransactions: %v", err)
+	}
+	if len(txns) != 0 {
+		t.Errorf("ListTransactions(balance-only account) returned %d rows, want 0", len(txns))
+	}
+
+	var links int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM transaction_links WHERE source_transaction_id = $1 OR target_transaction_id = $1`, otherTxnID,
+	).Scan(&links); err != nil {
+		t.Fatalf("count links: %v", err)
+	}
+	if links != 0 {
+		t.Errorf("links remaining = %d, want 0", links)
+	}
+
+	otherTxns, err := repo.ListTransactions(ctx, domain.TransactionFilter{UserID: userID, AccountID: otherID})
+	if err != nil {
+		t.Fatalf("ListTransactions(other): %v", err)
+	}
+	if len(otherTxns) != 1 {
+		t.Fatalf("other account txns = %d, want 1", len(otherTxns))
+	}
+	if len(otherTxns[0].PaysFor) != 0 || len(otherTxns[0].PaidBy) != 0 {
+		t.Errorf("other txn pays_for=%v paid_by=%v, want both empty", otherTxns[0].PaysFor, otherTxns[0].PaidBy)
+	}
+	if otherTxns[0].EffectiveAmount.ToInt64() != -20000 {
+		t.Errorf("other txn effective_amount = %d, want -20000", otherTxns[0].EffectiveAmount.ToInt64())
+	}
+
+	acc, err := repo.GetAccount(ctx, userID, accID)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	if !acc.BalanceOnly {
+		t.Error("BalanceOnly = false, want true")
+	}
+	if acc.CurrentBalance.ToInt64() != 100000 {
+		t.Errorf("CurrentBalance = %d, want 100000 (opening only)", acc.CurrentBalance.ToInt64())
+	}
+
+	if err := repo.UpsertBalanceSnapshot(ctx, nil, userID, accID, time.Now().UTC(), money.Money(500000), nil, domain.BalanceSourceSimplefin, nil); err != nil {
+		t.Fatalf("UpsertBalanceSnapshot: %v", err)
+	}
+	acc2, err := repo.GetAccount(ctx, userID, accID)
+	if err != nil {
+		t.Fatalf("GetAccount (after snapshot): %v", err)
+	}
+	if acc2.CurrentBalance.ToInt64() != 500000 {
+		t.Errorf("CurrentBalance after snapshot = %d, want 500000", acc2.CurrentBalance.ToInt64())
+	}
+}
+
+// Re-enabling returns 0; disabling returns 0, clears the flag, restores nothing.
+func TestSetAccountBalanceOnlyIdempotentAndDisableIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+
+	userID := createTestUser(t, pool, "balance-only-toggle")
+	accID, err := repo.CreateAccount(ctx, userID, "Brokerage", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	insertTxn(t, pool, userID, accID, 1000, "2025-01-10", "t1")
+
+	if n, err := repo.SetAccountBalanceOnly(ctx, userID, accID, true); err != nil || n != 1 {
+		t.Fatalf("enable: n=%d err=%v, want 1, nil", n, err)
+	}
+	if n, err := repo.SetAccountBalanceOnly(ctx, userID, accID, true); err != nil || n != 0 {
+		t.Errorf("re-enable: n=%d err=%v, want 0, nil", n, err)
+	}
+	if n, err := repo.SetAccountBalanceOnly(ctx, userID, accID, false); err != nil || n != 0 {
+		t.Errorf("disable: n=%d err=%v, want 0, nil", n, err)
+	}
+
+	acc, err := repo.GetAccount(ctx, userID, accID)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	if acc.BalanceOnly {
+		t.Error("BalanceOnly = true after disable, want false")
+	}
+	if got := countLiveTxns(t, pool, accID); got != 0 {
+		t.Errorf("live txns after disable = %d, want 0 (nothing restored)", got)
+	}
+}
+
+// User B cannot toggle user A's account.
+func TestSetAccountBalanceOnlyTenancyIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+
+	userA := createTestUser(t, pool, "balance-only-tenancy-a")
+	userB := createTestUser(t, pool, "balance-only-tenancy-b")
+
+	accA, err := repo.CreateAccount(ctx, userA, "A 401k", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	insertTxn(t, pool, userA, accA, 1000, "2025-01-10", "t1")
+
+	if _, err := repo.SetAccountBalanceOnly(ctx, userB, accA, true); !errors.Is(err, apperrors.ErrForbidden) {
+		t.Errorf("SetAccountBalanceOnly(B, account of A) error = %v, want ErrForbidden", err)
+	}
+
+	acc, err := repo.GetAccount(ctx, userA, accA)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	if acc.BalanceOnly {
+		t.Error("BalanceOnly changed by foreign user")
+	}
+	if got := countLiveTxns(t, pool, accA); got != 1 {
+		t.Errorf("live txns = %d, want 1 (untouched)", got)
+	}
+}
+
+// CreateTransaction / UpdateTransaction into a balance-only account are rejected.
+func TestBalanceOnlyTransactionGuardIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+
+	userID := createTestUser(t, pool, "balance-only-guard")
+	boID, err := repo.CreateAccount(ctx, userID, "IRA", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount(bo): %v", err)
+	}
+	normalID, err := repo.CreateAccount(ctx, userID, "Checking", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount(normal): %v", err)
+	}
+	if _, err := repo.SetAccountBalanceOnly(ctx, userID, boID, true); err != nil {
+		t.Fatalf("SetAccountBalanceOnly: %v", err)
+	}
+
+	date := mustParseDate(t, "2025-01-10")
+	if err := repo.CreateTransaction(ctx, userID, boID, 1000, date, "blocked", nil, nil, nil); !errors.Is(err, apperrors.ErrInvalidInput) {
+		t.Errorf("CreateTransaction(balance-only) error = %v, want ErrInvalidInput", err)
+	}
+	if got := countLiveTxns(t, pool, boID); got != 0 {
+		t.Errorf("balance-only live txns = %d, want 0", got)
+	}
+
+	if err := repo.CreateTransaction(ctx, userID, normalID, 1000, date, "ok", nil, nil, nil); err != nil {
+		t.Fatalf("CreateTransaction(normal): %v", err)
+	}
+
+	txnID := insertTxn(t, pool, userID, normalID, 2000, "2025-01-11", "to move")
+	if err := repo.UpdateTransaction(ctx, userID, txnID, boID, 2000, date, "moved", nil, nil, nil, nil, nil); !errors.Is(err, apperrors.ErrInvalidInput) {
+		t.Errorf("UpdateTransaction(move into balance-only) error = %v, want ErrInvalidInput", err)
+	}
+	var accountID string
+	if err := pool.QueryRow(ctx, `SELECT account_id FROM transactions WHERE id = $1`, txnID).Scan(&accountID); err != nil {
+		t.Fatalf("select txn: %v", err)
+	}
+	if accountID != normalID {
+		t.Errorf("txn account = %s, want unchanged %s", accountID, normalID)
+	}
+
+	if err := repo.UpdateTransaction(ctx, userID, txnID, normalID, 2500, date, "edited", nil, nil, nil, nil, nil); err != nil {
+		t.Errorf("UpdateTransaction(normal): %v", err)
+	}
+	if got := countLiveTxns(t, pool, normalID); got != 2 {
+		t.Errorf("normal live txns = %d, want 2", got)
+	}
+}
+
+// BalanceOnlyAccountIDs returns only the flagged accounts of that user.
+func TestBalanceOnlyAccountIDsIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+
+	userA := createTestUser(t, pool, "balance-only-ids-a")
+	userB := createTestUser(t, pool, "balance-only-ids-b")
+
+	flagged, err := repo.CreateAccount(ctx, userA, "Flagged", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	if _, err := repo.CreateAccount(ctx, userA, "Plain", "asset", "USD", 0); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	flaggedB, err := repo.CreateAccount(ctx, userB, "B Flagged", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount(B): %v", err)
+	}
+	for _, p := range []struct{ user, acc string }{{userA, flagged}, {userB, flaggedB}} {
+		if _, err := repo.SetAccountBalanceOnly(ctx, p.user, p.acc, true); err != nil {
+			t.Fatalf("SetAccountBalanceOnly: %v", err)
+		}
+	}
+
+	ids, err := repo.BalanceOnlyAccountIDs(ctx, userA)
+	if err != nil {
+		t.Fatalf("BalanceOnlyAccountIDs: %v", err)
+	}
+	if len(ids) != 1 || !ids[flagged] {
+		t.Errorf("BalanceOnlyAccountIDs(A) = %v, want only %s", ids, flagged)
+	}
+
+	empty, err := repo.BalanceOnlyAccountIDs(ctx, createTestUser(t, pool, "balance-only-ids-c"))
+	if err != nil {
+		t.Fatalf("BalanceOnlyAccountIDs(C): %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Errorf("BalanceOnlyAccountIDs(C) = %v, want empty non-nil map", empty)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Balance-only concurrency (the FOR SHARE race fix)
+// ---------------------------------------------------------------------------
+
+// A concurrent importer holding AccountBalanceOnlyForShare's row lock (via an
+// open transaction that read the flag and inserted a transaction) must block
+// SetAccountBalanceOnly's UPDATE until that transaction ends -- otherwise the
+// enable could finish (and soft-delete nothing) before the import commits its
+// new row, leaving a live transaction on a balance-only account.
+func TestSetAccountBalanceOnlyWaitsForConcurrentImportIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+
+	userID := createTestUser(t, pool, "balance-only-race-import")
+	accID, err := repo.CreateAccount(ctx, userID, "Race Import", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+
+	t1, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin T1: %v", err)
+	}
+	defer t1.Rollback(ctx)
+
+	balanceOnly, err := repo.AccountBalanceOnlyForShare(ctx, t1, userID, accID)
+	if err != nil {
+		t.Fatalf("AccountBalanceOnlyForShare: %v", err)
+	}
+	if balanceOnly {
+		t.Fatalf("AccountBalanceOnlyForShare = true, want false before enabling")
+	}
+
+	if _, _, err := repo.InsertIngestedTransaction(ctx, t1, userID, accID, money.Money(-500), mustParseDate(t, "2025-01-10"), "concurrent import", uniqueEmail("race-import-sf"), nil, nil, false); err != nil {
+		t.Fatalf("InsertIngestedTransaction: %v", err)
+	}
+
+	type result struct {
+		deleted int64
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		n, err := repo.SetAccountBalanceOnly(ctx, userID, accID, true)
+		done <- result{n, err}
+	}()
+
+	select {
+	case r := <-done:
+		t.Fatalf("SetAccountBalanceOnly returned early (deleted=%d err=%v) before T1 committed -- it should have blocked on the share lock", r.deleted, r.err)
+	case <-time.After(300 * time.Millisecond):
+		// still blocked, as expected
+	}
+
+	if err := t1.Commit(ctx); err != nil {
+		t.Fatalf("commit T1: %v", err)
+	}
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("SetAccountBalanceOnly: %v", r.err)
+		}
+		if r.deleted != 1 {
+			t.Errorf("deleted = %d, want 1", r.deleted)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SetAccountBalanceOnly did not return after T1 committed")
+	}
+
+	if got := countLiveTxns(t, pool, accID); got != 0 {
+		t.Errorf("live txns = %d, want 0", got)
+	}
+}
+
+// The reverse ordering: a transaction that already ran the UPDATE to set
+// balance_only = true, but hasn't committed yet, must block
+// AccountBalanceOnlyForShare's SELECT ... FOR SHARE until it does -- so a
+// concurrent import can never observe a stale "false" flag while an enable is
+// still in flight.
+func TestAccountBalanceOnlyForShareWaitsForEnableIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+
+	userID := createTestUser(t, pool, "balance-only-race-enable")
+	accID, err := repo.CreateAccount(ctx, userID, "Race Enable", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+
+	t2, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin T2: %v", err)
+	}
+	defer t2.Rollback(ctx)
+
+	if _, err := t2.Exec(ctx, `UPDATE accounts SET balance_only = true WHERE id = $1`, accID); err != nil {
+		t.Fatalf("update balance_only in T2: %v", err)
+	}
+
+	type result struct {
+		balanceOnly bool
+		err         error
+	}
+	done := make(chan result, 1)
+	go func() {
+		t3, err := pool.Begin(ctx)
+		if err != nil {
+			done <- result{false, err}
+			return
+		}
+		defer t3.Rollback(ctx)
+		b, err := repo.AccountBalanceOnlyForShare(ctx, t3, userID, accID)
+		done <- result{b, err}
+	}()
+
+	select {
+	case r := <-done:
+		t.Fatalf("AccountBalanceOnlyForShare returned early (balanceOnly=%v err=%v) before T2 committed -- it should have blocked", r.balanceOnly, r.err)
+	case <-time.After(300 * time.Millisecond):
+		// still blocked, as expected
+	}
+
+	if err := t2.Commit(ctx); err != nil {
+		t.Fatalf("commit T2: %v", err)
+	}
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("AccountBalanceOnlyForShare: %v", r.err)
+		}
+		if !r.balanceOnly {
+			t.Errorf("balanceOnly = false, want true")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AccountBalanceOnlyForShare did not return after T2 committed")
+	}
+}
+
+// Enabling balance_only must also clean up a link between two transactions
+// that both belong to the account being flagged (not just cross-account
+// links), soft-deleting both sides and leaving no dangling link row.
+func TestSetAccountBalanceOnlySameAccountLinkIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+
+	userID := createTestUser(t, pool, "balance-only-same-account-link")
+	accID, err := repo.CreateAccount(ctx, userID, "Self-Linked", "asset", "USD", 0)
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+
+	txn1ID := insertTxn(t, pool, userID, accID, -1000, "2025-01-10", "source")
+	txn2ID := insertTxn(t, pool, userID, accID, 1000, "2025-01-11", "target")
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO transaction_links (source_transaction_id, target_transaction_id, amount) VALUES ($1, $2, $3)`,
+		txn1ID, txn2ID, 500,
+	); err != nil {
+		t.Fatalf("insert link: %v", err)
+	}
+
+	n, err := repo.SetAccountBalanceOnly(ctx, userID, accID, true)
+	if err != nil {
+		t.Fatalf("SetAccountBalanceOnly: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("deleted = %d, want 2", n)
+	}
+
+	var links int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM transaction_links WHERE source_transaction_id IN ($1, $2) OR target_transaction_id IN ($1, $2)`,
+		txn1ID, txn2ID,
+	).Scan(&links); err != nil {
+		t.Fatalf("count links: %v", err)
+	}
+	if links != 0 {
+		t.Errorf("links remaining = %d, want 0", links)
+	}
+}

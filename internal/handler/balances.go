@@ -121,6 +121,39 @@ func (h *Handler) DeleteBalanceSnapshot(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// SetAccountBalanceOnly handles PUT /accounts/{id}/balance-only.
+func (h *Handler) SetAccountBalanceOnly(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	accountID := chi.URLParam(r, "id")
+	if !validID(w, accountID, "account id") {
+		return
+	}
+
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+	if body.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "enabled is required")
+		return
+	}
+
+	deleted, err := h.svc.SetAccountBalanceOnly(r.Context(), userID, accountID, *body.Enabled)
+	if err != nil {
+		writeBalanceError(h, w, err, "failed to update account")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "deleted_transactions": deleted})
+}
+
 // writeBalanceError maps service/repository errors to HTTP responses for the
 // balance snapshot endpoints. ErrForbidden is mapped to the same 404 used for
 // ErrNotFound (rather than 403) so a request against another user's account

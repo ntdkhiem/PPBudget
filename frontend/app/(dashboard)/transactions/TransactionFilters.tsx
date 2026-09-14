@@ -35,6 +35,8 @@ export default function TransactionFilters({
   categories,
   accounts,
 }: TransactionFiltersProps) {
+  const trackedAccounts = accounts?.filter((a) => !a.balance_only);
+
   return (
     <div className="w-full relative group mb-6">
       <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500/10 to-transparent rounded-xl blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
@@ -119,7 +121,7 @@ export default function TransactionFilters({
               <div className="px-2 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100">Filter Accounts</div>
               <div className="h-px bg-slate-200 dark:bg-slate-800 my-1" />
               <div className="max-h-[300px] overflow-y-auto space-y-0.5">
-              {accounts?.map(account => (
+              {trackedAccounts?.map(account => (
                 <label key={account.id} className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
                   <input 
                     type="checkbox" 

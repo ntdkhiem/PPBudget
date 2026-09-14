@@ -19,6 +19,7 @@ import { PageContainer } from "@/components/page-container";
 import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
 import { UpdateBalanceDialog } from "@/components/update-balance-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const STALE_DAYS = 3;
 
@@ -28,10 +29,13 @@ function isStale(balanceAsOf: string): boolean {
   return diffMs > STALE_DAYS * 24 * 60 * 60 * 1000;
 }
 
+type PendingBalanceOnlyEdit = { id: string; name: string; type: string };
+
 export default function AccountsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [balanceAccount, setBalanceAccount] = useState<Account | null>(null);
+  const [pendingBalanceOnlyEdit, setPendingBalanceOnlyEdit] = useState<PendingBalanceOnlyEdit | null>(null);
   const queryClient = useQueryClient();
   const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
 
@@ -57,18 +61,44 @@ export default function AccountsPage() {
   });
 
   const updateAccountMutation = useMutation({
-    mutationFn: (data: { id: string; name: string; type: string }) =>
-      apiFetch<Account>(`/accounts/${data.id}`, {
+    mutationFn: async (data: { id: string; name: string; type: string; balanceOnly: boolean; prevBalanceOnly: boolean }) => {
+      await apiFetch<Account>(`/accounts/${data.id}`, {
         method: "PUT",
         body: JSON.stringify({ name: data.name, type: data.type }),
-      }, token),
-    onSuccess: () => {
+      }, token);
+
+      if (data.balanceOnly === data.prevBalanceOnly) {
+        return { balanceOnlyChanged: false as const };
+      }
+
+      const res = await apiFetch<{ status: string; deleted_transactions: number }>(
+        `/accounts/${data.id}/balance-only`,
+        { method: "PUT", body: JSON.stringify({ enabled: data.balanceOnly }) },
+        token
+      );
+      return { balanceOnlyChanged: true as const, enabled: data.balanceOnly, deletedTransactions: res.deleted_transactions };
+    },
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
       setSelectedAccount(null);
-      toast.success("Account updated successfully");
+      setPendingBalanceOnlyEdit(null);
+      if (result.balanceOnlyChanged) {
+        if (result.enabled) {
+          toast.success(`Balance-only enabled · ${result.deletedTransactions} transactions deleted`);
+        } else {
+          toast.success("Balance-only disabled");
+        }
+      } else {
+        toast.success("Account updated successfully");
+      }
     },
     onError: (error: any) => {
       toast.error(error.message || "Failed to update account");
+      setPendingBalanceOnlyEdit(null);
+      // The name/type update may have succeeded before the balance-only request failed.
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
   });
 
@@ -104,8 +134,15 @@ export default function AccountsPage() {
     const formData = new FormData(e.currentTarget);
     const name = formData.get("name") as string;
     const type = formData.get("type") as string;
+    const balanceOnly = formData.get("balance_only") === "on";
 
-    updateAccountMutation.mutate({ id: selectedAccount.id, name, type });
+    if (balanceOnly && !selectedAccount.balance_only) {
+      // Turning balance-only on deletes transactions — confirm first.
+      setPendingBalanceOnlyEdit({ id: selectedAccount.id, name, type });
+      return;
+    }
+
+    updateAccountMutation.mutate({ id: selectedAccount.id, name, type, balanceOnly, prevBalanceOnly: selectedAccount.balance_only });
   };
 
   const assets = accounts?.filter((a) => a.type === "asset") || [];
@@ -156,14 +193,21 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
         <p className={`text-3xl font-bold font-heading tracking-tight text-slate-900 dark:text-white`}>
           {formatCurrency(account.current_balance)}
         </p>
-        {account.balance_as_of && (
-          <div className="mt-1 flex items-center gap-2">
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              as of {formatDate(account.balance_as_of)} &middot; {account.balance_source === "simplefin" ? "SimpleFin" : "Manual"}
-            </p>
+        {(account.balance_as_of || account.balance_only) && (
+          <div className="mt-1 flex items-center gap-2 flex-wrap">
+            {account.balance_as_of && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                as of {formatDate(account.balance_as_of)} &middot; {account.balance_source === "simplefin" ? "SimpleFin" : "Manual"}
+              </p>
+            )}
             {showStale && (
               <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 border-0">
                 Stale
+              </Badge>
+            )}
+            {account.balance_only && (
+              <Badge className="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-0">
+                Balance only
               </Badge>
             )}
           </div>
@@ -243,7 +287,7 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
               <DialogTitle className="text-2xl font-bold font-heading text-slate-900 dark:text-white">Edit Account</DialogTitle>
             </DialogHeader>
             {selectedAccount && (
-              <form onSubmit={handleEditAccount} className="space-y-6 mt-4">
+              <form key={selectedAccount.id} onSubmit={handleEditAccount} className="space-y-6 mt-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit-name" className="text-slate-700 dark:text-slate-300">Account Name</Label>
                   <Input id="edit-name" name="name" defaultValue={selectedAccount.name} required className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
@@ -262,6 +306,24 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
                     </SelectContent>
                   </Select>
                 </div>
+                <label
+                  htmlFor="edit-balance-only"
+                  className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3 cursor-pointer hover:border-indigo-200 dark:hover:border-indigo-800/60 transition-colors"
+                >
+                  <input
+                    id="edit-balance-only"
+                    name="balance_only"
+                    type="checkbox"
+                    defaultChecked={selectedAccount.balance_only}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-900 cursor-pointer dark:checked:bg-indigo-500"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Balance only</span>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Track only this account&apos;s balance. Transactions won&apos;t be imported.
+                    </p>
+                  </div>
+                </label>
                 <div className="pt-4 flex gap-3">
                   <Button type="button" variant="destructive" onClick={() => deleteAccountMutation.mutate(selectedAccount.id)} disabled={deleteAccountMutation.isPending || updateAccountMutation.isPending} className="rounded-xl py-6 font-medium">
                     {deleteAccountMutation.isPending ? "..." : "Delete"}
@@ -274,6 +336,26 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
             )}
           </DialogContent>
         </Dialog>
+
+        <ConfirmDialog
+          open={!!pendingBalanceOnlyEdit}
+          onOpenChange={(open) => !open && setPendingBalanceOnlyEdit(null)}
+          title="Track balance only?"
+          description={`All transactions in ${pendingBalanceOnlyEdit?.name ?? "this account"} will be deleted and future syncs won't import its transactions. This can't be undone.`}
+          confirmText="Enable"
+          isDestructive
+          isLoading={updateAccountMutation.isPending}
+          onConfirm={() => {
+            if (!pendingBalanceOnlyEdit || !selectedAccount) return;
+            updateAccountMutation.mutate({
+              id: pendingBalanceOnlyEdit.id,
+              name: pendingBalanceOnlyEdit.name,
+              type: pendingBalanceOnlyEdit.type,
+              balanceOnly: true,
+              prevBalanceOnly: selectedAccount.balance_only,
+            });
+          }}
+        />
       </PageHeader>
 
       <div className="space-y-12">

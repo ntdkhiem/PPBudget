@@ -70,6 +70,10 @@ func TestBalanceHandlers_Validation(t *testing.T) {
 		{"delete non-uuid snapshot id", h.DeleteBalanceSnapshot, http.MethodDelete, "", map[string]string{"id": testAccountID, "snapshotId": "1; DROP TABLE x"}, true, 400, "invalid snapshot id"},
 		{"delete missing snapshot id", h.DeleteBalanceSnapshot, http.MethodDelete, "", map[string]string{"id": testAccountID, "snapshotId": ""}, true, 400, "snapshot id is required"},
 		{"post unauthenticated", h.RecordManualBalance, http.MethodPost, `{"balance":1000}`, map[string]string{"id": testAccountID}, false, 401, "unauthorized"},
+		{"balance-only non-uuid account id", h.SetAccountBalanceOnly, http.MethodPut, `{"enabled":true}`, map[string]string{"id": "abc"}, true, 400, "invalid account id"},
+		{"balance-only invalid JSON", h.SetAccountBalanceOnly, http.MethodPut, "not json", map[string]string{"id": testAccountID}, true, 400, "invalid payload"},
+		{"balance-only missing enabled", h.SetAccountBalanceOnly, http.MethodPut, `{}`, map[string]string{"id": testAccountID}, true, 400, "enabled is required"},
+		{"balance-only unauthenticated", h.SetAccountBalanceOnly, http.MethodPut, `{"enabled":true}`, map[string]string{"id": testAccountID}, false, 401, "unauthorized"},
 	}
 
 	for _, tt := range tests {

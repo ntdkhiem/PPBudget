@@ -33,6 +33,11 @@ func (s *Service) RecordManualBalance(ctx context.Context, userID, accountID str
 	return s.repo.UpsertBalanceSnapshot(ctx, nil, userID, accountID, date, money.Money(balance), nil, domain.BalanceSourceManual, &reportedAt)
 }
 
+// SetAccountBalanceOnly toggles balance-only tracking; enabling it deletes the account's transactions.
+func (s *Service) SetAccountBalanceOnly(ctx context.Context, userID, accountID string, enabled bool) (int64, error) {
+	return s.repo.SetAccountBalanceOnly(ctx, userID, accountID, enabled)
+}
+
 func (s *Service) ListBalanceSnapshots(ctx context.Context, userID, accountID string) ([]domain.BalanceSnapshot, error) {
 	return s.repo.ListBalanceSnapshots(ctx, userID, accountID)
 }

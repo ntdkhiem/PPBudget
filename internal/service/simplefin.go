@@ -90,6 +90,19 @@ type SimplefinExecuteRequest struct {
 	ApplyRules     bool              `json:"apply_rules"`
 	ContentDedup   bool              `json:"content_dedup"`
 	IsAutoSync     bool              `json:"-"`
+	// BalanceOnlyAccounts holds SimpleFin account ids the user marked
+	// "balance only" in the import wizard's mapping step. Auto-sync never
+	// sets this; there, the flag already stored on the account is the
+	// source of truth (see the flags map in SimpleFinExecute).
+	BalanceOnlyAccounts []string `json:"balance_only_accounts"`
+}
+
+// isUnmapped reports whether an account_mapping value means "don't import this
+// account": either genuinely unset, or the wizard's "skip" sentinel sent for
+// "Skip importing this account". mappedAccountID == "new" is NOT unmapped --
+// that means "create a new PPBudget account for it".
+func isUnmapped(mappedAccountID string) bool {
+	return mappedAccountID == "" || mappedAccountID == "skip"
 }
 
 // 1. Claim
@@ -280,11 +293,38 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 		return fmt.Errorf("failed to parse simplefin response: %w", err)
 	}
 
+	flags, err := s.repo.BalanceOnlyAccountIDs(ctx, userID)
+	if err != nil {
+		s.logger.Error("failed to load balance-only account ids", "error", err, "user_id", userID)
+		flags = make(map[string]bool)
+	}
+
+	requested := make(map[string]bool, len(req.BalanceOnlyAccounts))
+	for _, sfID := range req.BalanceOnlyAccounts {
+		requested[sfID] = true
+	}
+
 	totalTransactions := 0
 	for _, acc := range sfData.Accounts {
 		mappedAccountID, ok := req.AccountMapping[acc.ID]
-		if !ok || mappedAccountID == "" {
+		if !ok || isUnmapped(mappedAccountID) {
 			continue // Skip unmapped accounts
+		}
+
+		// Balance-only accounts (whether newly requested or already flagged)
+		// contribute no transactions to the progress total.
+		if requested[acc.ID] {
+			continue
+		}
+		resolvedID := mappedAccountID
+		if mappedAccountID == "new" {
+			// A saved "new" mapping resolves to the account created by an earlier sync.
+			if existingID, err := s.repo.GetAccountBySimplefinID(ctx, nil, userID, acc.ID); err == nil {
+				resolvedID = existingID
+			}
+		}
+		if flags[resolvedID] {
+			continue
 		}
 
 		for _, txn := range acc.Transactions {
@@ -328,7 +368,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 
 		for _, acc := range sfData.Accounts {
 			mappedAccountID, ok := req.AccountMapping[acc.ID]
-			if !ok || mappedAccountID == "" {
+			if !ok || isUnmapped(mappedAccountID) {
 				continue // Skip unmapped accounts
 			}
 
@@ -346,61 +386,28 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 				_ = s.repo.LinkSimplefinAccount(bgCtx, userID, targetAccountID, acc.ID)
 			}
 
-			tx, err := s.repo.BeginTx(bgCtx)
-			if err != nil {
-				s.logger.Error("failed to begin tx", "error", err)
-				continue
+			// Newly-requested balance-only accounts get flagged (and their
+			// existing transactions soft-deleted) right now, before we decide
+			// whether to import transactions for this sync below.
+			if requested[acc.ID] && !flags[targetAccountID] {
+				if _, err := s.repo.SetAccountBalanceOnly(bgCtx, userID, targetAccountID, true); err != nil {
+					s.logger.Error("failed to mark account balance-only", "error", err, "sf_id", acc.ID, "user_id", userID)
+				} else {
+					flags[targetAccountID] = true
+				}
 			}
 
-			for _, txn := range acc.Transactions {
-				if txn.Pending && !req.ImportPending {
-					continue
-				}
-
-				date := time.Unix(txn.Posted, 0)
-				if !startTime.IsZero() && date.Before(startTime) {
-					continue
-				}
-
-				amount, err := money.NewFromString(txn.Amount)
-				if err != nil {
-					updateImportProgress(userID, func(p *ImportStatus) { p.Current++ })
-					continue
-				}
-
-				if req.ContentDedup {
-					exists, err := s.repo.TransactionExistsByDetails(bgCtx, userID, targetAccountID, amount.ToInt64(), date, txn.Description)
-					if err == nil && exists {
-						updateImportProgress(userID, func(p *ImportStatus) { p.Current++ })
-						continue // Duplicate found based on content, skip
-					}
-				}
-
-				txnID, created, err := s.repo.InsertIngestedTransaction(bgCtx, tx, userID, targetAccountID, amount, date, txn.Description, txn.ID, nil, nil, false)
-				if err != nil {
-					s.logger.Error("failed to insert transaction", "error", err, "sf_txn_id", txn.ID, "user_id", userID)
-				} else if created {
-					importedTxns = append(importedTxns, domain.Transaction{
-						ID:          txnID,
-						AccountID:   targetAccountID,
-						Amount:      amount,
-						Date:        date,
-						Description: txn.Description,
-						UserID:      userID,
-					})
-				}
-
-				updateImportProgress(userID, func(p *ImportStatus) { p.Current++ })
+			// Balance-only accounts (already flagged, or requested even if the
+			// flag write above failed) never get transactions imported -- but
+			// they still get the balance snapshot below.
+			if !flags[targetAccountID] && !requested[acc.ID] {
+				s.importAccountTransactions(bgCtx, userID, targetAccountID, acc, req, startTime, &importedTxns)
 			}
 
-			if err := tx.Commit(bgCtx); err != nil {
-				s.logger.Error("failed to commit tx", "error", err)
-				continue
-			}
-
-			// Record the bank-reported balance for this sync. This runs after the
-			// transaction commit (never inside it) because in pgx a failed statement
-			// aborts the whole tx, which would discard the imported transactions.
+			// Record the bank-reported balance for this sync, even if the transaction import
+			// above failed: the balance is independent of the transaction rows. It runs outside
+			// the import transaction because in pgx a failed statement aborts the whole tx.
+			// It also runs for balance-only accounts, which skip the import entirely.
 			balance, available, asOf, reportedAt, err := snapshotFromSFAccount(acc, time.Now())
 			if err != nil {
 				s.logger.Error("failed to parse balance for snapshot", "error", err, "sf_id", acc.ID, "user_id", userID)
@@ -642,6 +649,85 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 		s.logger.Info("import notification email sent via SMTP", "count", len(txns), "user_id", userID)
 		return nil
 	}
+}
+
+// importAccountTransactions imports one SimpleFin account's transactions in a single DB
+// transaction. It share-locks the account row first and skips the import if the account is
+// balance-only, so a concurrent SetAccountBalanceOnly either runs before (import skipped) or
+// waits until this commit (and then soft-deletes these rows). Progress counts every
+// transaction considered, even when the import is skipped or fails.
+func (s *Service) importAccountTransactions(ctx context.Context, userID, accountID string, acc SFAccount, req SimplefinExecuteRequest, startTime time.Time, imported *[]domain.Transaction) {
+	var candidates []sfTransaction
+	for _, txn := range acc.Transactions {
+		if txn.Pending && !req.ImportPending {
+			continue
+		}
+		if !startTime.IsZero() && time.Unix(txn.Posted, 0).Before(startTime) {
+			continue
+		}
+		candidates = append(candidates, txn)
+	}
+	markDone := func(n int) {
+		if n > 0 {
+			updateImportProgress(userID, func(p *ImportStatus) { p.Current += n })
+		}
+	}
+
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		s.logger.Error("failed to begin tx", "error", err, "sf_id", acc.ID, "user_id", userID)
+		markDone(len(candidates))
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	balanceOnly, err := s.repo.AccountBalanceOnlyForShare(ctx, tx, userID, accountID)
+	if err != nil || balanceOnly {
+		if err != nil {
+			s.logger.Error("failed to lock account for import", "error", err, "sf_id", acc.ID, "user_id", userID)
+		}
+		markDone(len(candidates))
+		return
+	}
+
+	var created []domain.Transaction
+	for _, txn := range candidates {
+		date := time.Unix(txn.Posted, 0)
+		amount, err := money.NewFromString(txn.Amount)
+		if err != nil {
+			markDone(1)
+			continue
+		}
+
+		if req.ContentDedup {
+			exists, err := s.repo.TransactionExistsByDetails(ctx, userID, accountID, amount.ToInt64(), date, txn.Description)
+			if err == nil && exists {
+				markDone(1)
+				continue
+			}
+		}
+
+		txnID, isNew, err := s.repo.InsertIngestedTransaction(ctx, tx, userID, accountID, amount, date, txn.Description, txn.ID, nil, nil, false)
+		if err != nil {
+			s.logger.Error("failed to insert transaction", "error", err, "sf_txn_id", txn.ID, "user_id", userID)
+		} else if isNew {
+			created = append(created, domain.Transaction{
+				ID:          txnID,
+				AccountID:   accountID,
+				Amount:      amount,
+				Date:        date,
+				Description: txn.Description,
+				UserID:      userID,
+			})
+		}
+		markDone(1)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		s.logger.Error("failed to commit tx", "error", err, "sf_id", acc.ID, "user_id", userID)
+		return
+	}
+	*imported = append(*imported, created...)
 }
 
 // 4. Auto-Sync Background Job

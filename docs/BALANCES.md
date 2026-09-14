@@ -67,6 +67,10 @@ Example: Checking +$5,000, Savings +$2,000, Credit Card −$800 → Net Worth = 
 
 **Historical balances** (used in net-worth trend charts for past dates) between two snapshots are still derived from transactions, so editing an old transaction can shift the trend line — but never changes a snapshot value itself.
 
+## Balance-only Accounts
+
+Some accounts exist purely to track a balance (e.g., Roth IRA, 401k, brokerage). These **balance-only accounts** keep no transaction history. Their balance comes exclusively from snapshots: SimpleFin syncs and manual updates. When you enable balance-only on an account, all existing transactions are deleted (after confirmation), along with their links to transactions in other accounts, and future SimpleFin syncs skip its transactions while still recording its balance. With no transactions, the balance stays at the latest snapshot until the next sync or manual update. Turning balance-only off makes future syncs import new transactions again; previously deleted transactions are not restored. Balance-only accounts are excluded from transaction pickers and the Transactions page filter. The account history page shows only Balance History with a note that it tracks balance only.
+
 ## Same-Day Updates
 
 When multiple snapshots exist for the same date (e.g., two SimpleFin syncs in one day), the latest one wins. PPBudget uses `UNIQUE (account_id, as_of_date)` with an `ON CONFLICT UPDATE` strategy, so re-syncing the same day updates the snapshot rather than creating a duplicate.

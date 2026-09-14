@@ -41,6 +41,7 @@ export interface Account {
   current_balance: number; // cents, signed (liabilities negative)
   balance_as_of?: string; // "YYYY-MM-DDT00:00:00Z" — latest non-opening snapshot
   balance_source?: "simplefin" | "manual";
+  balance_only: boolean;
   simplefin_id?: string;
   created_at?: string;
   updated_at?: string;

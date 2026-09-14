@@ -23,6 +23,8 @@ type Account struct {
 	CurrentBalance money.Money `json:"current_balance"`
 	BalanceAsOf    *time.Time  `json:"balance_as_of,omitempty"`
 	BalanceSource  *string     `json:"balance_source,omitempty"`
+	// BalanceOnly accounts keep no transactions; their balance comes from snapshots only.
+	BalanceOnly bool `json:"balance_only"`
 	SimplefinID    *string     `json:"simplefin_id,omitempty"`
 	CreatedAt      time.Time   `json:"created_at"`
 	UpdatedAt      time.Time   `json:"updated_at"`

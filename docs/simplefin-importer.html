@@ -99,7 +99,8 @@
             <ul>
                 <li><strong>Map to Existing Account:</strong> Associate the SimpleFin account with an account you already created in PPBudget (e.g., "Chase Freedom", "Ally Savings").</li>
                 <li><strong>+ Create New Account:</strong> Automatically create a matching account in PPBudget with the current balance and currency fetched from SimpleFin.</li>
-                <li><strong>Skip Importing:</strong> Ignore this account entirely during import operations.</li>
+                <li><strong>Skip Importing:</strong> Ignore this account entirely during import operations. This skips all transactions from that account.</li>
+                <li><strong>Balance only (don't import transactions):</strong> For investment accounts (Roth IRA, 401k, brokerage), check this box to track balance snapshots only. SimpleFin syncs still record the balance, but transactions are skipped. If the target account already exists and has transactions, a warning shows that they will be deleted. Accounts that are already balance-only show the box checked and locked; turn balance-only off from the account's settings on the Accounts page.</li>
             </ul>
 
             <div class="highlight-box">
@@ -165,6 +166,7 @@
                     <li>The engine pulls the last 30 days of transactions from SimpleFin.</li>
                     <li>It uses your saved <strong>Account Memory</strong> configuration to map transactions to the right accounts.</li>
                     <li>For <strong>every mapped account</strong>, it records the current balance as reported by SimpleFin, even if there are no new transactions. This anchors investment accounts (brokerage, IRA, 401k) to their real-time market value.</li>
+                    <li>For <strong>balance-only accounts</strong>, it records a balance snapshot on every sync but skips importing transactions entirely.</li>
                     <li>It applies smart de-duplication to skip already-imported records.</li>
                     <li>It executes active <strong>Categorization Rules</strong> to organize the new transactions.</li>
                 </ul>

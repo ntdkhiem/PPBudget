@@ -2,18 +2,27 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
-import { useState, useMemo } from "react";
-import { apiFetch, Transaction, Category, BalanceSnapshot } from "@/lib/api";
+import { useState, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
+import { apiFetch, Transaction, Category, Account, Subscription, BalanceSnapshot } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { Plus, Search, Calendar, Filter, X, Trash2, History } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Plus, Search, Calendar, Filter, X, Trash2, History, SearchX, PiggyBank } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DashboardCard } from "@/components/dashboard-card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
+import { TransactionTableRow } from "@/components/transaction-table-row";
 import { toast } from "sonner";
-import { PageHeader } from "@/components/page-header";
+
+const EditTransactionDialog = dynamic(() => import("../../transactions/EditTransactionDialog"), { ssr: false });
+
+type Allocation = { transaction_id: string; amount: number; description?: string; date?: string };
 
 const fieldClass =
   "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded dark:[color-scheme:dark] [&>option]:bg-white [&>option]:text-slate-900 dark:[&>option]:bg-slate-800 dark:[&>option]:text-white";
+
+const COLUMN_COUNT = 6;
 
 export default function AccountDetailPage() {
   const params = useParams();
@@ -25,10 +34,13 @@ export default function AccountDetailPage() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  
-  const [editingTxn, setEditingTxn] = useState<string | null>(null);
-  const [editDesc, setEditDesc] = useState("");
-  const [editCatId, setEditCatId] = useState("");
+
+  const [selectedTxn, setSelectedTxn] = useState<Transaction | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [quickEditTxnId, setQuickEditTxnId] = useState<string | null>(null);
+  const [txnToDelete, setTxnToDelete] = useState<string | null>(null);
+  const [paysFor, setPaysFor] = useState<Allocation[]>([]);
+  const [paidBy, setPaidBy] = useState<Allocation[]>([]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [snapshotToDelete, setSnapshotToDelete] = useState<BalanceSnapshot | null>(null);
@@ -44,58 +56,105 @@ export default function AccountDetailPage() {
     queryFn: () => apiFetch<Category[]>("/categories", {}, token),
   });
 
+  const { data: accounts } = useQuery<Account[]>({
+    queryKey: ["accounts"],
+    queryFn: () => apiFetch<Account[]>("/accounts", {}, token),
+    enabled: !!token,
+  });
+
+  const { data: subscriptions } = useQuery<Subscription[]>({
+    queryKey: ["subscriptions"],
+    queryFn: () => apiFetch<Subscription[]>("/subscriptions", {}, token),
+    enabled: !!token,
+  });
+
   const { data: balanceSnapshots, isLoading: loadingBalances } = useQuery<BalanceSnapshot[]>({
     queryKey: ["accounts", accountId, "balances"],
     queryFn: () => apiFetch<BalanceSnapshot[]>(`/accounts/${accountId}/balances`, {}, token),
     enabled: !!accountId,
   });
 
+  const invalidateBalances = () => {
+    queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    queryClient.invalidateQueries({ queryKey: ["reports"] });
+  };
+
   const deleteSnapshotMutation = useMutation({
     mutationFn: (snapshotId: string) =>
-      apiFetch(`/accounts/${accountId}/balances/${snapshotId}`, {
-        method: "DELETE",
-      }, token),
+      apiFetch(`/accounts/${accountId}/balances/${snapshotId}`, { method: "DELETE" }, token),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["accounts", accountId, "balances"] });
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
-      queryClient.invalidateQueries({ queryKey: ["transactions", accountId] });
+      invalidateBalances();
       setSnapshotToDelete(null);
       toast.success("Balance snapshot deleted");
     },
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: { id: string, description: string, category_id: string }) => 
-      apiFetch(`/transactions/${data.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ description: data.description, category_id: data.category_id || null }),
-      }, token),
-    onMutate: async (newData) => {
-      await queryClient.cancelQueries({ queryKey: ["transactions", accountId] });
-      const previousTxns = queryClient.getQueryData<Transaction[]>(["transactions", accountId]);
-      queryClient.setQueryData<Transaction[]>(["transactions", accountId], (old) => 
-        old?.map(t => t.id === newData.id ? { ...t, description: newData.description, category_id: newData.category_id } : t) || []
-      );
-      return { previousTxns };
+    mutationFn: (data: Record<string, unknown>) =>
+      apiFetch(`/transactions/${data.id}`, { method: "PUT", body: JSON.stringify(data) }, token),
+    onSuccess: () => {
+      toast.success("Transaction updated successfully");
+      setIsEditOpen(false);
+      invalidateBalances();
     },
-    onError: (err, newData, context) => {
-      if (context?.previousTxns) {
-        queryClient.setQueryData(["transactions", accountId], context.previousTxns);
-      }
-      alert("Failed to update transaction.");
-    },
-    onSuccess: () => setEditingTxn(null),
   });
 
-  const startEdit = (txn: Transaction) => {
-    setEditingTxn(txn.id);
-    setEditDesc(txn.description);
-    setEditCatId(txn.category_id || "");
-  };
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiFetch(`/transactions/${id}`, { method: "DELETE" }, token),
+    onSuccess: () => {
+      toast.success("Transaction deleted successfully");
+      setTxnToDelete(null);
+      invalidateBalances();
+    },
+  });
 
-  const saveEdit = (id: string) => {
-    updateMutation.mutate({ id, description: editDesc, category_id: editCatId });
+  const reviewMutation = useMutation({
+    mutationFn: ({ id, categoryId }: { id: string; categoryId: string }) =>
+      apiFetch(`/transactions/${id}/review`, { method: "PATCH", body: JSON.stringify({ category_id: categoryId }) }, token),
+    onSuccess: () => {
+      toast.success("Transaction categorized successfully");
+      setQuickEditTxnId(null);
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["unreviewed"] });
+    },
+  });
+
+  const handleRowClick = useCallback((txn: Transaction) => {
+    setSelectedTxn(txn);
+    setPaidBy(txn.paid_by || []);
+    setPaysFor(txn.pays_for || []);
+    setIsEditOpen(true);
+  }, []);
+
+  const handleDelete = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTxnToDelete(id);
+  }, []);
+
+  const { mutate: reviewTransaction } = reviewMutation;
+  const handleReview = useCallback(
+    (id: string, categoryId: string) => reviewTransaction({ id, categoryId }),
+    [reviewTransaction]
+  );
+
+  const handleUpdateSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedTxn) return;
+    const formData = new FormData(e.currentTarget);
+    updateMutation.mutate({
+      id: selectedTxn.id,
+      account_id: formData.get("accountId"),
+      amount: Math.round(parseFloat(formData.get("amount") as string) * 100),
+      date: formData.get("date"),
+      description: formData.get("description"),
+      notes: formData.get("notes") || null,
+      category_id: formData.get("categoryId") || null,
+      subscription_id: formData.get("subscriptionId") === "none" ? null : formData.get("subscriptionId") || null,
+      pays_for: paysFor,
+      paid_by: paidBy,
+    });
   };
 
   const filteredTxns = useMemo(() => {
@@ -109,117 +168,134 @@ export default function AccountDetailPage() {
     });
   }, [transactions, search, fromDate, toDate, categoryId]);
 
-  if (isLoading) return <div className="text-slate-500 dark:text-slate-400">Loading account history...</div>;
+  const hasActiveFilters = !!(search || fromDate || toDate || categoryId);
+  const clearFilters = () => {
+    setSearch("");
+    setFromDate("");
+    setToDate("");
+    setCategoryId("");
+  };
+
+  const accountsLoaded = accounts !== undefined;
+  const account = accounts?.find(a => a.id === accountId);
+  const accountName = account?.name;
+  // Unknown while accounts haven't loaded yet — treat as "not balance-only" for loading purposes,
+  // but don't render the real transactions UI until we know for sure (avoids a flash).
+  const isBalanceOnly = accountsLoaded && !!account?.balance_only;
+  const showTransactionsUI = !accountsLoaded || !isBalanceOnly;
+  const showTransactionsSkeleton = isLoading || !accountsLoaded;
 
   return (
     <div className="pb-24 relative min-h-screen">
-      <h1 className="text-3xl font-bold mb-6 text-slate-900 dark:text-white">Account History</h1>
+      <h1 className="text-3xl font-bold mb-6 text-slate-900 dark:text-white">
+        {accountName ? `${accountName} History` : "Account History"}
+      </h1>
 
-      {/* Filtering Bar */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-lg shadow mb-6 flex flex-wrap gap-4 items-center">
-        <div className="flex items-center bg-gray-100 dark:bg-slate-800 rounded px-3 py-2 flex-1 min-w-[200px]">
-          <Search size={18} className="text-slate-500 dark:text-slate-400 mr-2" />
-          <input 
-            type="text" 
-            placeholder="Search description..." 
-            className="bg-transparent outline-none w-full text-sm text-slate-900 dark:text-white"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <Calendar size={18} className="text-slate-500 dark:text-slate-400" />
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={`${fieldClass} px-2 py-1 text-sm`} />
-          <span className="text-slate-500 dark:text-slate-400">-</span>
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={`${fieldClass} px-2 py-1 text-sm`} />
-        </div>
-        <div className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 rounded px-3 py-1 bg-white dark:bg-slate-900">
-          <Filter size={18} className="text-slate-500 dark:text-slate-400" />
-          <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className="outline-none text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-white dark:[color-scheme:dark] [&>option]:bg-white [&>option]:text-slate-900 dark:[&>option]:bg-slate-900 dark:[&>option]:text-white">
-            <option value="">All Categories</option>
-            {categories?.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
+      {showTransactionsUI ? (
+        <>
+          {/* Filtering Bar */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-lg shadow mb-6 flex flex-wrap gap-4 items-center">
+            <div className="flex items-center bg-gray-100 dark:bg-slate-800 rounded px-3 py-2 flex-1 min-w-[200px]">
+              <Search size={18} className="text-slate-500 dark:text-slate-400 mr-2" />
+              <input
+                type="text"
+                placeholder="Search description..."
+                className="bg-transparent outline-none w-full text-sm text-slate-900 dark:text-white"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Calendar size={18} className="text-slate-500 dark:text-slate-400" />
+              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={`${fieldClass} px-2 py-1 text-sm`} />
+              <span className="text-slate-500 dark:text-slate-400">-</span>
+              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={`${fieldClass} px-2 py-1 text-sm`} />
+            </div>
+            <div className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 rounded px-3 py-1 bg-white dark:bg-slate-900">
+              <Filter size={18} className="text-slate-500 dark:text-slate-400" />
+              <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className="outline-none text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-white dark:[color-scheme:dark] [&>option]:bg-white [&>option]:text-slate-900 dark:[&>option]:bg-slate-900 dark:[&>option]:text-white">
+                <option value="">All Categories</option>
+                {categories?.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-      {/* Transactions Table */}
-      <div className="bg-white dark:bg-slate-900 rounded-lg shadow overflow-hidden">
-        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-          <thead className="bg-slate-50 dark:bg-slate-900/50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Date</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Description</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Category</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Amount</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Balance</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white dark:bg-slate-900 divide-y divide-slate-200 dark:divide-slate-800">
-            {filteredTxns.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">No transactions found.</td>
-              </tr>
-            )}
-            {filteredTxns.map((txn) => {
-              const isEditing = editingTxn === txn.id;
-              return (
-                <tr key={txn.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer" onClick={() => !isEditing && startEdit(txn)}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-white">
-                    {formatDate(txn.date)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-white">
-                    {isEditing ? (
-                      <input 
-                        type="text" 
-                        value={editDesc} 
-                        onChange={e => setEditDesc(e.target.value)}
-                        className={`${fieldClass} px-2 py-1 w-full`}
-                        autoFocus
+          {/* Transactions Table (same row component as the Transactions page) */}
+          <div className="overflow-auto relative rounded-3xl border border-slate-200 dark:border-slate-800/60 bg-white dark:bg-slate-900/80 backdrop-blur-xl shadow-sm">
+            <Table className="relative w-full">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-slate-200 dark:border-slate-800/60">
+                  <TableHead className="font-semibold text-slate-500 dark:text-slate-400 py-4">Description</TableHead>
+                  <TableHead className="font-semibold text-slate-500 dark:text-slate-400 text-right py-4">Amount</TableHead>
+                  <TableHead className="font-semibold text-slate-500 dark:text-slate-400 text-right py-4">Balance</TableHead>
+                  <TableHead className="font-semibold text-slate-500 dark:text-slate-400 py-4">Date</TableHead>
+                  <TableHead className="font-semibold text-slate-500 dark:text-slate-400 py-4">Category</TableHead>
+                  <TableHead className="font-semibold text-slate-500 dark:text-slate-400 text-right py-4">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {showTransactionsSkeleton ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-8 w-24 rounded-lg" /></TableCell>
+                      <TableCell><Skeleton className="h-8 w-16 ml-auto rounded-lg" /></TableCell>
+                    </TableRow>
+                  ))
+                ) : filteredTxns.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={COLUMN_COUNT} className="h-64 p-0">
+                      <EmptyState
+                        icon={SearchX}
+                        title={hasActiveFilters ? "No matching transactions" : "No transactions found"}
+                        description={hasActiveFilters ? "Try adjusting your filters to find what you're looking for." : "This account has no transactions yet."}
+                        action={
+                          hasActiveFilters ? (
+                            <button onClick={clearFilters} className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+                              Clear Filters
+                            </button>
+                          ) : undefined
+                        }
                       />
-                    ) : (
-                      txn.description
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-white">
-                    {isEditing ? (
-                      <select 
-                        value={editCatId} 
-                        onChange={e => setEditCatId(e.target.value)}
-                        className={`${fieldClass} px-2 py-1 w-full`}
-                      >
-                        <option value="">Uncategorized</option>
-                        {categories?.map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="bg-gray-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded text-xs">
-                        {categories?.find(c => c.id === txn.category_id)?.name || "Uncategorized"}
-                      </span>
-                    )}
-                  </td>
-                  <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${txn.amount < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                    {formatCurrency(txn.amount)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-slate-900 dark:text-white">
-                    {formatCurrency(txn.running_balance || 0)}
-                  </td>
-                  {isEditing && (
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={(e) => { e.stopPropagation(); saveEdit(txn.id); }} className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline">Save</button>
-                        <button onClick={(e) => { e.stopPropagation(); setEditingTxn(null); }} className="text-slate-500 dark:text-slate-400 font-bold hover:underline">Cancel</button>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredTxns.map(txn => (
+                    <TransactionTableRow
+                      key={txn.id}
+                      txn={txn}
+                      accounts={accounts}
+                      categories={categories}
+                      quickEditTxnId={quickEditTxnId}
+                      onQuickEditTxnIdChange={setQuickEditTxnId}
+                      onRowClick={handleRowClick}
+                      onDelete={handleDelete}
+                      onReview={handleReview}
+                      isDeleting={deleteMutation.isPending}
+                      showAccount={false}
+                      showRunningBalance
+                    />
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      ) : (
+        <DashboardCard className="flex items-center gap-4">
+          <div className="p-3 rounded-2xl bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 shrink-0">
+            <PiggyBank className="h-6 w-6" />
+          </div>
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            This account tracks balance only. Its balance comes from SimpleFin syncs and manual updates, so transactions aren&apos;t shown.
+          </p>
+        </DashboardCard>
+      )}
 
       {/* Balance History */}
       <DashboardCard className="mt-6">
@@ -262,6 +338,35 @@ export default function AccountDetailPage() {
         )}
       </DashboardCard>
 
+      {showTransactionsUI && (
+        <EditTransactionDialog
+          isOpen={isEditOpen}
+          onOpenChange={setIsEditOpen}
+          selectedTxn={selectedTxn}
+          onSubmit={handleUpdateSubmit}
+          isPending={updateMutation.isPending}
+          accounts={accounts}
+          categories={categories}
+          subscriptions={subscriptions}
+          paysFor={paysFor}
+          setPaysFor={setPaysFor}
+          paidBy={paidBy}
+          setPaidBy={setPaidBy}
+          transactions={transactions}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!txnToDelete}
+        onOpenChange={(open) => !open && setTxnToDelete(null)}
+        title="Delete Transaction"
+        description="Are you sure you want to delete this transaction? This cannot be undone."
+        confirmText="Delete"
+        isDestructive
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => txnToDelete && deleteMutation.mutate(txnToDelete)}
+      />
+
       <ConfirmDialog
         open={!!snapshotToDelete}
         onOpenChange={(open) => !open && setSnapshotToDelete(null)}
@@ -273,16 +378,20 @@ export default function AccountDetailPage() {
         onConfirm={() => snapshotToDelete && deleteSnapshotMutation.mutate(snapshotToDelete.id)}
       />
 
-      {/* FAB */}
-      <button 
-        onClick={() => setIsModalOpen(true)}
-        className="fixed bottom-8 right-8 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 transition-colors z-10"
-      >
-        <Plus size={24} />
-      </button>
+      {accountsLoaded && !isBalanceOnly && (
+        <>
+          {/* FAB */}
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="fixed bottom-8 right-8 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 transition-colors z-10"
+          >
+            <Plus size={24} />
+          </button>
 
-      {/* Manual Entry Modal */}
-      {isModalOpen && <ManualEntryModal accountId={accountId} onClose={() => setIsModalOpen(false)} token={token} />}
+          {/* Manual Entry Modal */}
+          {isModalOpen && <ManualEntryModal accountId={accountId} onClose={() => setIsModalOpen(false)} token={token} />}
+        </>
+      )}
     </div>
   );
 }
@@ -299,7 +408,9 @@ function ManualEntryModal({ accountId, onClose, token }: { accountId: string, on
       body: JSON.stringify({ account_id: accountId, description: desc, amount: Math.round(parseFloat(amt) * 100), date }),
     }, token),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["transactions", accountId] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
       onClose();
     },
   });
@@ -322,8 +433,8 @@ function ManualEntryModal({ accountId, onClose, token }: { accountId: string, on
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`${fieldClass} w-full p-2`} />
           </div>
-          <button 
-            onClick={() => createMutation.mutate()} 
+          <button
+            onClick={() => createMutation.mutate()}
             disabled={createMutation.isPending}
             className="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700 mt-2 disabled:opacity-50"
           >

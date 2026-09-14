@@ -687,6 +687,10 @@ func (h *Handler) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 
 	err = h.svc.CreateTransaction(r.Context(), userID, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID)
 	if err != nil {
+		if errors.Is(err, apperrors.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create transaction")
 		return
 	}
@@ -802,6 +806,10 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")
+			return
+		}
+		if errors.Is(err, apperrors.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if strings.Contains(err.Error(), "exceeds available") {

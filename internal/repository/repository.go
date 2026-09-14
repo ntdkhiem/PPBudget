@@ -45,6 +45,43 @@ func (r *Repository) checkOwnership(ctx context.Context, tx pgx.Tx, table, id, u
 	return nil
 }
 
+// checkNotBalanceOnly returns ErrInvalidInput when the user's account is flagged balance_only.
+// A missing or foreign account is left to checkOwnership.
+// Call it inside the transaction that inserts or moves transactions: FOR SHARE blocks a
+// concurrent SetAccountBalanceOnly until that transaction commits, so its soft-delete sees them.
+func (r *Repository) checkNotBalanceOnly(ctx context.Context, tx pgx.Tx, accountID, userID string) error {
+	if accountID == "" {
+		return nil
+	}
+	balanceOnly, err := r.AccountBalanceOnlyForShare(ctx, tx, userID, accountID)
+	if err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if balanceOnly {
+		return fmt.Errorf("%w: account is balance-only and does not track transactions", apperrors.ErrInvalidInput)
+	}
+	return nil
+}
+
+// AccountBalanceOnlyForShare reads the account's balance_only flag and, inside tx, share-locks the
+// account row until tx ends. Returns ErrNotFound for a missing or foreign account.
+func (r *Repository) AccountBalanceOnlyForShare(ctx context.Context, tx pgx.Tx, userID, accountID string) (bool, error) {
+	var balanceOnly bool
+	err := r.querier(tx).QueryRow(ctx,
+		`SELECT balance_only FROM accounts WHERE id = $1 AND user_id = $2 FOR SHARE`, accountID, userID,
+	).Scan(&balanceOnly)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, apperrors.ErrNotFound
+		}
+		return false, err
+	}
+	return balanceOnly, nil
+}
+
 // BeginTx starts a new database transaction
 func (r *Repository) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	return r.pool.Begin(ctx)
@@ -388,6 +425,7 @@ func (r *Repository) MarkReviewed(ctx context.Context, userID, txnID string, cat
 // Callers append WHERE (which must filter on a.user_id) and ORDER BY clauses.
 const accountSelectFrom = `
 	SELECT a.id, a.user_id, a.name, a.type, a.currency, a.simplefin_id, a.created_at, a.updated_at,
+	       a.balance_only,
 	       account_balance_at(a.id, 'infinity'::date) AS current_balance,
 	       ls.as_of_date AS balance_as_of,
 	       ls.source AS balance_source
@@ -407,7 +445,7 @@ func scanAccount(row pgx.Row) (domain.Account, error) {
 	var a domain.Account
 	var currentBalance int64
 	err := row.Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Currency, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt,
-		&currentBalance, &a.BalanceAsOf, &a.BalanceSource)
+		&a.BalanceOnly, &currentBalance, &a.BalanceAsOf, &a.BalanceSource)
 	if err != nil {
 		return a, err
 	}
@@ -580,16 +618,25 @@ func (r *Repository) DeleteAccount(ctx context.Context, userID, id string) error
 // Transactions (Manual)
 
 func (r *Repository) CreateTransaction(ctx context.Context, userID, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string) error {
-	if err := r.checkOwnership(ctx, nil, "accounts", accountID, userID); err != nil {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := r.checkOwnership(ctx, tx, "accounts", accountID, userID); err != nil {
+		return err
+	}
+	if err := r.checkNotBalanceOnly(ctx, tx, accountID, userID); err != nil {
 		return err
 	}
 	if categoryID != nil {
-		if err := r.checkOwnership(ctx, nil, "categories", *categoryID, userID); err != nil {
+		if err := r.checkOwnership(ctx, tx, "categories", *categoryID, userID); err != nil {
 			return err
 		}
 	}
 	if subscriptionID != nil {
-		if err := r.checkOwnership(ctx, nil, "subscriptions", *subscriptionID, userID); err != nil {
+		if err := r.checkOwnership(ctx, tx, "subscriptions", *subscriptionID, userID); err != nil {
 			return err
 		}
 	}
@@ -598,8 +645,10 @@ func (r *Repository) CreateTransaction(ctx context.Context, userID, accountID st
 		VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
 	`
 	// Manual transactions are considered reviewed automatically.
-	_, err := r.pool.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID, userID)
-	return err
+	if _, err := tx.Exec(ctx, query, accountID, amount, date, description, notes, categoryID, subscriptionID, userID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *Repository) DeleteTransaction(ctx context.Context, userID, id string) error {
@@ -647,6 +696,9 @@ func (r *Repository) UpdateTransaction(ctx context.Context, userID, id, accountI
 	defer tx.Rollback(ctx)
 
 	if err := r.checkOwnership(ctx, tx, "accounts", accountID, userID); err != nil {
+		return err
+	}
+	if err := r.checkNotBalanceOnly(ctx, tx, accountID, userID); err != nil {
 		return err
 	}
 	if categoryID != nil {
