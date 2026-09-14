@@ -1,5 +1,9 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
 
+export function getStoredToken(): string {
+  return typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
+}
+
 export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -145,9 +149,10 @@ export interface NetWorthDataPoint {
   net_worth: number;
 }
 
-export interface SpendingDataPoint {
-  category: string;
-  value: number; // cents
+export interface CategorySpend {
+  category_id: string | null; // null for uncategorized
+  name: string;
+  total_spent: number; // cents
 }
 
 export interface DashboardSummary {

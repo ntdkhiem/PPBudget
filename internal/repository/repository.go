@@ -229,7 +229,11 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 		argID++
 	}
 
-	query += " ORDER BY t.date DESC, t.id DESC LIMIT 100"
+	limit := 100
+	if f.Limit > 0 && f.Limit < limit {
+		limit = f.Limit
+	}
+	query += fmt.Sprintf(" ORDER BY t.date DESC, t.id DESC LIMIT %d", limit)
 
 	// Running balance is computed after filtering and paging, so it never depends on the
 	// filters. account_balance_at runs once per (account, date) on the page; within a day
@@ -810,15 +814,37 @@ func (r *Repository) GetNetWorthTrend(ctx context.Context, userID string, startD
 }
 
 func (r *Repository) GetSpendingByCategory(ctx context.Context, userID string, startDate, endDate time.Time) ([]domain.CategorySpend, error) {
+	// Matches out_period in GetReportsSummary: outflows by effective (link-adjusted)
+	// amount, transfers excluded, uncategorized transactions grouped together.
 	query := `
-		SELECT c.id, c.name, SUM(ABS(t.amount)) as total_spent
-		FROM transactions t
-		JOIN categories c ON t.category_id = c.id
-		WHERE t.user_id = $1 AND c.user_id = $1
-		  AND t.date >= $2 AND t.date <= $3
-		  AND c.type = 'expense'
-		  AND t.deleted_at IS NULL
-		GROUP BY c.id, c.name
+		WITH linked_amounts AS (
+			SELECT
+				t.category_id,
+				(t.amount
+				 - COALESCE(pays_for_agg.total_amount, 0)
+				 + COALESCE(paid_by_agg.total_amount, 0)
+				) as effective_amount
+			FROM transactions t
+			LEFT JOIN categories c ON t.category_id = c.id
+			LEFT JOIN LATERAL (
+				SELECT SUM(l.amount) as total_amount
+				FROM transaction_links l
+				WHERE l.source_transaction_id = t.id
+			) pays_for_agg ON true
+			LEFT JOIN LATERAL (
+				SELECT SUM(l.amount) as total_amount
+				FROM transaction_links l
+				WHERE l.target_transaction_id = t.id
+			) paid_by_agg ON true
+			WHERE t.user_id = $1 AND t.date >= $2 AND t.date <= $3
+			  AND t.deleted_at IS NULL
+			  AND (c.type IS NULL OR c.type != 'transfer')
+		)
+		SELECT la.category_id, COALESCE(c.name, 'Uncategorized'), SUM(ABS(la.effective_amount)) as total_spent
+		FROM linked_amounts la
+		LEFT JOIN categories c ON la.category_id = c.id
+		WHERE la.effective_amount < 0
+		GROUP BY la.category_id, c.name
 		ORDER BY total_spent DESC
 	`
 	rows, err := r.pool.Query(ctx, query, userID, startDate, endDate)

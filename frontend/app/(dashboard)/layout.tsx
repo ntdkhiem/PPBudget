@@ -2,8 +2,8 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState, ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, Insight } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import { useInsights } from "@/hooks/useInsights";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { LayoutDashboard, ReceiptText, ListChecks, PieChart, Settings, SlidersHorizontal, LogOut, Wallet, Database, Repeat, Menu, Tag } from "lucide-react";
@@ -137,14 +137,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     { href: "/settings", label: "Settings", icon: Settings },
   ];
 
-  const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
-  const { data: insights } = useQuery<Insight[]>({
-    queryKey: ["reports", "insights"],
-    queryFn: () => apiFetch<Insight[]>("/reports/insights", {}, token),
-    enabled: isAuthed && !!token,
-  });
-
-  const insightsCount = insights?.length || 0;
+  const { insights } = useInsights({ enabled: isAuthed });
+  const insightsCount = insights.length;
 
   if (!isAuthed) return null;
 

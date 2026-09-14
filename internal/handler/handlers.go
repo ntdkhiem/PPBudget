@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,8 +82,10 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 		categoryIDs = strings.Split(categoriesStr, ",")
 	}
 	txnType := r.URL.Query().Get("type")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 
 	filter := domain.TransactionFilter{
+		Limit:          limit,
 		UserID:         userID,
 		AccountID:      accountID,
 		AccountIDs:     accountIDs,

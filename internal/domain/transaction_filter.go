@@ -14,4 +14,5 @@ type TransactionFilter struct {
 	StartDate      *time.Time
 	EndDate        *time.Time
 	Search         string
+	Limit          int // 1-100; anything else means the default page size of 100
 }

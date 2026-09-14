@@ -141,7 +141,7 @@ type BudgetSummary struct {
 }
 
 type CategorySpend struct {
-	CategoryID string      `json:"category_id"`
+	CategoryID *string     `json:"category_id"` // nil for uncategorized
 	Name       string      `json:"name"`
 	TotalSpent money.Money `json:"total_spent"`
 }
