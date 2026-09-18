@@ -6,7 +6,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CheckCircle2, Edit2, Link, Repeat, Trash2 } from "lucide-react";
+import { CheckCircle2, Edit2, Link, Repeat, Trash2, Wand2 } from "lucide-react";
 
 const truncateText = (text: string, maxLength: number = 100) => {
   if (!text) return "";
@@ -24,6 +24,8 @@ export interface TransactionTableRowProps {
   onQuickEditTxnIdChange: (id: string | null) => void;
   onRowClick: (txn: Transaction) => void;
   onDelete: (id: string, e: React.MouseEvent) => void;
+  /** Opens the rules page with a new rule prefilled from this transaction. */
+  onCreateRule?: (txn: Transaction) => void;
   onReview: (id: string, categoryId: string) => void;
   isDeleting: boolean;
   /** Renders the selection checkbox column when provided. */
@@ -43,6 +45,7 @@ export const TransactionTableRow = memo(function TransactionTableRow({
   onQuickEditTxnIdChange,
   onRowClick,
   onDelete,
+  onCreateRule,
   onReview,
   isDeleting,
   onSelectRow,
@@ -141,7 +144,19 @@ export const TransactionTableRow = memo(function TransactionTableRow({
         </Popover>
       </TableCell>
       <TableCell className="text-right py-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          {onCreateRule && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Create rule from this transaction"
+              title="Create rule from this transaction"
+              className="text-slate-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:text-violet-400 dark:hover:bg-violet-500/10 h-8 w-8 rounded-lg"
+              onClick={(e) => { e.stopPropagation(); onCreateRule(txn); }}
+            >
+              <Wand2 className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"

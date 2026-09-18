@@ -104,3 +104,28 @@ Status: **Open** = not started · **Covered** = handled inside the balance-snaps
 ### E5. Balance function cost on very large accounts — Open (monitor)
 - `account_balance_at` sums from the anchor; manual accounts anchor at `-infinity`, so cost grows with history. Measured with the covering index: 50k transactions → ~0.5s per 100-row transactions page, ~0.35s for a 10-year trend on one account. Fine at personal scale.
 - Fix idea if needed: periodic automatic snapshots for manual accounts (e.g. monthly), which bound every sum to one month.
+
+---
+
+## F. From the rules-engine fixes (2026-09-18)
+
+Discovered while fixing the UI/engine vocabulary drift. See migration
+`0022_rules_canonical_vocabulary` and `internal/service/rules_vocabulary.go`.
+
+### F1. Legacy action rows left in place by migration 0022 — Open
+- The rules UI used to offer `add_tag`, `set_budget`, and `link_as_card_payment`. None were ever implemented by the engine, and there is no `tags` table in the schema. Rules using only those actions have always been no-ops.
+- Migration 0022 deliberately leaves those `rule_actions` rows alone rather than deleting user data. The rules page renders them as an amber "Unsupported" badge so they stay visible.
+- `ValidateRule` now rejects them, so **editing and saving** such a rule forces you to replace the action. A rule left untouched keeps its dead row.
+- Fix idea: a one-off cleanup once you've confirmed none of your rules still carry them, or implement `add_tag` properly (needs a `tags` table plus a transaction_tags join).
+
+### F2. Rules still only run on the SimpleFin sync path — Open
+- `docs/rules-engine.html` previously claimed rules run on SimpleFin, CSV upload, and manual creation. Only the SimpleFin path calls them (`internal/service/simplefin.go`); the doc has been corrected rather than the behavior.
+- Fix idea: call `ApplyActiveRules` (scoped to the new transaction ids) from the CSV import and the manual-create handler. Wants a transaction-id-scoped variant so it doesn't rescan the ledger to categorize one row.
+
+### F3. Retroactive apply has no undo — Open
+- `POST /rules/{id}/apply` overwrites `category_id` / `subscription_id` / `account_id` with no record of the previous values. The new preview endpoint makes the blast radius visible beforehand, but a mistaken apply is still unrecoverable.
+- Fix idea: record the prior values in an `apply_runs` table and offer "undo last apply", or reuse the same table to satisfy C1's need for durable run history.
+
+### F4. Account conditions unresolvable after migration — Open (verify)
+- Migration 0022 resolves old free-text account values to `accounts.id` by SimpleFIN id, then by a case-insensitive unique name match. A value matching neither (a renamed or deleted account, or an ambiguous name) is left as-is and will never match.
+- **Verify after ship:** open Settings → Rules and check that every Account condition shows an account name rather than a raw string.

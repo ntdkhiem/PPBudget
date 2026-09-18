@@ -24,10 +24,10 @@ type Account struct {
 	BalanceAsOf    *time.Time  `json:"balance_as_of,omitempty"`
 	BalanceSource  *string     `json:"balance_source,omitempty"`
 	// BalanceOnly accounts keep no transactions; their balance comes from snapshots only.
-	BalanceOnly bool `json:"balance_only"`
-	SimplefinID    *string     `json:"simplefin_id,omitempty"`
-	CreatedAt      time.Time   `json:"created_at"`
-	UpdatedAt      time.Time   `json:"updated_at"`
+	BalanceOnly bool      `json:"balance_only"`
+	SimplefinID *string   `json:"simplefin_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // BalanceSnapshot anchors an account's balance at the end of AsOfDate (UTC).
@@ -65,6 +65,17 @@ type Transaction struct {
 	PaysFor            []TransactionLink `json:"pays_for,omitempty"`
 	PaidBy             []TransactionLink `json:"paid_by,omitempty"`
 	EffectiveAmount    money.Money       `json:"effective_amount"`
+}
+
+// TransactionRuleUpdate is the narrow set of fields the rules engine may
+// change on a transaction. It exists so an apply does not have to round-trip
+// the full transaction (and rewrite its transaction_links rows) to set a
+// category.
+type TransactionRuleUpdate struct {
+	ID             string
+	CategoryID     *string
+	SubscriptionID *string
+	AccountID      string
 }
 
 type TransactionLink struct {
@@ -180,4 +191,3 @@ type SearchResult struct {
 	Accounts      []Account      `json:"accounts"`
 	Subscriptions []Subscription `json:"subscriptions"`
 }
-

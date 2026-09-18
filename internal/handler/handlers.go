@@ -212,6 +212,10 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.CreateRule(r.Context(), userID, &rule); err != nil {
+		if errors.Is(err, apperrors.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create rule")
 		return
 	}
@@ -257,6 +261,10 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "rule not found")
 			return
 		}
+		if errors.Is(err, apperrors.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to update rule")
 		return
 	}
@@ -300,21 +308,7 @@ func (h *Handler) ApplyRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sDate, eDate *time.Time
-	if !payload.RunAll {
-		if payload.StartDate != "" {
-			t, err := time.Parse(time.RFC3339, payload.StartDate)
-			if err == nil {
-				sDate = &t
-			}
-		}
-		if payload.EndDate != "" {
-			t, err := time.Parse(time.RFC3339, payload.EndDate)
-			if err == nil {
-				eDate = &t
-			}
-		}
-	}
+	sDate, eDate := parseRuleDateRange(payload.RunAll, payload.StartDate, payload.EndDate)
 
 	updatedCount, err := h.svc.ApplyRule(r.Context(), userID, id, payload.RunAll, sDate, eDate)
 	if err != nil {
@@ -327,6 +321,71 @@ func (h *Handler) ApplyRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int{"updated_count": updatedCount})
+}
+
+// PreviewRule dry-runs a rule and reports what would change without writing
+// anything. The rule in the body need not be saved, so the rules dialog can
+// preview before the rule exists.
+func (h *Handler) PreviewRule(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var payload struct {
+		domain.Rule
+		RunAll    bool   `json:"run_all"`
+		StartDate string `json:"start_date"`
+		EndDate   string `json:"end_date"`
+		Limit     int    `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	rule := payload.Rule
+	// A preview never writes, so a name is irrelevant -- but ValidateRule
+	// requires one. Supply a placeholder so previewing a half-filled form
+	// reports the condition problems that actually matter.
+	if strings.TrimSpace(rule.Name) == "" {
+		rule.Name = "preview"
+	}
+
+	sDate, eDate := parseRuleDateRange(payload.RunAll, payload.StartDate, payload.EndDate)
+
+	preview, err := h.svc.PreviewRule(r.Context(), userID, &rule, payload.RunAll, sDate, eDate, payload.Limit)
+	if err != nil {
+		if errors.Is(err, apperrors.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to preview rule")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, preview)
+}
+
+// parseRuleDateRange parses the apply/preview date scoping. Unparseable dates
+// are treated as absent, matching the previous behavior.
+func parseRuleDateRange(runAll bool, startDate, endDate string) (*time.Time, *time.Time) {
+	if runAll {
+		return nil, nil
+	}
+	var sDate, eDate *time.Time
+	if startDate != "" {
+		if t, err := time.Parse(time.RFC3339, startDate); err == nil {
+			sDate = &t
+		}
+	}
+	if endDate != "" {
+		if t, err := time.Parse(time.RFC3339, endDate); err == nil {
+			eDate = &t
+		}
+	}
+	return sDate, eDate
 }
 
 func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {

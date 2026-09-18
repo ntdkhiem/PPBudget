@@ -375,6 +375,15 @@ export default function TransactionsPage() {
     setIsEditOpen(true);
   }, []);
 
+  // Hands the transaction off to the rules page, which opens its create dialog
+  // prefilled and then strips these params.
+  const handleCreateRule = useCallback((txn: Transaction) => {
+    const params = new URLSearchParams({ new: "1", description: txn.description });
+    if (txn.account_id) params.set("account", txn.account_id);
+    if (txn.category_id) params.set("category", txn.category_id);
+    router.push(`/settings/rules?${params.toString()}`);
+  }, [router]);
+
   const handleNextPage = () => {
     if (transactions && transactions.length === 100) {
       const last = transactions[transactions.length - 1];
@@ -511,6 +520,7 @@ export default function TransactionsPage() {
                     onSelectRow={handleSelectRow}
                     onRowClick={handleRowClick}
                     onDelete={handleDelete}
+                    onCreateRule={handleCreateRule}
                     onReview={handleReview}
                     isDeleting={deleteMutation.isPending}
                   />
@@ -568,6 +578,7 @@ export default function TransactionsPage() {
         paidBy={paidBy}
         setPaidBy={setPaidBy}
         transactions={transactions}
+        onCreateRule={handleCreateRule}
       />
 
       {selectedIds.length > 0 && (

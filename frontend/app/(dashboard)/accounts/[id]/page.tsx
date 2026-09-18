@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useState, useMemo, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch, Transaction, Category, Account, Subscription, BalanceSnapshot } from "@/lib/api";
@@ -26,6 +26,7 @@ const COLUMN_COUNT = 6;
 
 export default function AccountDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const accountId = params.id as string;
   const queryClient = useQueryClient();
   const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
@@ -120,6 +121,13 @@ export default function AccountDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["unreviewed"] });
     },
   });
+
+  const handleCreateRule = useCallback((txn: Transaction) => {
+    const params = new URLSearchParams({ new: "1", description: txn.description });
+    if (txn.account_id) params.set("account", txn.account_id);
+    if (txn.category_id) params.set("category", txn.category_id);
+    router.push(`/settings/rules?${params.toString()}`);
+  }, [router]);
 
   const handleRowClick = useCallback((txn: Transaction) => {
     setSelectedTxn(txn);
@@ -275,6 +283,7 @@ export default function AccountDetailPage() {
                       onQuickEditTxnIdChange={setQuickEditTxnId}
                       onRowClick={handleRowClick}
                       onDelete={handleDelete}
+                      onCreateRule={handleCreateRule}
                       onReview={handleReview}
                       isDeleting={deleteMutation.isPending}
                       showAccount={false}

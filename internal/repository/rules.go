@@ -148,38 +148,117 @@ func (r *Repository) ListRulesDetailed(ctx context.Context, userID string) ([]do
 	defer rows.Close()
 
 	var rules []domain.Rule
+	var ids []string
+	byID := map[string]int{}
 	for rows.Next() {
 		var rule domain.Rule
 		if err := rows.Scan(&rule.ID, &rule.UserID, &rule.Name, &rule.Description, &rule.TriggerType, &rule.Strictness, &rule.Priority, &rule.IsActive, &rule.CreatedAt, &rule.UpdatedAt); err != nil {
 			return nil, err
 		}
+		byID[rule.ID] = len(rules)
+		ids = append(ids, rule.ID)
 		rules = append(rules, rule)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(rules) == 0 {
+		return rules, nil
+	}
 
-	// for simplicity, just query them individually or group, but there are usually few rules
-	for i := range rules {
-		// Fetch conditions
-		queryCond := `SELECT id, rule_id, field, operator, value FROM rule_conditions WHERE rule_id = $1`
-		rowsCond, _ := r.pool.Query(ctx, queryCond, rules[i].ID)
-		for rowsCond.Next() {
-			var cond domain.RuleCondition
-			rowsCond.Scan(&cond.ID, &cond.RuleID, &cond.Field, &cond.Operator, &cond.Value)
+	// Two bulk queries rather than two per rule. Errors here are returned, not
+	// discarded: an empty condition list is indistinguishable from a rule with
+	// no conditions, and silently dropping conditions changes what a rule matches.
+	queryCond := `SELECT id, rule_id, field, operator, value FROM rule_conditions WHERE rule_id = ANY($1) ORDER BY id`
+	rowsCond, err := r.pool.Query(ctx, queryCond, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rowsCond.Close()
+	for rowsCond.Next() {
+		var cond domain.RuleCondition
+		if err := rowsCond.Scan(&cond.ID, &cond.RuleID, &cond.Field, &cond.Operator, &cond.Value); err != nil {
+			return nil, err
+		}
+		if i, ok := byID[cond.RuleID]; ok {
 			rules[i].Conditions = append(rules[i].Conditions, cond)
 		}
-		rowsCond.Close()
+	}
+	if err := rowsCond.Err(); err != nil {
+		return nil, err
+	}
 
-		// Fetch actions
-		queryAct := `SELECT id, rule_id, action_type, value FROM rule_actions WHERE rule_id = $1`
-		rowsAct, _ := r.pool.Query(ctx, queryAct, rules[i].ID)
-		for rowsAct.Next() {
-			var act domain.RuleAction
-			rowsAct.Scan(&act.ID, &act.RuleID, &act.ActionType, &act.Value)
+	queryAct := `SELECT id, rule_id, action_type, value FROM rule_actions WHERE rule_id = ANY($1) ORDER BY id`
+	rowsAct, err := r.pool.Query(ctx, queryAct, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rowsAct.Close()
+	for rowsAct.Next() {
+		var act domain.RuleAction
+		if err := rowsAct.Scan(&act.ID, &act.RuleID, &act.ActionType, &act.Value); err != nil {
+			return nil, err
+		}
+		if i, ok := byID[act.RuleID]; ok {
 			rules[i].Actions = append(rules[i].Actions, act)
 		}
-		rowsAct.Close()
+	}
+	if err := rowsAct.Err(); err != nil {
+		return nil, err
 	}
 
 	return rules, nil
+}
+
+// ApplyRuleUpdates writes the rules engine's pending changes in one
+// transaction. It touches only the three columns a rule may set, so applying a
+// category does not churn the transaction's links the way UpdateTransaction
+// does. Ownership is enforced by the WHERE clause plus the existing foreign
+// keys; a row that fails either is skipped rather than failing the batch.
+func (r *Repository) ApplyRuleUpdates(ctx context.Context, userID string, updates []domain.TransactionRuleUpdate) (int, error) {
+	if len(updates) == 0 {
+		return 0, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	const query = `
+		UPDATE transactions t
+		SET category_id = $1, subscription_id = $2, account_id = $3, updated_at = NOW()
+		FROM accounts a
+		WHERE t.id = $4 AND t.user_id = $5 AND t.deleted_at IS NULL
+		  AND a.id = $3 AND a.user_id = $5 AND a.balance_only = FALSE
+		  AND ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM categories c WHERE c.id = $1 AND c.user_id = $5))
+		  AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM subscriptions s WHERE s.id = $2 AND s.user_id = $5))
+	`
+
+	updated := 0
+	batch := &pgx.Batch{}
+	for _, u := range updates {
+		batch.Queue(query, u.CategoryID, u.SubscriptionID, u.AccountID, u.ID, userID)
+	}
+
+	br := tx.SendBatch(ctx, batch)
+	for range updates {
+		tag, err := br.Exec()
+		if err != nil {
+			br.Close()
+			return 0, err
+		}
+		updated += int(tag.RowsAffected())
+	}
+	if err := br.Close(); err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return updated, nil
 }
 
 func (r *Repository) DeleteRule(ctx context.Context, userID, id string) error {

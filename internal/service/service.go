@@ -4,14 +4,12 @@ import (
 	"context"
 
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/config"
 	"ntdkhiem/ppbudget-go/internal/domain"
 	"ntdkhiem/ppbudget-go/internal/repository"
-	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
 type Service struct {
@@ -80,11 +78,19 @@ func (s *Service) ListRulesDetailed(ctx context.Context, userID string) ([]domai
 }
 
 func (s *Service) CreateRule(ctx context.Context, userID string, rule *domain.Rule) error {
+	NormalizeRule(rule)
+	if err := ValidateRule(rule); err != nil {
+		return err
+	}
 	rule.UserID = userID
 	return s.repo.CreateRule(ctx, rule)
 }
 
 func (s *Service) UpdateRule(ctx context.Context, userID string, rule *domain.Rule) error {
+	NormalizeRule(rule)
+	if err := ValidateRule(rule); err != nil {
+		return err
+	}
 	rule.UserID = userID
 	return s.repo.UpdateRule(ctx, rule)
 }
@@ -155,124 +161,6 @@ func (s *Service) BulkUpdateTransactionsCategory(ctx context.Context, userID str
 
 func (s *Service) UpdateTransaction(ctx context.Context, userID, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink) error {
 	return s.repo.UpdateTransaction(ctx, userID, id, accountID, amount, date, description, notes, categoryID, subscriptionID, paysFor, paidBy)
-}
-
-func (s *Service) ApplyRule(ctx context.Context, userID, ruleID string, runAll bool, startDate, endDate *time.Time) (int, error) {
-	rule, err := s.repo.GetRule(ctx, userID, ruleID)
-	if err != nil {
-		return 0, err
-	}
-
-	var sDate, eDate *time.Time
-	if !runAll {
-		sDate = startDate
-		eDate = endDate
-	}
-
-	txns, err := s.repo.GetTransactionsByDateRange(ctx, userID, sDate, eDate)
-	if err != nil {
-		return 0, err
-	}
-
-	updatedCount := 0
-	for _, t := range txns {
-		match := false
-		if rule.Strictness == "all" || len(rule.Conditions) == 0 {
-			match = true
-		}
-
-		sfAccount := ""
-		if t.SimplefinAccountID != nil {
-			sfAccount = *t.SimplefinAccountID
-		}
-
-		for _, cond := range rule.Conditions {
-			condMatch := false
-			if cond.Field == "description" {
-				switch cond.Operator {
-				case "contains":
-					condMatch = strings.Contains(strings.ToLower(t.Description), strings.ToLower(cond.Value))
-				case "is_exactly":
-					condMatch = t.Description == cond.Value
-				case "starts_with":
-					condMatch = strings.HasPrefix(t.Description, cond.Value)
-				case "ends_with":
-					condMatch = strings.HasSuffix(t.Description, cond.Value)
-				}
-			} else if cond.Field == "amount" {
-				condAmt, err := money.NewFromString(cond.Value)
-				if err == nil {
-					if cond.Operator == "greater_than" {
-						condMatch = t.Amount.ToInt64() > condAmt.ToInt64()
-					} else if cond.Operator == "less_than" {
-						condMatch = t.Amount.ToInt64() < condAmt.ToInt64()
-					} else if cond.Operator == "is_exactly" {
-						condMatch = t.Amount.ToInt64() == condAmt.ToInt64()
-					}
-				}
-			} else if cond.Field == "source_account" {
-				if cond.Operator == "is_exactly" {
-					condMatch = sfAccount == cond.Value
-				}
-			}
-
-			if rule.Strictness == "all" {
-				if !condMatch {
-					match = false
-					break
-				}
-			} else { // "any"
-				if condMatch {
-					match = true
-					break
-				}
-			}
-		}
-
-		if match {
-			var newCatID *string = t.CategoryID
-			var newSubID *string = t.SubscriptionID
-			var newAccID string = t.AccountID
-			needsUpdate := false
-
-			for _, act := range rule.Actions {
-				if act.ActionType == "set_category" {
-					if act.Value != "" {
-						catID := act.Value
-						if newCatID == nil || *newCatID != catID {
-							newCatID = &catID
-							needsUpdate = true
-						}
-					}
-				}
-				if act.ActionType == "set_account" {
-					if act.Value != "" && act.Value != newAccID {
-						newAccID = act.Value
-						needsUpdate = true
-					}
-				}
-				if act.ActionType == "link_to_subscription" {
-					if act.Value != "" {
-						subID := act.Value
-						if newSubID == nil || *newSubID != subID {
-							newSubID = &subID
-							needsUpdate = true
-						}
-					}
-				}
-			}
-
-			if needsUpdate {
-				err = s.repo.UpdateTransaction(ctx, userID, t.ID, newAccID, t.Amount.ToInt64(), t.Date, t.Description, t.Notes, newCatID, newSubID, t.PaysFor, t.PaidBy)
-				if err != nil {
-					continue
-				}
-				updatedCount++
-			}
-		}
-	}
-
-	return updatedCount, nil
 }
 
 // Reports

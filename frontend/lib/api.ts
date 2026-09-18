@@ -86,19 +86,57 @@ export interface Category {
   transaction_count?: number;
 }
 
+// Canonical rules vocabulary. These strings must stay in sync with
+// internal/service/rules_vocabulary.go -- the Go test
+// TestVocabularyMatchesFrontend fails if they drift.
+export type RuleField = "description" | "amount" | "direction" | "account";
+
+export type RuleOperator =
+  | "contains"
+  | "not_contains"
+  | "is_exactly"
+  | "starts_with"
+  | "ends_with"
+  | "matches_regex"
+  | "greater_than"
+  | "less_than"
+  | "not_equals";
+
+export type RuleActionType = "set_category" | "set_account" | "link_to_subscription";
+
 export interface RuleCondition {
   id?: string;
   rule_id?: string;
-  field: string;
-  operator: string;
+  field: RuleField;
+  operator: RuleOperator;
   value: string;
 }
 
 export interface RuleAction {
   id?: string;
   rule_id?: string;
-  action_type: string;
+  action_type: RuleActionType;
   value: string;
+}
+
+export interface RulePreviewSample {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  current_category_id: string | null;
+  new_category_id: string | null;
+  current_account_id: string;
+  new_account_id: string;
+  current_subscription_id: string | null;
+  new_subscription_id: string | null;
+}
+
+export interface RulePreview {
+  total_scanned: number;
+  match_count: number;
+  would_update_count: number;
+  samples: RulePreviewSample[];
 }
 
 export interface Rule {

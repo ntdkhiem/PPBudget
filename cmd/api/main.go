@@ -155,6 +155,7 @@ func main() {
 			r.Put("/rules/{id}", h.UpdateRule)
 			r.Delete("/rules/{id}", h.DeleteRule)
 			r.Post("/rules/{id}/apply", h.ApplyRule)
+			r.Post("/rules/preview", h.PreviewRule)
 
 			// Budgets
 			r.Get("/budgets/summary", h.GetBudgetsSummary)

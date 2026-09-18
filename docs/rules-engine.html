@@ -26,7 +26,17 @@
         <section id="what-is-rules-engine">
             <h2>What is the Rules Engine?</h2>
             <p>The <strong>Rules Engine</strong> in PPBudget is an automated transaction processing system. Rather than manually assigning categories and tags to dozens of bank transactions every week, you can configure declarative <em>If &rarr; Then</em> rules.</p>
-            <p>Whenever transactions are imported from <a href="simplefin-importer.html">SimpleFin</a>, uploaded via CSV, or created manually, active rules automatically inspect the transaction properties and apply the designated category, subscription link, or tag instantly.</p>
+            <p>When transactions are imported from <a href="simplefin-importer.html">SimpleFin</a> with
+            <strong>Apply Categorization Rules</strong> enabled, active rules automatically inspect each
+            transaction and apply the designated category, account, or subscription link.</p>
+            <div class="callout callout-info">
+                <div class="callout-icon">&#8505;&#65039;</div>
+                <div class="callout-content">
+                    <strong>When rules run:</strong> rules are evaluated on the SimpleFin sync path only.
+                    Transactions added by CSV upload or created manually are not passed through the
+                    rules engine &mdash; use <em>Run rule on existing transactions</em> to categorize those.
+                </div>
+            </div>
         </section>
 
         <section id="anatomy-of-a-rule">
@@ -64,21 +74,35 @@
                 <tbody>
                     <tr>
                         <td><code>Description</code></td>
-                        <td><code>contains</code>, <code>is exactly</code>, <code>starts with</code>, <code>ends with</code></td>
-                        <td><code>Description contains "Starbucks"</code> or <code>starts with "UBER *"</code></td>
+                        <td><code>contains</code>, <code>does not contain</code>, <code>is exactly</code>, <code>starts with</code>, <code>ends with</code>, <code>matches regex</code></td>
+                        <td><code>Description contains "Starbucks"</code> or <code>matches regex "^AMZN.*"</code></td>
                     </tr>
                     <tr>
                         <td><code>Amount</code></td>
                         <td><code>greater than</code>, <code>less than</code>, <code>is exactly</code></td>
-                        <td><code>Amount greater than "100.00"</code> (e.g. flagging large expenses)</td>
+                        <td><code>Amount greater than "100.00"</code> &mdash; compares the amount's <em>size</em>, ignoring sign</td>
+                    </tr>
+                    <tr>
+                        <td><code>Direction</code></td>
+                        <td><code>is exactly</code></td>
+                        <td><code>Direction is "Outflow"</code> &mdash; pair with Amount to match only money out</td>
                     </tr>
                     <tr>
                         <td><code>Account</code></td>
-                        <td><code>is exactly</code></td>
-                        <td><code>Account is "Business Checking"</code></td>
+                        <td><code>is exactly</code>, <code>is not</code></td>
+                        <td><code>Account is "Business Checking"</code> (picked from a dropdown)</td>
                     </tr>
                 </tbody>
             </table>
+
+            <p><strong>A note on amounts.</strong> Expenses are stored as negative numbers, so
+            <code>Amount</code> conditions compare the amount's magnitude and ignore the sign:
+            <code>Amount greater than "100.00"</code> matches both a $150 purchase and a $150 deposit.
+            Add a <code>Direction</code> condition to narrow it to one or the other.</p>
+
+            <p><strong>Regular expressions</strong> use Go's RE2 syntax and are always
+            case-insensitive. A pattern that does not compile is rejected when you save the rule,
+            rather than producing a rule that quietly never matches.</p>
 
             <h3>2. Match Logic (Strictness)</h3>
             <ul>
@@ -90,10 +114,8 @@
             <p>When a transaction meets the conditions, the Rules Engine can perform any of the following actions:</p>
             <ul>
                 <li><strong>Set Category:</strong> Assigns the transaction to a specific category (e.g., <em>Groceries</em>, <em>Dining Out</em>, <em>Utilities</em>).</li>
+                <li><strong>Move to Account:</strong> Reassigns the transaction to a different account.</li>
                 <li><strong>Link to Subscription:</strong> Connects recurring transactions (such as Netflix or Spotify) directly to a tracked subscription profile.</li>
-                <li><strong>Add Tag:</strong> Attaches custom labels (e.g., <em>#tax-deductible</em>, <em>#reimbursable</em>, <em>#vacation</em>) for granular filtering.</li>
-                <li><strong>Set Budget:</strong> Allocates the transaction toward a particular budget envelope.</li>
-                <li><strong>Link as Card Payment:</strong> Flags internal transfer entries as credit card payoff transactions.</li>
             </ul>
         </section>
 
@@ -156,6 +178,9 @@
                     <div class="step-body">
                         <h3>Save &amp; Activate</h3>
                         <p>Click <strong>Save Rule</strong>. The rule is immediately active for all future transaction imports.</p>
+                        <p>You can pause a rule later without deleting it using the power button on its
+                        card, and set a <strong>Priority</strong> so that when two rules match the same
+                        transaction, the higher priority wins.</p>
                     </div>
                 </div>
             </div>
@@ -175,7 +200,12 @@
                     <li><strong>All Past Transactions:</strong> Scans your entire historical transaction database and updates every matching transaction.</li>
                     <li><strong>Specific Date Range:</strong> Choose a <em>Start Date</em> and <em>End Date</em> to limit retroactive categorization to a specific timeframe (e.g. the current month).</li>
                 </ul>
-                <p>Upon saving, PPBudget immediately processes the transactions in the background and reports how many historical transactions were updated.</p>
+                <p>Click <strong>Preview changes</strong> to see exactly how many transactions the rule
+                would alter, along with a before/after sample, <em>before</em> anything is written.
+                Saving then asks you to confirm against that count.</p>
+                <p>A retroactive apply overwrites existing categories and cannot be undone, so the
+                preview is worth reading. The preview and the apply share the same matching code, so
+                the number you confirm is the number you get.</p>
             </div>
         </section>
 

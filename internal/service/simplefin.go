@@ -416,23 +416,15 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 			}
 		}
 
-		// Apply all active rules to imported transactions
+		// Apply all active rules to imported transactions. One pass over a
+		// single load of the transaction set, rather than a full load per rule.
 		if req.ApplyRules {
-			rules, err := s.ListRulesDetailed(bgCtx, userID)
-			if err == nil {
-				var sDate *time.Time
-				if !startTime.IsZero() {
-					sDate = &startTime
-				}
-				for _, r := range rules {
-					if !r.IsActive {
-						continue
-					}
-					_, err := s.ApplyRule(bgCtx, userID, r.ID, false, sDate, nil)
-					if err != nil {
-						s.logger.Error("failed to apply rule during import", "error", err, "rule_id", r.ID, "user_id", userID)
-					}
-				}
+			var sDate *time.Time
+			if !startTime.IsZero() {
+				sDate = &startTime
+			}
+			if _, err := s.ApplyActiveRules(bgCtx, userID, false, sDate, nil); err != nil {
+				s.logger.Error("failed to apply rules during import", "error", err, "user_id", userID)
 			}
 		}
 

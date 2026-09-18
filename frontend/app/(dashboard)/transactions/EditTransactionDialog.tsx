@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Loader2, Link, Check, ChevronsUpDown, X } from "lucide-react";
+import { Loader2, Link, Check, ChevronsUpDown, X, Wand2 } from "lucide-react";
 import { Account, Category, Subscription, Transaction } from "@/lib/api";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
 
@@ -205,6 +205,8 @@ interface EditTransactionDialogProps {
   paidBy: {transaction_id: string, amount: number}[];
   setPaidBy: (val: {transaction_id: string, amount: number}[]) => void;
   transactions: Transaction[] | undefined;
+  /** Opens the rules page with a new rule prefilled from this transaction. */
+  onCreateRule?: (txn: Transaction) => void;
 }
 
 export default function EditTransactionDialog({
@@ -221,6 +223,7 @@ export default function EditTransactionDialog({
   paidBy,
   setPaidBy,
   transactions,
+  onCreateRule,
 }: EditTransactionDialogProps) {
   // Balance-only accounts don't track transactions, so they're excluded from the picker —
   // unless the transaction being edited is already (unexpectedly) on one, in which case we
@@ -326,6 +329,19 @@ export default function EditTransactionDialog({
                     </div>
                   </div>
                 </div>
+                {onCreateRule && selectedTxn && (
+                  <div className="pt-6 shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => { handleOpenChange(false); onCreateRule(selectedTxn); }}
+                      className="w-full gap-2 rounded-xl border-violet-200 text-violet-700 hover:bg-violet-50 dark:border-violet-800/50 dark:text-violet-300 dark:hover:bg-violet-500/10"
+                    >
+                      <Wand2 className="h-4 w-4" />
+                      Create a rule from this transaction
+                    </Button>
+                  </div>
+                )}
                 <div className="pt-8 flex gap-4 shrink-0">
                   <Button type="button" variant="outline" onClick={() => handleOpenChange(false)} className="flex-1 rounded-xl py-8 text-xl border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-800">
                     Cancel
