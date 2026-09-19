@@ -2,39 +2,44 @@
 
 Issues discovered while planning [`balance-snapshots.md`](balance-snapshots.md) (2026-09-13). Each was verified in code at that date; re-check before acting, since code may have moved.
 
-Status: **Open** = not started · **Covered** = handled inside the balance-snapshots plan (verify after it ships) · **Deferred** = user explicitly postponed.
+Status: **Open** = not started · **Done** = shipped and verified · **Covered** = handled inside the balance-snapshots plan (verify after it ships) · **Deferred** = user explicitly postponed.
 
 ---
 
 ## A. Correctness bugs
 
-### A1. Net-worth sign convention differs between trend and summary — Covered
+### A1. Net-worth sign convention differs between trend and summary — Done (2026-09-19)
 - `internal/repository/repository.go:684` (trend): `net_worth = assets + liabilities`
 - `internal/repository/repository.go:829-831` (reports summary): `assets - liabilities`
 - Same data gives two different net-worth numbers. The balance-snapshots plan (decision D2) standardizes on signed balances + SUM.
-- **Verify after ship:** summary `net_worth` equals the last point of `/reports/net-worth` for the current month.
+- **Verified 2026-09-19:** both paths now go through `account_balance_at`; `net_worth` is a single `SUM(account_balance_at(a.id, 'infinity'))` (`repository.go:971`). One convention, one code path.
 
-### A2. Transaction running balance is wrong under filters/pagination — Covered
+### A2. Transaction running balance is wrong under filters/pagination — Done (2026-09-19)
 - `repository.go:107` computes `running_balance` with a window function, which Postgres evaluates *after* `WHERE`. Filtering by `start_date`, search text, category, or unreviewed-only drops earlier rows from the sum.
 - Visible on `frontend/app/(dashboard)/accounts/[id]/page.tsx:179`.
 - The plan replaces it with a filter-independent `account_balance_at(...)` expression.
-- **Verify after ship:** same transaction shows the same running balance with and without a date filter.
+- **Verified 2026-09-19:** the window function is gone; `running_balance` derives from `account_balance_at(d.account_id, d.date)` (`repository.go:244`), which is independent of the `WHERE` clause.
 
-### A3. Concurrent SimpleFin imports for the same user — Open
+### A3. Concurrent SimpleFin imports for the same user — Done (2026-09-19)
 - Auto-sync is triggered twice by design: in-process cron `cmd/api/main.go:52-68` (`@every 12h`) **and** GitHub Actions `importer-cron.yml` → `POST /import/simplefin/cron` → `internal/handler/import.go:183`. Manual "Sync Now" can also overlap.
 - `SimpleFinExecute` (`internal/service/simplefin.go:205`) has no guard; it overwrites progress to `"running"` (line 275) and starts another goroutine.
 - Impact: duplicate transaction inserts are mostly blocked by `simplefin_id` UNIQUE, but content-dedup checks can race, progress counters get clobbered, rules run twice, and **duplicate summary emails** can be sent.
-- Fix idea: per-user in-process lock (`sync.Map` of mutexes / "already running → return 409"); for durability, a Postgres advisory lock (`pg_try_advisory_lock(hashtext(user_id))`). Consider removing the in-process cron entirely, since the GitHub ping exists because Render sleeps.
+- **Fixed:** per-user in-process lock in `internal/service/simplefin.go` (`tryAcquireImportLock`/`releaseImportLock`). `SimpleFinExecute` returns `apperrors.ErrConflict` when one is already running; the handler maps that to **409**, and auto-sync logs a skip at Info rather than Error. Covered by `internal/service/import_lock_test.go`, including a 50-goroutine contention test run under `-race`.
+- **Limitation:** process-local, which matches the single-instance Render deployment. More than one backend instance would need a Postgres advisory lock held on one pinned connection for the whole import.
+- Still open: removing the redundant in-process cron now that the GitHub ping exists.
 
 ### A4. SimpleFin accounts are always created as `asset` — Open
 - `internal/repository/simplefin.go:18` hardcodes `"asset"`. Credit cards/loans land in the Assets column on the Accounts page.
 - Net worth stays correct under signed balances (negative asset = same as negative liability), so this is a labeling/UX issue.
 - Fix idea: infer from SimpleFin metadata/negative balance on first import, or let the mapping wizard choose type; allow changing type later (already possible via PUT `/accounts/{id}`).
 
-### A5. `simplefin_id` is globally unique, not per user — Open
+### A5. `simplefin_id` is globally unique, not per user — Done (2026-09-19)
 - `internal/db/migrations/0001_init.up.sql:9` (accounts) and `:29` (transactions): `simplefin_id TEXT UNIQUE`; 0014 (multi-tenancy) never scoped it.
 - Impact: two PPBudget users linking the same SimpleFin connection (e.g. a couple sharing an account) collide. `UpsertSimplefinAccount`'s `ON CONFLICT (simplefin_id) DO UPDATE` could even rename another user's account; `InsertIngestedTransaction`'s `ON CONFLICT DO NOTHING` would silently skip the second user's transactions.
-- Fix idea: migration replacing both constraints with `UNIQUE (user_id, simplefin_id)` and updating the `ON CONFLICT` targets.
+- **Worse than first described:** `UpsertSimplefinAccount` had no `user_id` filter on its `DO UPDATE`, so a second user's sync matched the *first* user's row, renamed it, and returned that account's id — the second user's transactions were then written against someone else's account.
+- **Fixed:** migration `0023_user_scoped_simplefin_id` swaps both constraints to `UNIQUE (user_id, simplefin_id)`; `ON CONFLICT` targets updated in `repository/simplefin.go` and `repository/repository.go`, plus a `WHERE accounts.user_id = EXCLUDED.user_id` guard on the upsert.
+- **Verified** against a throwaway database: two users linking the same SimpleFIN id get separate accounts with names intact, same-user re-sync still upserts in place, and same-user transaction dedup still suppresses.
+- The down migration deliberately fails if two users have linked the same account (rolling back would have to delete someone's data); recovery steps are in the `.down.sql` header.
 
 ---
 
@@ -65,22 +70,26 @@ Status: **Open** = not started · **Covered** = handled inside the balance-snaps
 
 ## D. Hygiene
 
-### D1. Duplicate panic recovery — Open
-- `cmd/api/main.go:84-85` registers both `middleware.StructuredLogger` (which has its own `recover()`, `internal/middleware/middleware.go:28-35`) and chi `Recoverer`. Keep one.
+### D1. Duplicate panic recovery — Done (2026-09-19)
+- `cmd/api/main.go` registered both `middleware.StructuredLogger` (which has its own `recover()`) and chi `Recoverer`.
+- **Fixed:** dropped `chimw.Recoverer`. `StructuredLogger` is the outer middleware, so chi's would never have seen a handler panic anyway, and the structured one logs through slog with a stack trace.
 
-### D2. `ADMIN_PASSWORD` is loaded but never used — Open
-- `internal/config/config.go:13,29`; no other references. Vestigial from pre-multi-tenant auth. Remove from config, `.env.example`, `docker-compose.yml`, README deploy steps.
+### D2. `ADMIN_PASSWORD` is loaded but never used — Done (2026-09-19)
+- Worse than vestigial: `README.md` stated "Your `ADMIN_PASSWORD` secures the frontend UI via JWT tokens", which is false. Someone could set a strong value, believe the instance was protected, and have changed nothing.
+- **Fixed:** removed from `internal/config/config.go`, `.env.example`, `docker-compose.yml`, and both README references; the security section now describes how JWT sessions actually work.
 
-### D3. Insecure config defaults accepted silently — Open
-- `config.go` falls back to placeholder `JWT_SECRET` / `INGEST_API_KEY`; `MustLoad` only enforces `DATABASE_URL`. A production deploy missing `JWT_SECRET` would sign tokens with a public default.
-- Fix idea: fail startup when these equal their defaults and `FRONTEND_URL` isn't localhost (or add an `ENV=production` flag).
+### D3. Insecure config defaults accepted silently — Done (2026-09-19)
+- `config.go` fell back to placeholder `JWT_SECRET` / `INGEST_API_KEY`; `MustLoad` only enforced `DATABASE_URL`. Since `RequireJWT` trusts the `user_id` claim it carries, a deploy missing `JWT_SECRET` would accept tokens anyone could mint from the public default.
+- **Root cause was the docs:** the README's Render deploy steps never listed `JWT_SECRET` at all, so following them produced exactly this state.
+- **Fixed:** `MustLoad` became `Validate() error`; startup refuses (exit 1, logged at ERROR) when either secret equals its committed default and `FRONTEND_URL` is not a localhost address. Local development still runs on the defaults, with a warning. README now lists both as required, with a generation command. Covered by `internal/config/config_test.go`; the refuse / allow / local paths were verified by actually booting the binary.
+- **Action for the operator:** confirm `JWT_SECRET` is set in the Render environment. If it was never set, sessions have been signed with the public default — rotate it, which invalidates all existing sessions.
 
-### D4. `github.com/jackc/pgx/v4` in go.mod but not imported — Open
-- `go.mod:10`; no `.go` file imports it. Run `go mod tidy` and confirm it drops (it may be pulled in indirectly by a tool).
+### D4. `github.com/jackc/pgx/v4` in go.mod but not imported — Done (2026-09-19)
+- **Fixed:** `go mod tidy` dropped `pgx/v4` and eight transitive dependencies (`jackc/pgconn`, `pgtype`, `pgproto3/v2`, `chunkreader/v2`, `pgio`, `puddle` v1 and others); `golang.org/x/crypto` became a direct requirement. Full suite still green.
 
-### D5. Hydration-mismatch warning on every page in dev — Open
+### D5. Hydration-mismatch warning on every page in dev — Done (2026-09-19)
 - React warns that `<html>` className/style differ between server and client (`dark` class, `color-scheme`) — set by `next-themes` after SSR. Seen in the dev console on `/accounts` during balance-snapshot UI testing; pre-existing.
-- Fix idea: add `suppressHydrationWarning` to `<html>` in `frontend/app/layout.tsx` (the documented `next-themes` setup).
+- **Fixed:** added `suppressHydrationWarning` to `<html>` in `frontend/app/layout.tsx`, the documented `next-themes` setup.
 
 ---
 

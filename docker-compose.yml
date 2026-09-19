@@ -28,7 +28,6 @@ services:
       - PORT=8080
       - INGEST_API_KEY=super-secret-api-key
       - JWT_SECRET=super-secret-jwt-key
-      - ADMIN_PASSWORD=adminpassword
       - FRONTEND_URL=http://localhost:3000
     depends_on:
       db:

@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 	"ntdkhiem/ppbudget-go/internal/middleware"
 	"ntdkhiem/ppbudget-go/internal/service"
 )
@@ -84,6 +86,12 @@ func (h *Handler) SimpleFinExecute(w http.ResponseWriter, r *http.Request) {
 
 	err := h.svc.SimpleFinExecute(r.Context(), userID, req)
 	if err != nil {
+		// An overlapping sync is an expected condition, not a server fault:
+		// the cron and a manual "Sync Now" can legitimately collide.
+		if errors.Is(err, apperrors.ErrConflict) {
+			writeError(w, http.StatusConflict, "an import is already running; wait for it to finish")
+			return
+		}
 		h.logger.Error("failed to execute simplefin import", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "failed to execute import")
 		return

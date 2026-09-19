@@ -726,7 +726,7 @@ func TestSimpleFinExecuteSavedNewMappingOnFlaggedAccountIntegration(t *testing.T
 // After a normal sync imports transactions, enabling then disabling
 // balance-only (which soft-deletes but never restores), and re-syncing with
 // the same SimpleFin transactions plus one genuinely new one: the two old
-// ids must stay soft-deleted (ON CONFLICT (simplefin_id) DO NOTHING, not
+// ids must stay soft-deleted (ON CONFLICT (user_id, simplefin_id) DO NOTHING, not
 // resurrected), only the new transaction ends up live, and the balance
 // snapshot still updates.
 func TestSimpleFinReimportAfterDisableIntegration(t *testing.T) {

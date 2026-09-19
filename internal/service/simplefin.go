@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
@@ -243,8 +245,61 @@ func updateImportProgress(userID string, updateFn func(*ImportStatus)) {
 	userProgress.m[userID] = p
 }
 
+// importLocks serializes imports per user.
+//
+// Auto-sync fires from two places by design -- the in-process cron in
+// cmd/api/main.go and the GitHub Actions ping to /import/simplefin/cron -- and
+// a manual "Sync Now" can overlap either. Without a guard, two runs clobber
+// each other's progress counters, apply rules twice, and send duplicate
+// summary emails.
+//
+// This is process-local, which matches the single-instance deployment. Running
+// more than one backend instance would need a Postgres advisory lock (held on
+// one pinned connection for the whole import) instead.
+var importLocks = struct {
+	sync.Mutex
+	running map[string]bool
+}{running: make(map[string]bool)}
+
+// tryAcquireImportLock marks an import as running for userID, reporting false
+// if one already is.
+func tryAcquireImportLock(userID string) bool {
+	importLocks.Lock()
+	defer importLocks.Unlock()
+	if importLocks.running[userID] {
+		return false
+	}
+	importLocks.running[userID] = true
+	return true
+}
+
+func releaseImportLock(userID string) {
+	importLocks.Lock()
+	defer importLocks.Unlock()
+	delete(importLocks.running, userID)
+}
+
+// ImportRunning reports whether an import is currently in flight for userID.
+func ImportRunning(userID string) bool {
+	importLocks.Lock()
+	defer importLocks.Unlock()
+	return importLocks.running[userID]
+}
+
 // 3. Execute
 func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req SimplefinExecuteRequest) error {
+	if !tryAcquireImportLock(userID) {
+		return fmt.Errorf("%w: an import is already running for this user", apperrors.ErrConflict)
+	}
+	// Ownership passes to the background goroutine once it starts; until then
+	// every early return must release, or the user is locked out until restart.
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			releaseImportLock(userID)
+		}
+	}()
+
 	accountsURL := req.AccessURL + "/accounts"
 
 	// Format start date if provided
@@ -361,7 +416,12 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 		}
 	}
 
+	handedOff = true
 	go func() {
+		// The import owns the per-user lock from here until it finishes, so a
+		// concurrent sync gets a 409 instead of racing this one.
+		defer releaseImportLock(userID)
+
 		// Use a background context for the goroutine since the request context might be cancelled
 		bgCtx := context.Background()
 		var importedTxns []domain.Transaction
@@ -771,7 +831,13 @@ func (s *Service) RunAutoSync(ctx context.Context) error {
 		}
 
 		if err := s.SimpleFinExecute(ctx, userCfg.UserID, req); err != nil {
-			s.logger.Error("auto-sync: failed to execute simplefin import for user", "error", err, "user_id", userCfg.UserID)
+			// Both cron paths (in-process and the GitHub Actions ping) can fire
+			// close together, so a skipped run is routine, not a failure.
+			if errors.Is(err, apperrors.ErrConflict) {
+				s.logger.Info("auto-sync: skipped, an import is already running", "user_id", userCfg.UserID)
+			} else {
+				s.logger.Error("auto-sync: failed to execute simplefin import for user", "error", err, "user_id", userCfg.UserID)
+			}
 		} else {
 			s.logger.Info("auto-sync: started import for user", "user_id", userCfg.UserID)
 		}

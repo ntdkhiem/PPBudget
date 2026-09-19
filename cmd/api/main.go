@@ -30,7 +30,13 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
-	cfg.MustLoad()
+	if err := cfg.Validate(); err != nil {
+		logger.Error("refusing to start: invalid configuration", "error", err)
+		os.Exit(1)
+	}
+	if warning := cfg.InsecureDefaultsWarning(); warning != "" {
+		logger.Warn("insecure configuration", "warning", warning)
+	}
 
 	// 1. Init DB Pool
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -79,10 +85,13 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	// Global Middleware
+	// Global Middleware.
+	//
+	// StructuredLogger recovers panics itself (logging them through slog with a
+	// stack trace) and sits outside chi's Recoverer, so the chi one would never
+	// see a handler panic anyway. Only one recovery is registered.
 	r.Use(chimw.RequestID)
 	r.Use(middleware.StructuredLogger(logger))
-	r.Use(chimw.Recoverer)
 
 	// Routes
 	r.Route("/api/v1", func(r chi.Router) {

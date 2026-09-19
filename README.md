@@ -143,7 +143,8 @@ npm run dev
 - Add your Environment Variables:
   - `DATABASE_URL`: Your Supabase Pooler URL *(Note: Append `?default_query_exec_mode=exec` to prevent PgBouncer statement caching errors!)*
   - `FRONTEND_URL`: Your Vercel domain (e.g., `https://ppbudget.vercel.app`)
-  - `ADMIN_PASSWORD`: A secure password to log into the frontend.
+  - `JWT_SECRET`: **Required.** A long random string used to sign session tokens. Generate one with `openssl rand -base64 48`. The backend refuses to start if this is left at its default when `FRONTEND_URL` is not localhost.
+  - `INGEST_API_KEY`: **Required.** A random secure string guarding the ingest endpoints. Must match the `INGEST_API_KEY` GitHub secret in step 4.
   - `RESEND_API_KEY`: Your Resend API key (optional).
   - `RESEND_FROM_EMAIL`: `onboarding@resend.dev` (optional).
 
@@ -164,6 +165,6 @@ To enable auto-syncs and nightly database backups, add the following **Repositor
 
 ## 🔒 Security & Privacy
 
-- Your `ADMIN_PASSWORD` secures the frontend UI via JWT tokens.
+- Accounts are password-protected; each session is a JWT signed with your `JWT_SECRET`. Anyone who knows that secret can mint a token for any account, so treat it like a database password: set it to a long random value, never commit it, and rotate it if it leaks (rotating invalidates all existing sessions).
 - Bank credentials are never seen by the application; SimpleFin only provides read-only transaction feeds.
 - The nightly database backups stored on GitHub are encrypted via `openssl aes-256-cbc`. They cannot be read without the `BACKUP_PASSWORD`.

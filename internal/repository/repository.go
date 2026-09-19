@@ -114,7 +114,7 @@ func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, u
 	query := `
 		INSERT INTO transactions (account_id, amount, date, description, simplefin_id, category_id, subscription_id, is_reviewed, user_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (simplefin_id) DO NOTHING
+		ON CONFLICT (user_id, simplefin_id) DO NOTHING
 		RETURNING id
 	`
 	args := []interface{}{accountID, amount.ToInt64(), date, description, simplefinTxID, categoryID, subscriptionID, isReviewed, userID}
