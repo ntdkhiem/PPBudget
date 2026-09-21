@@ -135,6 +135,12 @@ Discovered while fixing the UI/engine vocabulary drift. See migration
 - `POST /rules/{id}/apply` overwrites `category_id` / `subscription_id` / `account_id` with no record of the previous values. The new preview endpoint makes the blast radius visible beforehand, but a mistaken apply is still unrecoverable.
 - Fix idea: record the prior values in an `apply_runs` table and offer "undo last apply", or reuse the same table to satisfy C1's need for durable run history.
 
+### F5. Recurring Payments showed every subscription unpaid — Done (2026-09-21)
+- Reported as "no subscription gets linked by the rules". The rules engine was fine; the page never got the transactions it compares against.
+- `frontend/app/(dashboard)/subscriptions/page.tsx` walked the cursor-paginated `/transactions` endpoint with `while (res.length < 50)` as its stop condition, but the server pages at 100 (`internal/repository/repository.go`) and serialized an empty page as `null`, not `[]`. So any range whose transaction count left a final page of 0 or 50-99 rows triggered one request past the end, `null.length` threw, and with `retry: false` in `providers.tsx` the query failed silently — `transactions` stayed `undefined`, every `t.subscription_id === sub.id` check was skipped, and "Expected and not yet paid" reported the full expected total. Roughly half of all transaction counts hit it, and only for a busy enough month, which is why it looked intermittent.
+- **Fixed:** the walk now coalesces the response and stops on an empty page instead of guessing a page size, and `ListTransactions` builds a non-nil slice so the endpoint returns `[]`.
+- Covered by `internal/service/rules_apply_test.go`, which pins the previously untested `link_to_subscription` action (set, combined with a category, no-op when already linked, priority resolution).
+
 ### F4. Account conditions unresolvable after migration — Open (verify)
 - Migration 0022 resolves old free-text account values to `accounts.id` by SimpleFIN id, then by a case-insensitive unique name match. A value matching neither (a renamed or deleted account, or an ambiguous name) is left as-is and will never match.
 - **Verify after ship:** open Settings → Rules and check that every Account condition shows an account name rather than a raw string.

@@ -20,6 +20,10 @@ import { PageContainer } from "@/components/page-container";
 import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
 
+// Upper bound on the cursor walk below: the server pages transactions at 100,
+// so this covers 100k transactions in one date range before giving up.
+const MAX_TRANSACTION_PAGES = 1000;
+
 function SubscriptionsContent() {
   const queryClient = useQueryClient();
   const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
@@ -37,30 +41,34 @@ function SubscriptionsContent() {
     queryFn: () => apiFetch<Subscription[]>("/subscriptions", {}, token),
   });
 
+  // "Paid this period" needs every transaction in the range, not just the first
+  // page, so walk the cursor until a page comes back empty.
+  //
+  // Two things here are easy to get wrong and both made every subscription look
+  // unpaid: the endpoint serializes an empty page as `null` rather than `[]`, so
+  // the response has to be coalesced before it is read; and the stop condition
+  // must not assume a page size, since guessing one that is smaller than the
+  // server's truncates the range silently.
   const { data: transactions, isLoading: loadingTxns } = useQuery<Transaction[]>({
     queryKey: ["transactions", "all", queryParams],
     queryFn: async () => {
-      let allTxns: Transaction[] = [];
-      let currentCursorDate: string | null = null;
-      let currentCursorId: string | null = null;
-      let hasMore = true;
+      const allTxns: Transaction[] = [];
+      let cursor: { date: string; id: string } | null = null;
 
-      while (hasMore) {
+      // Bounded so a paging change on the server can never spin forever.
+      for (let i = 0; i < MAX_TRANSACTION_PAGES; i++) {
         const params = new URLSearchParams(queryParams);
-        if (currentCursorDate && currentCursorId) {
-          params.append("cursor_date", currentCursorDate);
-          params.append("cursor_id", currentCursorId);
+        if (cursor) {
+          params.append("cursor_date", cursor.date);
+          params.append("cursor_id", cursor.id);
         }
-        const res = await apiFetch<Transaction[]>(`/transactions?${params.toString()}`, {}, token);
-        if (res.length > 0) {
-          allTxns = [...allTxns, ...res];
-          const last = res[res.length - 1];
-          currentCursorDate = last.date;
-          currentCursorId = last.id;
-        }
-        if (res.length < 50) {
-          hasMore = false;
-        }
+        const page =
+          (await apiFetch<Transaction[] | null>(`/transactions?${params.toString()}`, {}, token)) ?? [];
+        if (page.length === 0) break;
+
+        allTxns.push(...page);
+        const last = page[page.length - 1];
+        cursor = { date: last.date, id: last.id };
       }
       return allTxns;
     },

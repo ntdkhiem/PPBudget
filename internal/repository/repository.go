@@ -267,7 +267,10 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 	}
 	defer rows.Close()
 
-	var txns []domain.TransactionWithBalance
+	// Non-nil so an empty page serializes as `[]` rather than `null`. Clients
+	// walk this endpoint's cursor until a page comes back empty, and `null`
+	// makes the page past the last one look like a malformed response.
+	txns := make([]domain.TransactionWithBalance, 0)
 	for rows.Next() {
 		var t domain.TransactionWithBalance
 		var amount int64
