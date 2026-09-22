@@ -191,3 +191,31 @@ type SearchResult struct {
 	Accounts      []Account      `json:"accounts"`
 	Subscriptions []Subscription `json:"subscriptions"`
 }
+
+// Planning
+
+type PlanningMonth struct {
+	Month      time.Time   `json:"month"`
+	Income     money.Money `json:"income"`
+	Outflow    money.Money `json:"outflow"`
+	Needs      money.Money `json:"needs"`      // spend in categories budgeted 'needs' that month
+	Wants      money.Money `json:"wants"`      // spend in categories budgeted 'wants' that month
+	Savings    money.Money `json:"savings"`    // spend in categories budgeted 'savings' that month
+	Unbucketed money.Money `json:"unbucketed"` // spend in categories with no budget row that month
+	NetWorth   money.Money `json:"net_worth"`
+}
+
+type PlanningAccount struct {
+	ID      string      `json:"id"`
+	Name    string      `json:"name"`
+	Type    string      `json:"type"`
+	Balance money.Money `json:"balance"`
+}
+
+type PlanningBaseline struct {
+	Months           []PlanningMonth   `json:"months"`
+	LiquidAssets     money.Money       `json:"liquid_assets"`     // sum of asset accounts, now
+	TotalLiabilities money.Money       `json:"total_liabilities"` // negative
+	NetWorth         money.Money       `json:"net_worth"`
+	Accounts         []PlanningAccount `json:"accounts"`
+}

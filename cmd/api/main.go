@@ -176,6 +176,7 @@ func main() {
 			r.Get("/reports/summary", h.GetReportsSummary)
 			r.Get("/reports/net-worth", h.GetNetWorthTrend)
 			r.Get("/reports/spending", h.GetSpendingByCategory)
+			r.Get("/reports/planning", h.GetReportsPlanning)
 			// Subscriptions
 			r.Get("/subscriptions", h.ListSubscriptions)
 			r.Post("/subscriptions", h.CreateSubscription)

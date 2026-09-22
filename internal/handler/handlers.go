@@ -984,6 +984,37 @@ func (h *Handler) GetReportsSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, summary)
 }
 
+// GetReportsPlanning returns the trailing-month baseline the financial
+// planning page projects from. It is deliberately independent of the global
+// date range: planning always reads a trailing window and projects forward.
+func (h *Handler) GetReportsPlanning(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	months := 6
+	if v := r.URL.Query().Get("months"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			months = parsed
+		}
+	}
+	if months < 1 {
+		months = 1
+	}
+	if months > 24 {
+		months = 24
+	}
+
+	baseline, err := h.svc.GetPlanningBaseline(r.Context(), userID, months)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch planning baseline")
+		return
+	}
+	writeJSON(w, http.StatusOK, baseline)
+}
+
 func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok || userID == "" {

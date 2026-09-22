@@ -202,3 +202,31 @@ export interface DashboardSummary {
   net_worth: number;
 }
 
+/** One trailing month of the planning baseline. All amounts in cents, positive. */
+export interface PlanningMonth {
+  month: string; // ISO timestamp of the month start
+  income: number;
+  outflow: number;
+  needs: number;
+  wants: number;
+  savings: number;
+  /** Outflow in categories with no budget row — the confidence signal. */
+  unbucketed: number;
+  net_worth: number;
+}
+
+export interface PlanningAccount {
+  id: string;
+  name: string;
+  type: string;
+  balance: number; // cents; liabilities are negative
+}
+
+export interface PlanningBaseline {
+  months: PlanningMonth[];
+  liquid_assets: number;
+  total_liabilities: number; // negative
+  net_worth: number;
+  accounts: PlanningAccount[];
+}
+

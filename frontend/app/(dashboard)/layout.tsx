@@ -5,7 +5,7 @@ import { useEffect, useState, ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { LayoutDashboard, ReceiptText, ListChecks, PieChart, Settings, SlidersHorizontal, LogOut, Wallet, Database, Repeat, Menu, Tag } from "lucide-react";
+import { LayoutDashboard, ReceiptText, ListChecks, PieChart, Settings, SlidersHorizontal, LogOut, Wallet, Database, Repeat, Menu, Tag, Compass } from "lucide-react";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { useDateRange } from "@/app/contexts/DateRangeContext";
 import { GlobalSearch } from "@/components/global-search";
@@ -123,7 +123,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     { href: "/accounts", label: "Accounts", icon: Wallet },
     { href: "/transactions", label: "Transactions", icon: ReceiptText },
     { href: "/budgets", label: "Budgets", icon: PieChart },
-    { href: "/subscriptions", label: "Recurring Payments", icon: Repeat },
+    { href: "/planning", label: "Planning", icon: Compass },
+  { href: "/subscriptions", label: "Recurring Payments", icon: Repeat },
     { href: "/settings/categories", label: "Categories", icon: Tag },
     { href: "/settings/rules", label: "Rules", icon: SlidersHorizontal },
     { href: "/settings/importer", label: "Data Importer", icon: Database },

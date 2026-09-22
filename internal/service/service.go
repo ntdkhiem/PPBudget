@@ -176,3 +176,7 @@ func (s *Service) GetSpendingByCategory(ctx context.Context, userID string, star
 func (s *Service) GetReportsSummary(ctx context.Context, userID string, startDate, endDate time.Time) (*domain.ReportsSummary, error) {
 	return s.repo.GetReportsSummary(ctx, userID, startDate, endDate)
 }
+
+func (s *Service) GetPlanningBaseline(ctx context.Context, userID string, months int) (*domain.PlanningBaseline, error) {
+	return s.repo.GetPlanningBaseline(ctx, userID, months)
+}
