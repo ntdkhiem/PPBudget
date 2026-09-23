@@ -52,7 +52,7 @@ function GoalRow({
               </span>
             )}
           </div>
-          <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-1">
+          <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mt-1">
             {formatCurrency(progress.currentCents)} of {formatCurrency(progress.targetCents)}
             {progress.targetDate && <> · by {formatDate(progress.targetDate)}</>}
           </div>
@@ -294,7 +294,7 @@ export function GoalsProgress({
         ))}
 
         {plan.goals.length > 0 && (
-          <p className="text-xs text-slate-400 dark:text-slate-500">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Goals are funded one at a time in priority order, each taking the full{" "}
             {formatCurrency(goalPool)} a month once the cushion above is complete.
           </p>

@@ -183,6 +183,30 @@ func main() {
 			r.Put("/subscriptions/{id}", h.UpdateSubscription)
 			r.Delete("/subscriptions/{id}", h.DeleteSubscription)
 
+			// Wealth Strategy
+			//
+			// Supersedes /settings/values/{financial_plan,retirement_plan} as
+			// the store for planning data: typed columns and validated writes
+			// rather than an unvalidated free-form string.
+			r.Get("/wealth/profile", h.GetWealthProfile)
+			r.Put("/wealth/profile", h.UpdateWealthProfile)
+			r.Get("/wealth/profile/derived", h.GetDerivedProfile)
+			r.Get("/wealth/fields", h.GetWealthFields)
+			r.Get("/wealth/quests", h.ListQuests)
+			r.Put("/wealth/quests/{id}", h.UpdateQuestStatus)
+			r.Get("/wealth/quests/{id}/events", h.ListQuestEvents)
+			r.Get("/wealth/paystub", h.GetPaystub)
+			r.Put("/wealth/paystub", h.UpsertPaystub)
+			r.Get("/wealth/account-terms", h.ListAccountTerms)
+			r.Put("/wealth/account-terms/{id}", h.UpsertAccountTerms)
+			r.Get("/wealth/goals", h.ListGoals)
+			r.Post("/wealth/goals", h.UpsertGoal)
+			r.Put("/wealth/goals/{id}", h.UpsertGoal)
+			r.Delete("/wealth/goals/{id}", h.DeleteGoal)
+			r.Get("/wealth/retirement-accounts", h.ListRetirementAccountTerms)
+			r.Put("/wealth/retirement-accounts/{id}", h.UpsertRetirementAccountTerms)
+			r.Delete("/wealth/retirement-accounts/{id}", h.DeleteRetirementAccountTerms)
+
 			// Search
 			r.Get("/search", h.GlobalSearch)
 		})

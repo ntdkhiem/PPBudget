@@ -335,7 +335,7 @@ export default function AccountDetailPage() {
                   <button
                     type="button"
                     onClick={() => setSnapshotToDelete(snap)}
-                    className="shrink-0 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                    className="shrink-0 text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
                     aria-label="Delete balance snapshot"
                   >
                     <Trash2 className="h-4 w-4" />

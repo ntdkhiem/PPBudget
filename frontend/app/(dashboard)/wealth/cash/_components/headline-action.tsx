@@ -67,7 +67,7 @@ export function HeadlineAction({
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">
             Do this next
           </p>
 
@@ -94,7 +94,7 @@ export function HeadlineAction({
             )}
 
             {showCrossover && (
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
                 Everything below is funded in {formatMonths(waterfall.crossoverMonths)}, after
                 which the whole surplus is invested.
               </span>

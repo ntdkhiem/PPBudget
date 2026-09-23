@@ -18,7 +18,7 @@ function TrendCell({ trend, target }: { trend: Trend; target?: string }) {
 
   return (
     <div className="min-w-0 flex-1 px-4 py-3 sm:py-0">
-      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{trend.label}</div>
+      <div className="text-xs font-medium text-slate-600 dark:text-slate-400">{trend.label}</div>
 
       <div className="mt-1 flex items-baseline gap-2">
         <span className="text-lg font-bold font-heading text-slate-900 dark:text-white tabular-nums">
@@ -26,7 +26,7 @@ function TrendCell({ trend, target }: { trend: Trend; target?: string }) {
         </span>
 
         {trend.unknown ? (
-          <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
             not enough history
           </span>
         ) : (
@@ -34,7 +34,7 @@ function TrendCell({ trend, target }: { trend: Trend; target?: string }) {
             className={cn(
               "inline-flex items-center gap-0.5 text-xs font-semibold",
               trend.direction === "flat"
-                ? "text-slate-400 dark:text-slate-500"
+                ? "text-slate-500 dark:text-slate-400"
                 : trend.good
                   ? "text-emerald-600 dark:text-emerald-400"
                   : "text-rose-600 dark:text-rose-400",
@@ -50,7 +50,7 @@ function TrendCell({ trend, target }: { trend: Trend; target?: string }) {
         )}
       </div>
 
-      {target && <div className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{target}</div>}
+      {target && <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">{target}</div>}
     </div>
   );
 }
@@ -79,15 +79,16 @@ export function TrendStrip({
             trend={trend}
             target={
               trend.key === "savingsRate"
-                ? `${formatPct(targetRate)} target on ${STRATEGY_PROFILES[plan.strategy].label.toLowerCase()}`
+                ? `${formatPct(targetRate)} of take-home on ${STRATEGY_PROFILES[plan.strategy].label.toLowerCase()}`
                 : undefined
             }
           />
         ))}
       </div>
-      <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400 dark:border-slate-800 dark:text-slate-500">
+      <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400">
         Latest complete month, with the change measured across the two halves of the window — one
-        odd month on its own does not make a trend.
+        odd month on its own does not make a trend. Income here is what actually landed in your
+        accounts, so savings rate is measured after tax.
       </p>
     </div>
   );

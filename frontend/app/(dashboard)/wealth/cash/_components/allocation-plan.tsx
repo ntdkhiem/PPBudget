@@ -62,10 +62,10 @@ function StrategyPicker({
               </span>
               {selected && <Check className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />}
             </div>
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-1">
+            <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mt-1">
               {formatPct(profile.targetSavingsRate)} of income saved
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{profile.blurb}</p>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">{profile.blurb}</p>
           </button>
         );
       })}
@@ -119,7 +119,7 @@ export function AllocationPlan({
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
               Priority waterfall
             </h3>
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
               {formatCurrency(waterfall.poolCents)}/mo surplus
               {waterfall.targetPoolCents > 0 && (
                 <> · strategy targets {formatCurrency(waterfall.targetPoolCents)}</>
@@ -211,7 +211,7 @@ export function AllocationPlan({
                           ))}
                       </div>
 
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                         {stage.blockedReason ?? stage.description}
                       </p>
 

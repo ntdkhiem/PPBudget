@@ -14,7 +14,7 @@ export function PageHeader({ title, description, children, className, ...props }
         <h1 className="text-4xl font-bold font-heading text-slate-900 dark:text-white tracking-tight">
           {title}
         </h1>
-        {description && <p className="text-lg text-slate-500 mt-2">{description}</p>}
+        {description && <p className="text-lg text-slate-500 dark:text-slate-400 mt-2">{description}</p>}
       </div>
       {children && <div className="flex shrink-0 gap-3">{children}</div>}
     </div>

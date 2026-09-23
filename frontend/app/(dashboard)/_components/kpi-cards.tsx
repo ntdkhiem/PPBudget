@@ -94,7 +94,7 @@ export function SafeToSpendCard() {
 
   return (
     <StatCard title="Safe to Spend" icon={ShieldCheck} tone="emerald" action={`${monthName} budget`}>
-      <KpiValue loading={isLoading} className={hasBudgets ? undefined : "text-slate-400 dark:text-slate-500"}>
+      <KpiValue loading={isLoading} className={hasBudgets ? undefined : "text-slate-500 dark:text-slate-400"}>
         {hasBudgets ? formatCurrency(Math.max(0, allocated - spent)) : "—"}
       </KpiValue>
       <KpiDetail loading={isLoading}>

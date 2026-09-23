@@ -234,7 +234,7 @@ function SubscriptionsContent() {
                         }
                         
                         return (
-                          <span className={`inline-flex items-center gap-1.5 text-sm italic ${isPastDue ? 'text-amber-500 dark:text-amber-400 font-medium' : 'text-slate-400 dark:text-slate-500'}`}>
+                          <span className={`inline-flex items-center gap-1.5 text-sm italic ${isPastDue ? 'text-amber-500 dark:text-amber-400 font-medium' : 'text-slate-500 dark:text-slate-400'}`}>
                             <CircleDashed size={14} /> {expectedText}
                           </span>
                         );

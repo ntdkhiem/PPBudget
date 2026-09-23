@@ -109,11 +109,6 @@ export interface Baseline {
   monthsOfData: number;
 }
 
-function mean(values: number[]): number {
-  if (values.length === 0) return 0;
-  return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
-}
-
 /**
  * Months with no transactions at all are excluded from the averages: a month
  * that has not happened yet (or predates the data) would otherwise drag every
@@ -133,51 +128,14 @@ export function completeMonths(months: PlanningMonth[]): PlanningMonth[] {
   return active.slice(0, -1);
 }
 
-export function computeBaseline(
-  baseline: PlanningBaseline | undefined,
-  plan: FinancialPlan,
-): Baseline {
-  const months = completeMonths(baseline?.months ?? []);
-
-  const computedIncome = mean(months.map((m) => m.income));
-  const computedEssentials = mean(months.map((m) => m.needs));
-  const monthlyOutflow = mean(months.map((m) => m.outflow));
-
-  const liquidIds = plan.overrides.liquid_account_ids;
-  const computedLiquid = baseline?.liquid_assets ?? 0;
-  const liquidAssets =
-    liquidIds && liquidIds.length > 0
-      ? (baseline?.accounts ?? [])
-          .filter((a) => a.type === "asset" && liquidIds.includes(a.id))
-          .reduce((sum, a) => sum + a.balance, 0)
-      : computedLiquid;
-
-  const monthlyIncome = plan.overrides.monthly_income_cents ?? computedIncome;
-  const essentialMonthly = plan.overrides.essential_expenses_cents ?? computedEssentials;
-
-  const totalOutflow = months.reduce((s, m) => s + m.outflow, 0);
-  const totalUnbucketed = months.reduce((s, m) => s + m.unbucketed, 0);
-
-  return {
-    monthlyIncome,
-    monthlyOutflow,
-    essentialMonthly,
-    monthlyWants: mean(months.map((m) => m.wants)),
-    monthlySavingsSpend: mean(months.map((m) => m.savings)),
-    monthlyUnbucketed: mean(months.map((m) => m.unbucketed)),
-    monthlySurplus: monthlyIncome - monthlyOutflow,
-    liquidAssets,
-    totalLiabilities: baseline?.total_liabilities ?? 0,
-    netWorth: baseline?.net_worth ?? 0,
-    bucketCoverage: totalOutflow > 0 ? 1 - totalUnbucketed / totalOutflow : 1,
-    usedOverrides: {
-      income: plan.overrides.monthly_income_cents != null,
-      essentials: plan.overrides.essential_expenses_cents != null,
-      liquid: Boolean(liquidIds && liquidIds.length > 0),
-    },
-    monthsOfData: months.length,
-  };
-}
+// computeBaseline() lived here.
+//
+// It is gone rather than merely unused: the same averaging now happens once, in
+// ComputeBaseline in internal/service/wealth_baseline.go, and is served in the
+// plan summary. Two implementations of one average -- one of which had to match
+// the other's JavaScript rounding to stay in step -- is a parity problem
+// waiting to happen, and deleting one is a better answer to it than testing
+// both. The Baseline type stays as the shape the summary is mapped onto.
 
 // ------------------------------------------------------------ health metrics
 
@@ -221,6 +179,12 @@ export function coverageWarning(b: Baseline): string | null {
 }
 
 // -------------------------------------------------------------- allocation
+//
+// The Waterfall types survive; computeWaterfall() does not. Sequencing moved to
+// internal/service/quests_catalog.go, and the browser now renders the answer it
+// is given rather than working out its own -- which had high-APR debt ahead of
+// the starter cushion, so the two would have disagreed about what to do first.
+// See wealth/_components/plan-adapters.ts for the mapping.
 
 export type StageKind = "starter_ef" | "high_apr_debt" | "full_ef" | "invest";
 
@@ -254,118 +218,17 @@ export interface Waterfall {
   crossoverMonths: number | null;
 }
 
+/**
+ * Months to cover a remaining amount at a monthly rate.
+ *
+ * Shared by the goal schedule. Null means "never at this rate", which is the
+ * honest answer when nothing is being contributed -- a very large number would
+ * read as a plan.
+ */
 function monthsFor(remaining: number, monthly: number): number | null {
   if (remaining <= 0) return 0;
   if (monthly <= 0) return null;
   return Math.ceil(remaining / monthly);
-}
-
-/**
- * Routes the monthly surplus through funding priorities in strict order.
- *
- * A waterfall directs the whole flow at the topmost unfilled stage rather than
- * splitting it, so each stage's timeline starts only once the stages above it
- * finish. That sequencing is the point: it produces the crossover month, when
- * the cushion is done and the same dollars start being invested instead.
- *
- * The pool is actual surplus, not the strategy's target share — allocating
- * money you do not have would make every date below a fiction. The target is
- * returned alongside so the UI can show the gap.
- */
-export function computeWaterfall(
-  b: Baseline,
-  plan: FinancialPlan,
-  accounts: PlanningAccount[],
-): Waterfall {
-  const targetPoolCents = Math.round(
-    b.monthlyIncome * STRATEGY_PROFILES[plan.strategy].targetSavingsRate,
-  );
-  const poolCents = Math.max(0, b.monthlySurplus);
-
-  const starterTarget = b.essentialMonthly;
-  const fullTarget = b.essentialMonthly * plan.emergency_fund.target_months;
-
-  // The two EF stages partition one shortfall, so they never double-count.
-  const starterGap = Math.max(0, starterTarget - b.liquidAssets);
-  const totalEfGap = Math.max(0, fullTarget - b.liquidAssets);
-  const fullGap = Math.max(0, totalEfGap - starterGap);
-
-  const liabilityTotal = accounts
-    .filter((a) => a.type === "liability")
-    .reduce((s, a) => s + Math.abs(a.balance), 0);
-  const highAprBalance = plan.debts
-    .filter((d) => d.apr >= HIGH_APR_THRESHOLD)
-    .reduce((sum, d) => {
-      const acct = accounts.find((a) => a.id === d.account_id);
-      return sum + (acct ? Math.abs(acct.balance) : 0);
-    }, 0);
-
-  const specs: Array<Omit<WaterfallStage, "monthlyCents" | "monthsToComplete" | "startsInMonths" | "active" | "complete">> = [
-    {
-      kind: "starter_ef",
-      label: "Starter emergency fund",
-      description: "One month of essentials, in cash",
-      remainingCents: starterGap,
-    },
-    {
-      kind: "high_apr_debt",
-      label: "High-interest debt",
-      description: `Balances above ${formatPct(HIGH_APR_THRESHOLD)} APR`,
-      remainingCents: highAprBalance,
-      blockedReason:
-        plan.debts.length === 0 && liabilityTotal > 0
-          ? "You have liabilities but no interest rates entered, so this stage is skipped."
-          : undefined,
-    },
-    {
-      kind: "full_ef",
-      label: `Emergency fund to ${plan.emergency_fund.target_months} months`,
-      description: "Topping the cushion up to your target",
-      remainingCents: fullGap,
-    },
-  ];
-
-  let elapsed: number | null = 0;
-  let activeAssigned = false;
-
-  const stages: WaterfallStage[] = specs.map((spec) => {
-    const remaining = spec.remainingCents ?? 0;
-    const complete = remaining <= 0;
-    const months = monthsFor(remaining, poolCents);
-
-    const startsInMonths = complete ? elapsed : elapsed;
-    const active = !complete && !activeAssigned;
-    if (active) activeAssigned = true;
-
-    if (!complete) {
-      elapsed = elapsed === null || months === null ? null : elapsed + months;
-    }
-
-    return {
-      ...spec,
-      monthlyCents: complete ? 0 : poolCents,
-      monthsToComplete: complete ? 0 : months,
-      startsInMonths,
-      active,
-      complete,
-    };
-  });
-
-  const crossoverMonths = elapsed;
-
-  stages.push({
-    kind: "invest",
-    label: "Invest the remainder",
-    description: "Long-term money, once the cushion is in place",
-    monthlyCents: poolCents,
-    remainingCents: null,
-    monthsToComplete: null,
-    startsInMonths: crossoverMonths,
-    active: !activeAssigned,
-    complete: false,
-  });
-
-  return { poolCents, targetPoolCents, stages, crossoverMonths };
 }
 
 // ----------------------------------------------------------------- goals
@@ -633,8 +496,11 @@ export function computeTrends(months: PlanningMonth[]): Trend[] {
       value: (m) => m.wants + m.unbucketed,
     },
     {
+      // Named for its base on purpose. This is take-home income, which is the
+      // correct basis for a 50/30/20-style rule but NOT for the "save 15% of
+      // income" retirement guidance, which is stated on gross pay.
       key: "savingsRate",
-      label: "Savings rate",
+      label: "Savings rate (take-home)",
       upIsGood: true,
       value: (m) => (m.income > 0 ? (m.income - m.outflow) / m.income : 0),
     },
@@ -813,96 +679,10 @@ export interface Headline {
   hrefLabel?: string;
 }
 
-/**
- * The single sentence this page exists to produce.
- *
- * Resolved in priority order, and the data-quality cases come first on
- * purpose: when the page cannot support advice, it should say how to fix that
- * rather than advise anyway. A 22% card the page does not know about outranks
- * every recommendation it would otherwise make.
- */
-export function computeHeadline(
-  b: Baseline,
-  plan: FinancialPlan,
-  waterfall: Waterfall,
-  accounts: PlanningAccount[],
-): Headline {
-  if (b.essentialMonthly <= 0) {
-    return {
-      kind: "no_essentials",
-      action: "Give your categories budget buckets",
-      detail:
-        "Nothing here is measurable until some spending is marked as essential. Tag your categories as needs, wants or savings and this page can start advising you.",
-      tone: "unknown",
-      href: "/budgets",
-      hrefLabel: "Open Budgets",
-    };
-  }
-
-  const liabilities = accounts
-    .filter((a) => a.type === "liability")
-    .reduce((sum, a) => sum + Math.abs(a.balance), 0);
-
-  if (liabilities > 0 && plan.debts.length === 0) {
-    return {
-      kind: "missing_apr",
-      action: "Enter your interest rates",
-      detail: `You owe ${centsToDollars(liabilities)} but PPBudget does not store APRs. A high-rate balance would outrank everything else below, so this plan is incomplete until you add them.`,
-      tone: "warn",
-    };
-  }
-
-  if (b.monthlySurplus <= 0) {
-    return {
-      kind: "no_surplus",
-      action: "Close the gap between income and spending",
-      detail: `You are spending ${centsToDollars(Math.abs(b.monthlySurplus))} a month more than you earn. No funding priority below can make progress until that reverses.`,
-      tone: "bad",
-    };
-  }
-
-  const active = waterfall.stages.find((s) => s.active);
-  const pool = centsToDollars(waterfall.poolCents);
-
-  switch (active?.kind) {
-    case "starter_ef":
-      return {
-        kind: "starter_ef",
-        action: "Build a one-month cushion",
-        detail: `Put ${pool} a month toward ${centsToDollars(active.remainingCents ?? 0)} of starter savings — about ${formatMonths(active.monthsToComplete)} away.`,
-        tone: "warn",
-      };
-
-    case "high_apr_debt": {
-      const worst = [...plan.debts]
-        .filter((d) => d.apr >= HIGH_APR_THRESHOLD)
-        .sort((x, y) => y.apr - x.apr)[0];
-      const name = accounts.find((a) => a.id === worst?.account_id)?.name ?? "your high-rate debt";
-      return {
-        kind: "debt",
-        action: `Clear ${name}`,
-        detail: `${centsToDollars(active.remainingCents ?? 0)} at ${formatPct(worst?.apr ?? 0, 1)} APR costs you more than savings can earn. At ${pool} a month it is gone in ${formatMonths(active.monthsToComplete)}.`,
-        tone: "bad",
-      };
-    }
-
-    case "full_ef":
-      return {
-        kind: "full_ef",
-        action: `Top up your emergency fund`,
-        detail: `${centsToDollars(active.remainingCents ?? 0)} short of ${plan.emergency_fund.target_months} months. At ${pool} a month you get there in ${formatMonths(active.monthsToComplete)}, then this money starts being invested.`,
-        tone: "warn",
-      };
-
-    default:
-      return {
-        kind: "invest",
-        action: "Put your surplus to work",
-        detail: `Your cushion is complete and no high-rate debt is outstanding, so the full ${pool} a month can be invested.`,
-        tone: "good",
-      };
-  }
-}
+// computeHeadline() lived here. It resolved the same sentence through a
+// seven-case priority ladder that had to be kept in step with the waterfall
+// beside it; it is now simply the first action the engine ordered, which cannot
+// contradict the list below it. The Headline type stays as the view model.
 
 // ------------------------------------------------------------------ format
 

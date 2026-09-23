@@ -59,7 +59,7 @@ function ProjectionTooltip({ active, payload, label }: TooltipProps) {
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-white dark:bg-slate-800 p-3 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700/60">
-      <p className="text-slate-500 dark:text-slate-400 text-xs mb-1.5 font-medium">
+      <p className="text-slate-600 dark:text-slate-400 text-xs mb-1.5 font-medium">
         {Number(label) === 0 ? "Today" : `In ${formatMonths(Number(label))}`}
       </p>
       {payload.map((entry) => (
@@ -123,7 +123,7 @@ function DeltaStat({
 }) {
   return (
     <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
+      <div className="text-xs font-medium text-slate-600 dark:text-slate-400">{label}</div>
       <div className="mt-1.5 flex items-baseline gap-2">
         {/* Striking through an identical value reads as a change that isn't there. */}
         {baseline !== scenario && (
@@ -191,7 +191,7 @@ export function ScenarioExplorer({
             "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
             horizon === h
               ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm"
-              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300",
+              : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200",
           )}
         >
           {h}mo
@@ -298,7 +298,15 @@ export function ScenarioExplorer({
                 verticalAlign="top"
                 height={32}
                 iconType="plainline"
-                wrapperStyle={{ fontSize: 12, color: AXIS_COLOR }}
+                wrapperStyle={{ fontSize: 12 }}
+                /* Recharts colours each label with its own series colour,
+                   overriding the wrapper. On a dark surface the brand indigo
+                   lands at 4.45:1 -- just under the 4.5 small text needs. The
+                   swatch beside each label already carries the colour identity,
+                   so the text does not have to. */
+                formatter={(value: string) => (
+                  <span style={{ color: AXIS_COLOR }}>{value}</span>
+                )}
               />
               <Area
                 type="monotone"
@@ -376,7 +384,7 @@ export function ScenarioExplorer({
           />
         </div>
 
-        <p className="text-xs text-slate-400 dark:text-slate-500">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
           Straight-line projection: your current monthly surplus, compounded at{" "}
           {formatPct(plan.assumptions.invest_return_apr, 1)} a year. It does not model taxes,
           irregular income, or market swings. The discretionary cut applies to wants and unbudgeted

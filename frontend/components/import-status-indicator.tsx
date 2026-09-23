@@ -64,7 +64,7 @@ export function ImportStatusIndicator() {
       {nextSyncStr && !isRunning && (
         <>
           <span className="text-slate-300 dark:text-slate-700 mx-1">|</span>
-          <span className="text-slate-400 dark:text-slate-500 font-normal">Next: {nextSyncStr}</span>
+          <span className="text-slate-500 dark:text-slate-400 font-normal">Next: {nextSyncStr}</span>
         </>
       )}
     </div>

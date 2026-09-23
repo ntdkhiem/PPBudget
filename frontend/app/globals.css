@@ -95,7 +95,10 @@
   --secondary: oklch(0.25 0.02 250);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.25 0.02 250);
-  --muted-foreground: oklch(0.708 0 0);
+  /* 0.708 is the shadcn default and lands at 4.45:1 on the dark surface --
+     one value short of the 4.5 needed for small text, which the chart
+     legends use. 0.72 clears it and is visually indistinguishable. */
+  --muted-foreground: oklch(0.72 0 0);
   --accent: oklch(0.25 0.05 270);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);

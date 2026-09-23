@@ -44,7 +44,7 @@ export default function TransactionFilters({
       <div className="relative flex flex-col md:flex-row items-center gap-3 p-2 bg-white/60 dark:bg-slate-900/40 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 shadow-sm rounded-xl transition-all duration-300">
         
         <div className="relative w-full md:w-80 flex-shrink-0">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 dark:text-slate-500" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 dark:text-slate-400" />
           <Input
             type="text"
             placeholder="Search by description or amount..."

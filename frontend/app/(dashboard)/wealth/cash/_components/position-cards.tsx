@@ -21,7 +21,7 @@ const VALUE_TEXT: Record<Health, string> = {
   good: "text-emerald-600 dark:text-emerald-400",
   warn: "text-amber-600 dark:text-amber-400",
   bad: "text-rose-600 dark:text-rose-400",
-  unknown: "text-slate-400 dark:text-slate-500",
+  unknown: "text-slate-500 dark:text-slate-400",
 };
 
 const BAR: Record<Health, string> = {
@@ -114,7 +114,7 @@ export function PositionCards({
             {ef.value === null ? "—" : `${ef.value.toFixed(1)} mo`}
           </div>
           <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">{ef.note}</p>
-          <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             {formatCurrency(baseline.liquidAssets)} liquid
             {baseline.usedOverrides.liquid ? " across the accounts you chose" : " across all assets"}
           </p>
@@ -143,7 +143,7 @@ export function PositionCards({
             .
           </p>
           {movableIsRange && (
-            <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               {formatCurrency(movable.unclassifiedCents)} is unbudgeted, so it could be either.
             </p>
           )}
@@ -159,7 +159,7 @@ export function PositionCards({
         >
           {variance.unknown ? (
             <>
-              <div className="text-2xl font-bold font-heading text-slate-400 dark:text-slate-500">
+              <div className="text-2xl font-bold font-heading text-slate-500 dark:text-slate-400">
                 —
               </div>
               <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -181,7 +181,7 @@ export function PositionCards({
                 )}{" "}
                 above typical.
               </p>
-              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 {variance.shortfallVsStressed > 0
                   ? `Sized on that, ${plan.emergency_fund.target_months} months is ${formatCurrency(
                       variance.stressedTargetCents,

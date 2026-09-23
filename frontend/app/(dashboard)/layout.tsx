@@ -42,7 +42,13 @@ const SidebarContent = ({ pathname, date, setDate, handleLogout, navItems }: Sid
 
     <nav className="flex flex-col gap-2 flex-1 overflow-y-auto pr-2">
       {navItems.map((item) => {
-        const isActive = pathname === item.href;
+        // Wealth Strategy owns a subtree (/wealth/cash, /wealth/profile, ...),
+        // so an exact match would leave the sidebar unhighlighted on every page
+        // but the index. "/" is excluded from the prefix test for the obvious
+        // reason that it prefixes everything.
+        const isActive =
+          pathname === item.href ||
+          (item.href !== "/" && pathname.startsWith(`${item.href}/`));
         const Icon = item.icon;
         return (
           <Link
@@ -123,8 +129,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     { href: "/accounts", label: "Accounts", icon: Wallet },
     { href: "/transactions", label: "Transactions", icon: ReceiptText },
     { href: "/budgets", label: "Budgets", icon: PieChart },
-    { href: "/planning", label: "Planning", icon: Compass },
-  { href: "/subscriptions", label: "Recurring Payments", icon: Repeat },
+    { href: "/wealth", label: "Wealth Strategy", icon: Compass },
+    { href: "/subscriptions", label: "Recurring Payments", icon: Repeat },
     { href: "/settings/categories", label: "Categories", icon: Tag },
     { href: "/settings/rules", label: "Rules", icon: SlidersHorizontal },
     { href: "/settings/importer", label: "Data Importer", icon: Database },
