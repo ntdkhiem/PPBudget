@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { Check, CircleAlert, Sparkles, TriangleAlert } from "lucide-react";
+import { Check, ChevronRight, CircleAlert, Sparkles, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageContainer } from "@/components/page-container";
 import { PageHeader } from "@/components/page-header";
@@ -77,6 +78,9 @@ export default function WealthProfilePage() {
   // someone on a page of forty fields after telling them there were two.
   const askParam = searchParams.get("ask");
   const askKeys = askParam ? askParam.split(",").filter(Boolean) : [];
+  // Action cards send people here from the overview; the profile's own rows
+  // send them from here. Returning to the wrong one loses their place.
+  const cameFromProfile = searchParams.get("from") === "profile";
 
   const answered = profile?.fields ?? {};
   const answeredKeys = Object.keys(answered);
@@ -106,7 +110,9 @@ export default function WealthProfilePage() {
           fieldKeys={askKeys}
           labels={labels}
           knownFields={registry?.fields ?? []}
-          onDone={() => router.push("/wealth")}
+          profile={profile}
+          backTo={cameFromProfile ? "/wealth/profile" : "/wealth"}
+          onDone={() => router.push(cameFromProfile ? "/wealth/profile" : "/wealth")}
         />
       </PageContainer>
     );
@@ -208,9 +214,12 @@ export default function WealthProfilePage() {
 
         {/* What is on file. */}
         <section>
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Your answers
           </h2>
+          <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+            Select any of these to change it.
+          </p>
           <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
             {answeredKeys.map((key, i) => {
               const field = answered[key];
@@ -218,10 +227,15 @@ export default function WealthProfilePage() {
               const isStale = staleKeys.has(key);
 
               return (
-                <div
+                // The whole row is the edit affordance. Previously the only way
+                // to change an answer was to rerun the entire eight-screen
+                // setup, which is a lot of ceremony for correcting one number.
+                <Link
                   key={key}
+                  href={`/wealth/profile?ask=${encodeURIComponent(key)}&from=profile`}
                   className={cn(
-                    "flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5",
+                    "flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5 transition-colors",
+                    "hover:bg-slate-50 dark:hover:bg-slate-800/40",
                     i > 0 && "border-t border-slate-200 dark:border-slate-800",
                     isStale && "bg-amber-50/40 dark:bg-amber-500/5",
                   )}
@@ -249,7 +263,9 @@ export default function WealthProfilePage() {
                       worth rechecking
                     </span>
                   )}
-                </div>
+
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
+                </Link>
               );
             })}
           </div>
@@ -263,17 +279,21 @@ export default function WealthProfilePage() {
               Still unanswered
             </h2>
             <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
-              None of these are required. Each one unlocks a particular action, and the
-              overview shows which.
+              None of these are required. Select one to answer it — each unlocks a
+              particular action, and the overview shows which.
             </p>
+            {/* Each chip opens the question it names. Listing them without
+                any way to answer them made the section a nag rather than an
+                offer. */}
             <div className="flex flex-wrap gap-2">
               {derived.unanswered.map((key) => (
-                <span
+                <Link
                   key={key}
-                  className="rounded-lg border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-400"
+                  href={`/wealth/profile?ask=${encodeURIComponent(key)}&from=profile`}
+                  className="rounded-lg border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 transition-colors hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:text-slate-400 dark:hover:border-indigo-500 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
                 >
                   {labels[key] ?? key.replace(/_/g, " ")}
-                </span>
+                </Link>
               ))}
             </div>
           </section>
@@ -288,8 +308,17 @@ function formatAnswer(key: string, value: unknown): string {
   if (value === undefined || value === null) return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "string") {
-    // ISO dates come back as timestamps; show the day.
-    if (/^\d{4}-\d{2}-\d{2}T/.test(value)) return new Date(value).toLocaleDateString();
+    // ISO dates come back as timestamps, but they are calendar dates -- a date
+    // of birth is not an instant. Parsing the whole string and formatting it
+    // through the local zone moves it a day west of UTC, so someone born on the
+    // 15th sees the 14th. Build the date from its own parts instead, which
+    // keeps the locale's ordering without the shift.
+    const day = /^(\d{4})-(\d{2})-(\d{2})T/.exec(value);
+    if (day) {
+      return new Date(
+        Number(day[1]), Number(day[2]) - 1, Number(day[3]),
+      ).toLocaleDateString();
+    }
     return value;
   }
   if (typeof value === "number") {

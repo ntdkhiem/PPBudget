@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useSaveProfile } from "./wealth-data";
+import { useSaveProfile, type WealthProfile } from "./wealth-data";
 
 /**
  * The questions one blocked action is waiting on, and nothing else.
@@ -115,32 +115,85 @@ function kindOf(key: string): Kind {
   return "money";
 }
 
+/**
+ * Turns a stored value back into what its input expects.
+ *
+ * The reverse of the conversions in submit(): cents to dollars, fractions to
+ * percent, timestamps to a date input's yyyy-mm-dd. Without this an edit starts
+ * from an empty box, which reads as "this was never answered" and invites the
+ * user to retype something that was already right.
+ */
+function toInputValue(key: string, value: unknown): string {
+  if (value === undefined || value === null) return "";
+  switch (kindOf(key)) {
+    case "boolean":
+      return value ? "yes" : "no";
+    case "date":
+      return typeof value === "string" ? value.slice(0, 10) : "";
+    case "percent":
+      return typeof value === "number" ? String(Number((value * 100).toFixed(4))) : "";
+    case "integer":
+      return String(value);
+    case "money":
+      return typeof value === "number" ? String(value / 100) : "";
+    default:
+      return String(value);
+  }
+}
+
 export function FocusedQuestions({
   fieldKeys,
   labels,
   knownFields,
+  profile,
+  backTo = "/wealth",
   onDone,
 }: {
   fieldKeys: string[];
   labels: Record<string, string>;
   /** The canonical registry, used to tell real fields from pseudo-keys. */
   knownFields: string[];
+  /** Current answers, so editing starts from what is already there. */
+  profile?: WealthProfile;
+  /** Where the back link goes — wherever the user actually came from. */
+  backTo?: string;
   onDone: () => void;
 }) {
   const save = useSaveProfile();
-  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<Record<string, string>>(() => {
+    const seed: Record<string, string> = {};
+    if (!profile) return seed;
+    for (const k of fieldKeys) {
+      const v = (profile as unknown as Record<string, unknown>)[k];
+      if (v !== undefined && v !== null) seed[k] = toInputValue(k, v);
+    }
+    return seed;
+  });
 
   const known = useMemo(() => new Set(knownFields), [knownFields]);
   const answerable = fieldKeys.filter((k) => known.has(k));
   const elsewhere = fieldKeys.filter((k) => !known.has(k));
 
+  // Every requested field already has a value, so this is a correction rather
+  // than a first pass. Worth saying, because the two read differently.
+  const editing =
+    answerable.length > 0 &&
+    answerable.every((k) => (profile?.fields ?? {})[k] !== undefined);
+
   const set = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
 
   const submit = () => {
     const fields: Record<string, unknown> = {};
+    const answeredAlready = profile?.fields ?? {};
     for (const key of answerable) {
       const raw = draft[key];
-      if (raw === undefined || raw === "") continue;
+      if (raw === undefined || raw === "") {
+        // Emptying a field that had a value is a request to REMOVE the answer,
+        // and the API treats an explicit null as exactly that. Skipping it
+        // would make an answer impossible to take back once given.
+        if (answeredAlready[key] !== undefined) fields[key] = null;
+        continue;
+      }
 
       switch (kindOf(key)) {
         case "boolean":
@@ -178,18 +231,26 @@ export function FocusedQuestions({
   return (
     <div className="mx-auto max-w-2xl">
       <Link
-        href="/wealth"
+        href={backTo}
         className="mb-6 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back to your plan
+        {backTo === "/wealth/profile" ? "Back to your profile" : "Back to your plan"}
       </Link>
 
       <h2 className="text-2xl font-bold font-heading tracking-tight text-slate-900 dark:text-white">
-        {answerable.length === 1 ? "One question" : `${answerable.length} questions`}
+        {editing
+          ? answerable.length === 1
+            ? labels[answerable[0]] ?? "Change this answer"
+            : "Change these answers"
+          : answerable.length === 1
+            ? "One question"
+            : `${answerable.length} questions`}
       </h2>
       <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-        Answering these unlocks the action you came from.
+        {editing
+          ? "Your current answer is filled in. Change it and save, or leave it as it is."
+          : "Answering these unlocks the action you came from."}
       </p>
 
       <div className="mt-8 space-y-6">
@@ -303,7 +364,7 @@ export function FocusedQuestions({
       <div className="mt-10 flex items-center gap-2">
         <Button onClick={submit} disabled={save.isPending || answerable.length === 0}>
           <Check className="h-4 w-4" />
-          Save and go back
+          {save.isPending ? "Saving…" : "Save and go back"}
         </Button>
         <Button variant="ghost" onClick={onDone} disabled={save.isPending}>
           Cancel

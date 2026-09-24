@@ -114,6 +114,17 @@ func TestWealthProfileRoundTripIntegration(t *testing.T) {
 	if got.MatchPct != nil {
 		t.Errorf("match_pct should have been cleared, got %v", *got.MatchPct)
 	}
+	// And the provenance row goes with it. Everything downstream reads
+	// "answered" as "a provenance row exists", so a row surviving a cleared
+	// value would report the question as answered while the answer is gone --
+	// the generator would stop asking for it and evaluate against nothing.
+	if f, ok := got.Fields["match_pct"]; ok {
+		t.Errorf("match_pct was cleared but still claims provenance %+v", f)
+	}
+	// Its neighbours are untouched: clearing one answer is not a reset.
+	if _, ok := got.Fields["match_limit_pct"]; !ok {
+		t.Error("clearing match_pct removed the provenance for match_limit_pct")
+	}
 }
 
 // Provenance is load-bearing: the generator refuses to run high-stakes branches

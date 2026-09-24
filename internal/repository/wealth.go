@@ -138,12 +138,21 @@ func (r *Repository) UpsertWealthProfile(
 	updates := make([]string, 0, len(setKeys))
 	args := []any{userID}
 
+	// A key whose value is NULL is a request to take an answer BACK, which is
+	// the opposite of recording one. Tracked separately because the two halves
+	// of this function then have to do opposite things with it.
+	cleared := make([]string, 0)
+
 	for _, key := range setKeys {
 		def, ok := profileFieldByKey[key]
 		if !ok {
 			return fmt.Errorf("%w: unknown profile field %q", apperrors.ErrInvalidInput, key)
 		}
-		args = append(args, def.Value(p))
+		v := def.Value(p)
+		if v == nil {
+			cleared = append(cleared, key)
+		}
+		args = append(args, v)
 		cols = append(cols, def.Column)
 		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
 		updates = append(updates, fmt.Sprintf("%s = EXCLUDED.%s", def.Column, def.Column))
@@ -167,6 +176,12 @@ func (r *Repository) UpsertWealthProfile(
 	// Provenance is rewritten for exactly the keys touched, so answered_at
 	// tracks when this answer was last affirmed rather than when the row was
 	// created. Staleness depends on that distinction.
+	//
+	// Cleared keys lose their row instead of gaining one. The whole feature
+	// reads "answered" as "a provenance row exists" (see missingFields in
+	// quests_generate.go), so leaving the row behind on a NULL value would
+	// report the question as answered while the value is gone -- the generator
+	// would stop asking for it and run on nothing.
 	for _, key := range setKeys {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO wealth_profile_fields (user_id, field_key, source, answered_at)
@@ -176,6 +191,15 @@ func (r *Repository) UpsertWealthProfile(
 			userID, key, source,
 		); err != nil {
 			return fmt.Errorf("failed to record provenance for %q: %w", key, err)
+		}
+	}
+
+	if len(cleared) > 0 {
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM wealth_profile_fields WHERE user_id = $1 AND field_key = ANY($2)`,
+			userID, cleared,
+		); err != nil {
+			return fmt.Errorf("failed to clear provenance: %w", err)
 		}
 	}
 
