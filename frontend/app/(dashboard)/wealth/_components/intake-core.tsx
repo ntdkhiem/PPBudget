@@ -67,9 +67,9 @@ const STEPS: Array<{ id: StepId; title: string; blurb: string }> = [
   },
   {
     id: "retirement",
-    title: "Your 401(k)",
+    title: "Your pay and 401(k)",
     blurb:
-      "Your current contribution rate and what your employer matches. This is where the single highest-return action in the plan comes from.",
+      "What you earn, your current contribution rate and what your employer matches. This is where the single highest-return action in the plan comes from.",
   },
   {
     id: "debts",
@@ -211,6 +211,7 @@ export function IntakeCore({
         bool("spouse_has_workplace_plan");
         break;
       case "retirement":
+        num("gross_annual_income", toCents);
         num("deferral_pct", toFraction);
         num("match_pct", toFraction);
         num("match_limit_pct", toFraction);
@@ -443,19 +444,41 @@ export function IntakeCore({
                 onChange={(e) => set("ps_ytd_count", e.target.value)}
               />
             </Field>
-            <Field label="Paychecks per year" hint="26 if you are paid fortnightly, 24 if twice a month.">
-              <Input
-                inputMode="numeric"
-                placeholder="26"
-                value={val("ps_per_year")}
-                onChange={(e) => set("ps_per_year", e.target.value)}
-              />
-            </Field>
+            {/* A choice rather than a number box: a "26" placeholder looked
+                like an answer and saved nothing. */}
+            <div className="sm:col-span-2">
+              <Field label="How often are you paid?">
+                <Choice
+                  value={val("ps_per_year")}
+                  onChange={(v) => set("ps_per_year", v)}
+                  options={[
+                    { value: "52", label: "Weekly" },
+                    { value: "26", label: "Every two weeks" },
+                    { value: "24", label: "Twice a month" },
+                    { value: "12", label: "Monthly" },
+                  ]}
+                />
+              </Field>
+            </div>
           </div>
         )}
 
         {current.id === "retirement" && (
           <>
+            {/* Asked directly rather than only annualised from a paystub: the
+                paystub screen can be skipped, and without this the match --
+                the plan's first action -- stays blocked. */}
+            <Field
+              label="Gross pay per year"
+              hint="Before tax, including bonuses and stock that vests. Your match is worked out from it, and so is how you can fund a Roth IRA, where guessing low is the costly mistake."
+            >
+              <Input
+                inputMode="decimal"
+                className="w-40"
+                value={val("gross_annual_income")}
+                onChange={(e) => set("gross_annual_income", e.target.value)}
+              />
+            </Field>
             <Field
               label="What percent of pay are you contributing now?"
               hint="The current rate, not the average so far. They differ exactly when it matters."

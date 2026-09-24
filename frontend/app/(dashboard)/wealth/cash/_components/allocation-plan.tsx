@@ -152,7 +152,7 @@ export function AllocationPlan({
                   if (share <= 0) return null;
                   return (
                     <div
-                      key={stage.kind}
+                      key={stage.id}
                       className={STAGE_BAR[stage.kind]}
                       style={{ flexGrow: share }}
                       title={`${stage.label}: ${formatMonths(stage.monthsToComplete)}`}
@@ -164,7 +164,7 @@ export function AllocationPlan({
               <ol className="space-y-3">
                 {waterfall.stages.map((stage) => (
                   <li
-                    key={stage.kind}
+                    key={stage.id}
                     className={cn(
                       "flex items-start gap-3 rounded-xl border p-3",
                       stage.active
@@ -215,7 +215,9 @@ export function AllocationPlan({
                         {stage.blockedReason ?? stage.description}
                       </p>
 
-                      {!stage.complete && (
+                      {/* A stage waiting on an answer has no figure to schedule;
+                          its reason above says what it needs instead. */}
+                      {!stage.complete && !stage.blockedReason && (
                         <div className="text-xs font-medium text-slate-600 dark:text-slate-300 mt-1.5">
                           {stage.kind === "invest" ? (
                             <>

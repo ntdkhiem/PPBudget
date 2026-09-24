@@ -93,8 +93,9 @@ func completeMonths(months []domain.PlanningMonth) []domain.PlanningMonth {
 // ComputeBaseline averages the trailing window and folds in current balances.
 //
 // Unlike the TypeScript original it takes no plan overrides: those lived in the
-// financial_plan blob, and their replacements are profile answers that the
-// caller applies afterwards, with provenance attached.
+// financial_plan blob, and their replacements are profile answers that
+// applyProfile folds in afterwards. This stays a plain reading of the ledger
+// because the intake's confirmation screen offers exactly these figures.
 func ComputeBaseline(pb *domain.PlanningBaseline) Baseline {
 	if pb == nil {
 		return Baseline{BucketCoverage: 1}
@@ -149,4 +150,67 @@ func ComputeBaseline(pb *domain.PlanningBaseline) Baseline {
 		BucketCoverage:    coverage,
 		MonthsOfData:      len(months),
 	}
+}
+
+// cashAccountIDs names the accounts an emergency could actually draw on.
+//
+// The user's own choice wins outright. Without one, every asset account counts
+// except those linked to a tax treatment on the Retirement tab: a 401(k) or a
+// brokerage balance is not an emergency fund, and counting it declared the
+// cushion finished before a dollar of cash had been set aside.
+func cashAccountIDs(
+	accounts []domain.PlanningAccount, chosen []string, invested []domain.RetirementAccountTerms,
+) map[string]bool {
+	cash := make(map[string]bool)
+
+	if len(chosen) > 0 {
+		picked := make(map[string]bool, len(chosen))
+		for _, id := range chosen {
+			picked[id] = true
+		}
+		for _, a := range accounts {
+			if a.Type == "asset" && picked[a.ID] {
+				cash[a.ID] = true
+			}
+		}
+		return cash
+	}
+
+	skip := make(map[string]bool, len(invested))
+	for _, r := range invested {
+		skip[r.AccountID] = true
+	}
+	for _, a := range accounts {
+		if a.Type == "asset" && !skip[a.ID] {
+			cash[a.ID] = true
+		}
+	}
+	return cash
+}
+
+// applyProfile folds the user's corrections into the ledger baseline.
+//
+// The plan is built on this version rather than on ComputeBaseline's: an
+// override the engine never reads is one the user was shown and is ignored,
+// which is worse than not offering it. Surplus is recomputed from an overridden
+// income for the same reason the original did -- every timeline runs off it.
+func applyProfile(
+	b Baseline, p *domain.WealthProfile, accounts []domain.PlanningAccount, cash map[string]bool,
+) Baseline {
+	var liquid money.Money
+	for _, a := range accounts {
+		if cash[a.ID] {
+			liquid += a.Balance
+		}
+	}
+	b.LiquidAssets = liquid
+
+	if p.OverrideMonthlyIncome != nil {
+		b.MonthlyIncome = *p.OverrideMonthlyIncome
+		b.MonthlySurplus = b.MonthlyIncome - b.MonthlyOutflow
+	}
+	if p.OverrideEssentialExpenses != nil {
+		b.EssentialMonthly = *p.OverrideEssentialExpenses
+	}
+	return b
 }

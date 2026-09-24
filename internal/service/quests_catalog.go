@@ -43,6 +43,11 @@ type questContext struct {
 	Limits   domain.TaxLimits
 
 	Accounts []domain.PlanningAccount
+	// Cash is the set of account IDs that count as cash; see cashAccountIDs.
+	// Baseline.LiquidAssets is their total, and any rule that moves money
+	// between accounts reads this rather than the account type, which calls a
+	// 401(k) an asset just as it does a checking account.
+	Cash map[string]bool
 	// Months is the per-month history behind Baseline, oldest first and with
 	// the partial current month already dropped. Duration conditions read it
 	// directly rather than inferring a streak from the action's own event log:

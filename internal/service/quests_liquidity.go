@@ -169,8 +169,9 @@ func questStarterEmergencyFund() questDef {
 // questClearPromoBalance handles 0% promotional balances, which invert the
 // usual ordering.
 func questClearPromoBalance() questDef {
+	const key = "clear_promo_balance_before_expiry"
 	return questDef{
-		Key:          "clear_promo_balance_before_expiry",
+		Key:          key,
 		Phase:        PhaseLiquidity,
 		Priority:     15,
 		Verification: domain.QuestVerificationAuto,
@@ -186,6 +187,15 @@ func questClearPromoBalance() questDef {
 				}
 				balance := absMoney(acct.Balance)
 				if balance <= 0 {
+					// See clear_high_apr_balance: a tracked balance that reaches
+					// zero completes rather than disappearing.
+					if _, tracked := c.ExistingStatus[key+":"+acct.ID]; tracked {
+						out = append(out, questResult{
+							KeySuffix: acct.ID,
+							Complete:  true,
+							Title:     fmt.Sprintf("You cleared the promotional balance on %s", acct.Name),
+						})
+					}
 					continue
 				}
 				due := *terms.PromoExpiresOn
@@ -219,8 +229,9 @@ func questClearPromoBalance() questDef {
 
 // questClearHighAPRBalance fans out one action per expensive balance.
 func questClearHighAPRBalance() questDef {
+	const key = "clear_high_apr_balance"
 	return questDef{
-		Key:          "clear_high_apr_balance",
+		Key:          key,
 		Phase:        PhaseLiquidity,
 		Priority:     20,
 		Verification: domain.QuestVerificationAuto,
@@ -228,7 +239,7 @@ func questClearHighAPRBalance() questDef {
 			threshold := highAPRThreshold(c.Profile)
 
 			var out []questResult
-			var unratedCount int
+			var open, unratedCount int
 
 			for _, acct := range c.Accounts {
 				if acct.Type != "liability" {
@@ -236,6 +247,19 @@ func questClearHighAPRBalance() questDef {
 				}
 				balance := absMoney(acct.Balance)
 				if balance <= 0 {
+					// A balance this action was tracking has been paid off. Say
+					// so: producing nothing would let regeneration prune the
+					// action, and its history with it, at the one moment in
+					// this phase most worth a record.
+					if _, tracked := c.ExistingStatus[key+":"+acct.ID]; tracked {
+						out = append(out, questResult{
+							KeySuffix: acct.ID,
+							Complete:  true,
+							Title:     fmt.Sprintf("You cleared the balance on %s", acct.Name),
+							Detail: "Keep the account open: closing it raises your utilisation and " +
+								"shortens your average account age.",
+						})
+					}
 					continue
 				}
 				terms, ok := c.Terms[acct.ID]
@@ -255,6 +279,7 @@ func questClearHighAPRBalance() questDef {
 				}
 
 				annualInterest := money.Money(float64(balance) * *terms.APR)
+				open++
 				out = append(out, questResult{
 					KeySuffix: acct.ID,
 					Title:     fmt.Sprintf("Clear the %s balance on %s", usd(balance), acct.Name),
@@ -268,15 +293,17 @@ func questClearHighAPRBalance() questDef {
 				})
 			}
 
-			if len(out) == 0 && unratedCount > 0 {
-				return []questResult{{
+			// Counted against open actions only: a card already paid off says
+			// nothing about the balances that still have no rate.
+			if open == 0 && unratedCount > 0 {
+				out = append(out, questResult{
 					Title: "Add interest rates to your debts",
 					Detail: fmt.Sprintf(
 						"%d of your balances have no interest rate recorded, so they cannot be ordered "+
 							"against each other or against investing. A rate takes a moment to find on a statement.",
 						unratedCount),
 					Missing: []string{"account_apr"},
-				}}
+				})
 			}
 			return out
 		},
@@ -296,7 +323,7 @@ func questSweepIdleCash() questDef {
 			// cannot act on today.
 			var bestAPY float64
 			for _, acct := range c.Accounts {
-				if acct.Type != "asset" {
+				if !c.Cash[acct.ID] {
 					continue
 				}
 				if t, ok := c.Terms[acct.ID]; ok && t.APY != nil && *t.APY > bestAPY {
@@ -315,7 +342,10 @@ func questSweepIdleCash() questDef {
 
 			var out []questResult
 			for _, acct := range c.Accounts {
-				if acct.Type != "asset" || acct.Balance <= 0 {
+				// Only cash is idle. A retirement or brokerage account with no
+				// rate recorded reads as 0% here, and "move it into savings"
+				// would be a withdrawal with tax and a penalty attached.
+				if !c.Cash[acct.ID] || acct.Balance <= 0 {
 					continue
 				}
 				apy := 0.0

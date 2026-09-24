@@ -20,7 +20,6 @@ import { computeInputs, isConfigured, project } from "./_components/retirement-m
 import { RetirementHeadline } from "./_components/retirement-headline";
 import { YourNumber } from "./_components/your-number";
 import { AccountsTable } from "./_components/accounts-table";
-import { RetirementProjection } from "./_components/retirement-projection";
 
 /**
  * The retirement surface, off its blob.
@@ -31,9 +30,6 @@ import { RetirementProjection } from "./_components/retirement-projection";
  * second implementation of the same checks — `computeFlags` used to be the only
  * thing in the app that caught unclaimed employer match, and that check now
  * lives in the catalog where it is ordered against everything else and tested.
- *
- * The projection maths stays here: it drives interactive sliders, and those
- * have no business round-tripping to the server on every drag.
  */
 export default function RetirementPage() {
   const { data: baselineData, isLoading, isError } = useQuery<PlanningBaseline>({
@@ -138,8 +134,6 @@ export default function RetirementPage() {
               flags={flags}
               loading={false}
             />
-
-            <RetirementProjection profile={profile} inputs={inputs} loading={false} />
           </>
         )}
       </motion.div>

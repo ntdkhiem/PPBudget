@@ -197,18 +197,10 @@ export interface RetirementProjection {
 export function project(
   profile: RetirementProfile,
   inputs: RetirementInputs,
-  /** Overrides for the what-if sliders, all optional. */
-  overrides: {
-    extraMonthlyCents?: number;
-    realReturn?: number;
-    retirementAge?: number;
-  } = {},
 ): RetirementProjection {
-  const realReturn = overrides.realReturn ?? inputs.realReturn;
-  const retirementAge = overrides.retirementAge ?? profile.target_retirement_age;
-  const years = Math.max(0, retirementAge - profile.current_age);
-  const annual =
-    inputs.totalAnnualContributionCents + (overrides.extraMonthlyCents ?? 0) * 12;
+  const realReturn = inputs.realReturn;
+  const years = Math.max(0, profile.target_retirement_age - profile.current_age);
+  const annual = inputs.totalAnnualContributionCents;
 
   const series: ProjectionYear[] = [];
   let balance = inputs.currentAssetsCents;
@@ -289,14 +281,4 @@ export function centsToDollars(cents: number): string {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(Math.round(cents / 100));
-}
-
-/** Compact, for axes and large headline figures. */
-export function formatCompactCents(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(cents / 100);
 }

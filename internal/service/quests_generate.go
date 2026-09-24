@@ -67,14 +67,18 @@ func (s *Service) SetQuestStatus(ctx context.Context, userID, questID, status, s
 // was the failure mode of having a waterfall in the browser and a catalog on
 // the server.
 type PlanSummary struct {
-	MonthlyIncome    money.Money `json:"monthly_income"`
-	MonthlyOutflow   money.Money `json:"monthly_outflow"`
-	EssentialMonthly money.Money `json:"essential_monthly"`
-	MonthlySurplus   money.Money `json:"monthly_surplus"`
-	LiquidAssets     money.Money `json:"liquid_assets"`
-	NetWorth         money.Money `json:"net_worth"`
-	BucketCoverage   float64     `json:"bucket_coverage"`
-	MonthsOfData     int         `json:"months_of_data"`
+	MonthlyIncome     money.Money `json:"monthly_income"`
+	MonthlyOutflow    money.Money `json:"monthly_outflow"`
+	EssentialMonthly  money.Money `json:"essential_monthly"`
+	MonthlyWants      money.Money `json:"monthly_wants"`
+	MonthlyUnbucketed money.Money `json:"monthly_unbucketed"`
+	MonthlySavings    money.Money `json:"monthly_savings"`
+	MonthlySurplus    money.Money `json:"monthly_surplus"`
+	LiquidAssets      money.Money `json:"liquid_assets"`
+	TotalLiabilities  money.Money `json:"total_liabilities"`
+	NetWorth          money.Money `json:"net_worth"`
+	BucketCoverage    float64     `json:"bucket_coverage"`
+	MonthsOfData      int         `json:"months_of_data"`
 
 	// TargetSavingsRate is what the chosen strategy asks for, so the client can
 	// show the gap without holding its own copy of the strategy table.
@@ -85,6 +89,38 @@ type PlanSummary struct {
 	// there is no surplus to fund them with -- an honest "never at this rate"
 	// rather than a very large number.
 	CrossoverMonths *int `json:"crossover_months"`
+
+	// Funding is the schedule CrossoverMonths is the end of, served so the
+	// Cash page draws the same stages instead of re-deriving them.
+	Funding []FundingStage `json:"funding"`
+}
+
+// FundingStage is one phase 1 action the monthly surplus pays for.
+type FundingStage struct {
+	QuestID string `json:"quest_id"`
+	// Remaining is what the surplus still has to put in: zero once the action
+	// is done, skipped, or has no figure yet.
+	Remaining money.Money `json:"remaining"`
+	// StartsInMonths and MonthsToComplete are null when there is no surplus to
+	// pay with, which is "never at this rate". A stage with nothing remaining
+	// takes zero months and has no start.
+	StartsInMonths   *int `json:"starts_in_months"`
+	MonthsToComplete *int `json:"months_to_complete"`
+}
+
+// fundedFromSurplus names the phase 1 actions paid for out of the monthly
+// surplus.
+//
+// The rest of the phase carries targets of a different kind -- a yearly match
+// claimed through payroll, a monthly spending cap, cash moved between accounts
+// the user already has. Adding those to the sum mixed yearly figures with
+// monthly ones and pushed the crossover out by months that no one was saving
+// toward.
+var fundedFromSurplus = map[string]bool{
+	"starter_emergency_fund":            true,
+	"clear_promo_balance_before_expiry": true,
+	"clear_high_apr_balance":            true,
+	"full_emergency_fund":               true,
 }
 
 // strategyTargets mirrors STRATEGY_PROFILES in planning-math.ts.
@@ -107,37 +143,80 @@ func summarise(qc questContext, quests []domain.Quest) PlanSummary {
 		MonthlyIncome:     qc.Baseline.MonthlyIncome,
 		MonthlyOutflow:    qc.Baseline.MonthlyOutflow,
 		EssentialMonthly:  qc.Baseline.EssentialMonthly,
+		MonthlyWants:      qc.Baseline.MonthlyWants,
+		MonthlyUnbucketed: qc.Baseline.MonthlyUnbucketed,
+		MonthlySavings:    qc.Baseline.MonthlySavings,
 		MonthlySurplus:    qc.Baseline.MonthlySurplus,
 		LiquidAssets:      qc.Baseline.LiquidAssets,
+		TotalLiabilities:  qc.Baseline.TotalLiabilities,
 		NetWorth:          qc.Baseline.NetWorth,
 		BucketCoverage:    qc.Baseline.BucketCoverage,
 		MonthsOfData:      qc.Baseline.MonthsOfData,
 		TargetSavingsRate: target,
 	}
+	out.Funding, out.CrossoverMonths = fundingSchedule(quests, qc.Baseline.MonthlySurplus)
+	return out
+}
 
-	// Everything still owed across phase 1, funded sequentially out of one
-	// surplus -- which is why it is a sum rather than a max.
+// fundingSchedule lays phase 1's funding actions end to end against one
+// surplus, and returns the schedule with the month it finishes.
+//
+// Each action takes the whole surplus until it is satisfied, in the engine's
+// order. Starts and ends are read off the running total rather than by adding
+// each stage's own rounded-up month count, so the last stage ends exactly at
+// the crossover instead of a month or two after it.
+func fundingSchedule(quests []domain.Quest, surplus money.Money) ([]FundingStage, *int) {
+	stages := []FundingStage{}
 	var owed money.Money
+	// The starter cushion and the full fund are measured against the same
+	// cash, so the full fund's gap already contains the starter's. Summing the
+	// two asked the surplus for the first month of essentials twice.
+	var starterQueued money.Money
+
 	for _, q := range quests {
-		if q.Phase != PhaseLiquidity || q.TargetAmount == nil {
+		base, _, _ := strings.Cut(q.CatalogKey, ":")
+		if q.Phase != PhaseLiquidity || !fundedFromSurplus[base] {
 			continue
 		}
+
+		var remaining money.Money
 		switch q.Status {
 		case domain.QuestStatusAvailable, domain.QuestStatusBlocked, domain.QuestStatusLocked:
-			owed += *q.TargetAmount
+			if q.TargetAmount != nil && *q.TargetAmount > 0 {
+				remaining = *q.TargetAmount
+			}
 		}
+		switch base {
+		case "starter_emergency_fund":
+			starterQueued = remaining
+		case "full_emergency_fund":
+			remaining = max(remaining-starterQueued, 0)
+		}
+
+		stage := FundingStage{QuestID: q.ID, Remaining: remaining}
+		switch {
+		case remaining == 0:
+			zero := 0
+			stage.MonthsToComplete = &zero
+		case surplus > 0:
+			start := int(owed / surplus)
+			months := monthsToFill(owed+remaining, surplus) - start
+			stage.StartsInMonths = &start
+			stage.MonthsToComplete = &months
+		}
+		stages = append(stages, stage)
+		owed += remaining
 	}
-	if owed <= 0 {
+
+	switch {
+	case owed <= 0:
 		zero := 0
-		out.CrossoverMonths = &zero
-	} else if qc.Baseline.MonthlySurplus > 0 {
-		months := int(owed / qc.Baseline.MonthlySurplus)
-		if owed%qc.Baseline.MonthlySurplus != 0 {
-			months++
-		}
-		out.CrossoverMonths = &months
+		return stages, &zero
+	case surplus > 0:
+		months := monthsToFill(owed, surplus)
+		return stages, &months
 	}
-	return out
+	return stages, nil
 }
 
 // Phase describes a phase for display: the engine and the UI must agree on
@@ -222,14 +301,16 @@ func (s *Service) buildQuestContext(ctx context.Context, userID string) (questCo
 	for _, q := range existing {
 		existingStatus[q.CatalogKey] = q.Status
 	}
+	cash := cashAccountIDs(pb.Accounts, profile.OverrideLiquidAccountIDs, retirement)
 
 	return questContext{
 		Now:            now,
 		TaxYear:        now.Year(),
 		Profile:        profile,
-		Baseline:       ComputeBaseline(pb),
+		Baseline:       applyProfile(ComputeBaseline(pb), profile, pb.Accounts, cash),
 		Limits:         limits,
 		Accounts:       pb.Accounts,
+		Cash:           cash,
 		Months:         completeMonths(pb.Months),
 		Terms:          terms,
 		Retirement:     retirement,
@@ -580,6 +661,12 @@ var fieldLabels = map[string]string{
 	"target_independence_age":      "when you want work to become optional",
 	"emergency_fund_target_months": "how many months of cover you want",
 	"expected_return_apr":          "the return you expect on investments",
+
+	// Corrections rather than questions, labelled for the profile's list of
+	// answers; see isOverrideField.
+	"override_monthly_income":     "your corrected monthly income",
+	"override_essential_expenses": "your corrected monthly essentials",
+	"override_liquid_account_ids": "which accounts count as cash",
 
 	// Pseudo-keys. These do not appear in the profile field registry: they
 	// describe data the app is missing rather than an answer it wants, and the

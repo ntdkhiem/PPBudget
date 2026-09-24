@@ -153,6 +153,20 @@ export interface Phase {
 }
 
 /**
+ * One phase 1 action the monthly surplus pays for, in the order it is paid.
+ * The last stage ends at `crossover_months`.
+ */
+export interface FundingStage {
+  quest_id: string;
+  /** What the surplus still has to put in; 0 once done or when there is no figure. */
+  remaining: number;
+  /** Null when there is no surplus to pay with, or nothing remains. */
+  starts_in_months: number | null;
+  /** Null means "never at this rate". */
+  months_to_complete: number | null;
+}
+
+/**
  * The figures every wealth surface needs in common, served alongside the action
  * list so the client stops computing a baseline of its own.
  */
@@ -160,14 +174,19 @@ export interface PlanSummary {
   monthly_income: number;
   monthly_outflow: number;
   essential_monthly: number;
+  monthly_wants: number;
+  monthly_unbucketed: number;
+  monthly_savings: number;
   monthly_surplus: number;
   liquid_assets: number;
+  total_liabilities: number;
   net_worth: number;
   bucket_coverage: number;
   months_of_data: number;
   target_savings_rate: number;
   /** Months until phase 1 is funded. Null means "never at this rate". */
   crossover_months: number | null;
+  funding: FundingStage[];
 }
 
 /** A user-authored savings target — the only content here nothing re-derives. */

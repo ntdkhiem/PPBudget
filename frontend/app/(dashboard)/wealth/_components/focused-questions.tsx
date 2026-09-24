@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Check } from "lucide-react";
+import { apiFetch, getStoredToken, type Account } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +26,7 @@ import { useSaveProfile, type WealthProfile } from "./wealth-data";
  * server's CHECK constraints reject anything genuinely wrong.
  */
 
-type Kind = "money" | "percent" | "integer" | "boolean" | "date" | "text" | "choice";
+type Kind = "money" | "percent" | "integer" | "boolean" | "date" | "text" | "choice" | "accounts";
 
 const CHOICES: Record<string, Array<{ value: string; label: string }>> = {
   filing_status: [
@@ -106,6 +108,9 @@ const ELSEWHERE: Record<string, { text: string; href: string; cta: string }> = {
 };
 
 function kindOf(key: string): Kind {
+  // The one list-valued field. Falling through to money turned "which accounts
+  // count as cash" into a dollar box the server then rejected.
+  if (key === "override_liquid_account_ids") return "accounts";
   if (CHOICES[key]) return "choice";
   if (BOOLEANS.has(key)) return "boolean";
   if (key === "date_of_birth") return "date";
@@ -136,9 +141,60 @@ function toInputValue(key: string, value: unknown): string {
       return String(value);
     case "money":
       return typeof value === "number" ? String(value / 100) : "";
+    case "accounts":
+      return Array.isArray(value) ? value.join(",") : "";
     default:
       return String(value);
   }
+}
+
+/**
+ * Picks which accounts count as cash, held in the draft as comma-joined ids.
+ *
+ * Picking none clears the choice on save, which puts the default back rather
+ * than claiming there is no cash at all.
+ */
+function AccountPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { data: accounts } = useQuery<Account[]>({
+    queryKey: ["accounts"],
+    queryFn: () => apiFetch<Account[]>("/accounts", {}, getStoredToken()),
+  });
+  const selected = new Set(value.split(",").filter(Boolean));
+  const assets = (accounts ?? []).filter((a) => a.type === "asset");
+
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange([...next].join(","));
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        {assets.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            onClick={() => toggle(a.id)}
+            aria-pressed={selected.has(a.id)}
+            className={cn(
+              "rounded-xl border px-4 py-2 text-sm font-medium transition-colors",
+              selected.has(a.id)
+                ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-500/15 dark:text-indigo-300"
+                : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300",
+            )}
+          >
+            {a.name}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Only the accounts you pick count toward your emergency fund. Pick none to go back to the
+        default: every account except those linked on the Retirement tab.
+      </p>
+    </div>
+  );
 }
 
 export function FocusedQuestions({
@@ -217,6 +273,9 @@ export function FocusedQuestions({
           if (Number.isFinite(n)) fields[key] = Math.round(n * 100);
           break;
         }
+        case "accounts":
+          fields[key] = raw.split(",").filter(Boolean);
+          break;
         default:
           fields[key] = raw;
       }
@@ -334,6 +393,10 @@ export function FocusedQuestions({
                   value={draft[key] ?? ""}
                   onChange={(e) => set(key, e.target.value.toUpperCase())}
                 />
+              )}
+
+              {kind === "accounts" && (
+                <AccountPicker value={draft[key] ?? ""} onChange={(v) => set(key, v)} />
               )}
             </div>
           );

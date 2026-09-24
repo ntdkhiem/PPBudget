@@ -116,7 +116,16 @@ export function PositionCards({
           <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">{ef.note}</p>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             {formatCurrency(baseline.liquidAssets)} liquid
-            {baseline.usedOverrides.liquid ? " across the accounts you chose" : " across all assets"}
+            {baseline.usedOverrides.liquid
+              ? " across the accounts you chose"
+              : " across your accounts, minus those linked on the Retirement tab"}
+            .{" "}
+            <Link
+              href="/wealth/profile?ask=override_liquid_account_ids&from=cash"
+              className="font-medium underline underline-offset-2"
+            >
+              Choose accounts
+            </Link>
           </p>
           {ef.value !== null && (
             <Bar fill={ef.value / plan.emergency_fund.target_months} status={ef.status} />

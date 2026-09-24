@@ -78,9 +78,12 @@ export default function WealthProfilePage() {
   // someone on a page of forty fields after telling them there were two.
   const askParam = searchParams.get("ask");
   const askKeys = askParam ? askParam.split(",").filter(Boolean) : [];
-  // Action cards send people here from the overview; the profile's own rows
-  // send them from here. Returning to the wrong one loses their place.
-  const cameFromProfile = searchParams.get("from") === "profile";
+  // Action cards send people here from the overview, the profile's own rows
+  // from here, and the Cash page's account choice from there. Returning to the
+  // wrong one loses their place.
+  const from = searchParams.get("from");
+  const backTo =
+    from === "profile" ? "/wealth/profile" : from === "cash" ? "/wealth/cash" : "/wealth";
 
   const answered = profile?.fields ?? {};
   const answeredKeys = Object.keys(answered);
@@ -111,8 +114,8 @@ export default function WealthProfilePage() {
           labels={labels}
           knownFields={registry?.fields ?? []}
           profile={profile}
-          backTo={cameFromProfile ? "/wealth/profile" : "/wealth"}
-          onDone={() => router.push(cameFromProfile ? "/wealth/profile" : "/wealth")}
+          backTo={backTo}
+          onDone={() => router.push(backTo)}
         />
       </PageContainer>
     );
@@ -306,6 +309,8 @@ export default function WealthProfilePage() {
 /** Renders a stored answer in the shape its field actually has. */
 function formatAnswer(key: string, value: unknown): string {
   if (value === undefined || value === null) return "—";
+  // The one list answer is a set of account ids, which mean nothing on screen.
+  if (Array.isArray(value)) return `${value.length} ${value.length === 1 ? "account" : "accounts"}`;
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "string") {
     // ISO dates come back as timestamps, but they are calendar dates -- a date

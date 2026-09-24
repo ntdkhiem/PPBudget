@@ -189,6 +189,8 @@ export function coverageWarning(b: Baseline): string | null {
 export type StageKind = "starter_ef" | "high_apr_debt" | "full_ef" | "invest";
 
 export interface WaterfallStage {
+  /** Unique per stage: one card per balance means several stages share a kind. */
+  id: string;
   kind: StageKind;
   label: string;
   description: string;
@@ -348,101 +350,6 @@ export function computeGoalPlan(
             (goal.target_date ? (monthsUntil(goal.target_date, now) ?? 0) : Infinity)),
     };
   });
-}
-
-// -------------------------------------------------------------- projection
-
-export interface ScenarioInput {
-  /** Extra or reduced monthly contribution, in cents. */
-  monthlyContributionCents: number;
-  /** Fractional change to income, e.g. 0.1 for a 10% raise. */
-  incomeChange: number;
-  /** Fractional cut to discretionary spending, e.g. 0.3 for 30% less. */
-  spendingCut: number;
-}
-
-export interface ProjectionPoint {
-  monthIndex: number;
-  baselineNetWorth: number;
-  scenarioNetWorth: number;
-  baselineEfMonths: number | null;
-  scenarioEfMonths: number | null;
-}
-
-export interface Projection {
-  points: ProjectionPoint[];
-  baselineEfFundedMonth: number | null;
-  scenarioEfFundedMonth: number | null;
-  baselineFinalNetWorth: number;
-  scenarioFinalNetWorth: number;
-}
-
-/**
- * Projects net worth and emergency-fund coverage forward month by month.
- *
- * Deliberately simple: a monthly surplus added to net worth, compounded at the
- * stated return. It does not model taxes, irregular income, or market variance,
- * which is exactly why the UI prints the assumption next to the chart.
- */
-export function project(
-  b: Baseline,
-  plan: FinancialPlan,
-  scenario: ScenarioInput,
-  horizonMonths: number,
-): Projection {
-  const monthlyReturn = plan.assumptions.invest_return_apr / 12;
-  const efTarget = b.essentialMonthly * plan.emergency_fund.target_months;
-
-  const scenarioIncome = b.monthlyIncome * (1 + scenario.incomeChange);
-  const discretionary = b.monthlyWants + b.monthlyUnbucketed;
-  const scenarioOutflow = b.monthlyOutflow - discretionary * scenario.spendingCut;
-  const scenarioSurplus =
-    scenarioIncome - scenarioOutflow + scenario.monthlyContributionCents;
-
-  let baselineNw = b.netWorth;
-  let scenarioNw = b.netWorth;
-  let baselineLiquid = b.liquidAssets;
-  let scenarioLiquid = b.liquidAssets;
-
-  let baselineEfFundedMonth: number | null = null;
-  let scenarioEfFundedMonth: number | null = null;
-
-  const points: ProjectionPoint[] = [];
-
-  for (let i = 0; i <= horizonMonths; i++) {
-    if (i > 0) {
-      baselineNw = Math.round(baselineNw * (1 + monthlyReturn)) + b.monthlySurplus;
-      scenarioNw = Math.round(scenarioNw * (1 + monthlyReturn)) + Math.round(scenarioSurplus);
-      baselineLiquid += Math.max(0, b.monthlySurplus);
-      scenarioLiquid += Math.max(0, Math.round(scenarioSurplus));
-    }
-
-    const baselineEfMonths = b.essentialMonthly > 0 ? baselineLiquid / b.essentialMonthly : null;
-    const scenarioEfMonths = b.essentialMonthly > 0 ? scenarioLiquid / b.essentialMonthly : null;
-
-    if (baselineEfFundedMonth === null && efTarget > 0 && baselineLiquid >= efTarget) {
-      baselineEfFundedMonth = i;
-    }
-    if (scenarioEfFundedMonth === null && efTarget > 0 && scenarioLiquid >= efTarget) {
-      scenarioEfFundedMonth = i;
-    }
-
-    points.push({
-      monthIndex: i,
-      baselineNetWorth: baselineNw,
-      scenarioNetWorth: scenarioNw,
-      baselineEfMonths,
-      scenarioEfMonths,
-    });
-  }
-
-  return {
-    points,
-    baselineEfFundedMonth,
-    scenarioEfFundedMonth,
-    baselineFinalNetWorth: baselineNw,
-    scenarioFinalNetWorth: scenarioNw,
-  };
 }
 
 // ------------------------------------------------------------------ trends

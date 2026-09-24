@@ -30,16 +30,14 @@ import { AllocationPlan } from "./_components/allocation-plan";
 import { PositionCards } from "./_components/position-cards";
 import { TrendStrip } from "./_components/trend-strip";
 import { GoalsProgress } from "./_components/goals-progress";
-import { ScenarioExplorer } from "./_components/scenario-explorer";
 
 /**
  * The cash surface, now a VIEW of the server's plan rather than a second
  * implementation of it.
  *
  * What changed: the ordering, the headline and the dollar figures come from the
- * Go catalog. What stayed: the trend strip, the what-if sliders and the goal
- * schedule, which are presentation over the same numbers and have no business
- * round-tripping to the server on every drag.
+ * Go catalog. What stayed: the trend strip and the goal schedule, which are
+ * presentation over the same numbers.
  *
  * The old version computed its own waterfall, and that waterfall disagreed with
  * the engine on something that mattered -- it put high-APR debt ahead of the
@@ -166,8 +164,6 @@ export default function CashPage() {
           loading={loading}
           onPlanChange={handleGoalChange}
         />
-
-        <ScenarioExplorer baseline={baseline} plan={plan} loading={loading} />
       </motion.div>
     </PageContainer>
   );

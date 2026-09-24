@@ -206,13 +206,24 @@ export function ActionCard({
           )}
 
           {(isOpen || isDone) && (
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               {isOpen && (
                 <>
-                  <Button size="sm" onClick={() => onComplete(quest)} disabled={busy}>
-                    <Check className="h-3.5 w-3.5" />
-                    Mark done
-                  </Button>
+                  {/* An action the app checks for itself cannot be ticked by
+                      hand: the next refresh reopens it from the same data. Say
+                      how it closes rather than offer a button that undoes
+                      itself. */}
+                  {quest.verification === "manual" ? (
+                    <Button size="sm" onClick={() => onComplete(quest)} disabled={busy}>
+                      <Check className="h-3.5 w-3.5" />
+                      Mark done
+                    </Button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Ticks itself off once your accounts or answers show it is done
+                    </span>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"

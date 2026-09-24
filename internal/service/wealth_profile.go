@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
@@ -234,13 +235,24 @@ func (s *Service) DeriveProfileValues(ctx context.Context, userID string) (*Deri
 	}
 
 	for _, key := range s.ProfileFieldKeys() {
-		if !answered(key) {
+		if !answered(key) && !isOverrideField(key) {
 			out.Unanswered = append(out.Unanswered, key)
 		}
 	}
 	out.Stale = StaleFields(profile, time.Now().UTC())
 
 	return out, nil
+}
+
+// isOverrideField reports whether a profile key corrects a derived figure
+// rather than asking a question.
+//
+// Overrides are left out of the unanswered list: an absent correction is the
+// normal state, not a gap, and listing "override liquid account ids" among the
+// questions invited answering an account list with a dollar amount. They are
+// set from the figure they correct.
+func isOverrideField(key string) bool {
+	return strings.HasPrefix(key, "override_")
 }
 
 // ProfileFieldKeys exposes the canonical field list to handlers, so the

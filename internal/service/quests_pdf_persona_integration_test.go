@@ -361,35 +361,50 @@ func TestPlanSummaryMatchesTheActionListIntegration(t *testing.T) {
 		t.Error("expected the seeded months to be counted")
 	}
 
-	// Crossover is the sum of what phase 1 still owes over the monthly surplus,
-	// because those actions are funded one after another out of one pool.
-	var owed int64
+	// Crossover is when the surplus has paid for phase 1, worked out here from
+	// the persona's own figures rather than by re-adding the action list: the
+	// Chase balance, plus whatever a six-month fund still lacks. The forgone
+	// match is claimed through payroll and the idle savings are moved rather
+	// than saved, so neither is owed -- the old sum counted both, and put the
+	// crossover twice as far out.
+	surplus := money.Money(personaMonthlyIncome - personaEssentials)
+	if summary.MonthlySurplus != surplus {
+		t.Fatalf("surplus: got %d want %d", summary.MonthlySurplus, surplus)
+	}
+	owed := money.Money(personaChaseBalance)
+	if gap := money.Money(6*personaEssentials) - summary.LiquidAssets; gap > 0 {
+		owed += gap
+	}
+	if want := monthsToFill(owed, surplus); summary.CrossoverMonths == nil || *summary.CrossoverMonths != want {
+		t.Errorf("crossover: got %v want %d", summary.CrossoverMonths, want)
+	}
+
+	// The schedule the Cash page draws holds only what the surplus pays for,
+	// and its last stage ends where the crossover says.
+	byID := map[string]domain.Quest{}
 	for _, q := range quests {
-		if q.Phase != PhaseLiquidity || q.TargetAmount == nil {
-			continue
-		}
-		switch q.Status {
-		case domain.QuestStatusAvailable, domain.QuestStatusBlocked, domain.QuestStatusLocked:
-			owed += q.TargetAmount.ToInt64()
+		byID[q.ID] = q
+	}
+	var scheduled []string
+	for _, f := range summary.Funding {
+		key := byID[f.QuestID].CatalogKey
+		scheduled = append(scheduled, key)
+		if base, _, _ := strings.Cut(key, ":"); !fundedFromSurplus[base] {
+			t.Errorf("%s is not paid for out of the surplus, but was scheduled", key)
 		}
 	}
-	switch {
-	case owed == 0:
-		if summary.CrossoverMonths == nil || *summary.CrossoverMonths != 0 {
-			t.Errorf("nothing owed should mean zero months, got %v", summary.CrossoverMonths)
-		}
-	case summary.MonthlySurplus <= 0:
-		if summary.CrossoverMonths != nil {
-			t.Error("with no surplus the answer is 'never at this rate', which is null, not a number")
-		}
-	default:
-		want := int(owed / summary.MonthlySurplus.ToInt64())
-		if owed%summary.MonthlySurplus.ToInt64() != 0 {
-			want++
-		}
-		if summary.CrossoverMonths == nil || *summary.CrossoverMonths != want {
-			t.Errorf("crossover: got %v want %d", summary.CrossoverMonths, want)
-		}
+	if len(summary.Funding) == 0 {
+		t.Fatal("expected a funding schedule for the card and the emergency fund")
+	}
+	last := summary.Funding[len(summary.Funding)-1]
+	if last.StartsInMonths == nil || last.MonthsToComplete == nil || summary.CrossoverMonths == nil ||
+		*last.StartsInMonths+*last.MonthsToComplete != *summary.CrossoverMonths {
+		t.Errorf("the last stage should end at the crossover; schedule %v, stages %+v", scheduled, summary.Funding)
+	}
+
+	// The breakdown the Cash page's movable-money card needs.
+	if summary.MonthlyWants != 0 || summary.MonthlyOutflow != personaEssentials {
+		t.Errorf("breakdown: wants %d, outflow %d", summary.MonthlyWants, summary.MonthlyOutflow)
 	}
 
 	// Strategy drives the target rate; the persona never set one, so the
@@ -519,5 +534,76 @@ func TestFundingAnAccountClosesTheActionIntegration(t *testing.T) {
 	if q := findQuest(reopened, "starter_emergency_fund"); q == nil ||
 		q.Status == domain.QuestStatusComplete {
 		t.Error("draining the account should reopen an auto-verified action")
+	}
+}
+
+// Paying a card off completes its action, end to end through regeneration.
+//
+// It used to vanish: the rule produced nothing for a zero balance, so the
+// prune in ReplaceQuests deleted the row and cascaded away its history.
+func TestPayingOffACardCompletesItsActionIntegration(t *testing.T) {
+	pool := sfSetupTestDB(t)
+	ctx := context.Background()
+	svc := newRulesTestService(pool)
+	userID := sfCreateTestUser(t, pool)
+
+	var card string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO accounts (user_id, name, type, currency) VALUES ($1, 'Chase Sapphire', 'liability', 'USD') RETURNING id`,
+		userID).Scan(&card); err != nil {
+		t.Fatalf("create card: %v", err)
+	}
+	setBalance := func(cents int64) {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO account_balance_snapshots (user_id, account_id, as_of_date, balance, source)
+			 VALUES ($1, $2, '-infinity'::date, $3, 'opening')
+			 ON CONFLICT (account_id, as_of_date) DO UPDATE SET balance = EXCLUDED.balance`,
+			userID, card, cents); err != nil {
+			t.Fatalf("set balance: %v", err)
+		}
+	}
+	setBalance(-382_435)
+	if err := svc.UpsertAccountTerms(ctx, userID, domain.AccountTerms{AccountID: card, APR: ptr(0.2249)}); err != nil {
+		t.Fatalf("upsert terms: %v", err)
+	}
+
+	key := "clear_high_apr_balance:" + card
+	before, _, err := svc.GenerateQuests(ctx, userID)
+	if err != nil {
+		t.Fatalf("GenerateQuests: %v", err)
+	}
+	open := findQuest(before, key)
+	if open == nil || open.Status != domain.QuestStatusAvailable {
+		t.Fatalf("expected an open action for the card; got %+v", open)
+	}
+
+	setBalance(0)
+
+	after, _, err := svc.GenerateQuests(ctx, userID)
+	if err != nil {
+		t.Fatalf("GenerateQuests (after paying off): %v", err)
+	}
+	done := findQuest(after, key)
+	if done == nil {
+		t.Fatal("paying off the card deleted its action instead of completing it")
+	}
+	if done.ID != open.ID {
+		t.Errorf("the action should complete in place; id %s became %s", open.ID, done.ID)
+	}
+	if done.Status != domain.QuestStatusComplete || done.CompletedSource != domain.QuestSourceAuto {
+		t.Errorf("status %q from %q, want complete from auto", done.Status, done.CompletedSource)
+	}
+
+	events, err := svc.ListQuestEvents(ctx, userID, done.ID)
+	if err != nil {
+		t.Fatalf("ListQuestEvents: %v", err)
+	}
+	var generated, completed bool
+	for _, e := range events {
+		generated = generated || e.Event == domain.QuestEventGenerated
+		completed = completed || e.Event == domain.QuestEventCompleted
+	}
+	if !generated || !completed {
+		t.Errorf("history should run from generated to completed; got %+v", events)
 	}
 }

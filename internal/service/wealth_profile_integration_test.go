@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -234,6 +235,19 @@ func TestDeriveProfileValuesMatchesBaselineIntegration(t *testing.T) {
 	}
 	if spend.AlreadyAnswered {
 		t.Error("nothing was answered yet; AlreadyAnswered should be false")
+	}
+
+	// Questions are listed as unanswered; corrections to derived figures are
+	// not, since having none is the normal state.
+	var asksBirthDate bool
+	for _, key := range derived.Unanswered {
+		asksBirthDate = asksBirthDate || key == "date_of_birth"
+		if strings.HasPrefix(key, "override_") {
+			t.Errorf("%s is a correction, not a question, and should not be listed as unanswered", key)
+		}
+	}
+	if !asksBirthDate {
+		t.Errorf("an unanswered question should still be listed; got %v", derived.Unanswered)
 	}
 
 	// Deriving writes nothing. Confirming is a separate, explicit act -- which

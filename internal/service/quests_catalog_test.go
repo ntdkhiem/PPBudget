@@ -1330,3 +1330,204 @@ func TestDiscretionaryCapRequiresAStreakNotAnAverage(t *testing.T) {
 		}
 	})
 }
+
+// ------------------------------------------ paid-off balances and idle cash
+
+// Paying a card off used to make its action vanish: the rule produced nothing
+// for a zero balance, regeneration pruned the row, and its history went with
+// it. The one outcome this phase exists for left no trace.
+func TestPaidOffBalanceCompletesRatherThanVanishing(t *testing.T) {
+	withCard := func(balance money.Money, tracked string) questContext {
+		qc := baseContext(nil)
+		qc.Accounts = []domain.PlanningAccount{
+			{ID: "card", Name: "Chase", Type: "liability", Balance: balance},
+		}
+		qc.Terms["card"] = domain.AccountTerms{AccountID: "card", APR: ptr(0.2249)}
+		if tracked != "" {
+			qc.ExistingStatus[tracked] = domain.QuestStatusAvailable
+		}
+		return qc
+	}
+
+	t.Run("a tracked card at zero completes", func(t *testing.T) {
+		quests := evaluateCatalog(withCard(0, "clear_high_apr_balance:card"))
+		q := mustFind(t, quests, "clear_high_apr_balance:card")
+		if q.Status != domain.QuestStatusComplete {
+			t.Errorf("status: got %q want complete", q.Status)
+		}
+		if !strings.Contains(q.Title, "Chase") {
+			t.Errorf("should name the card; got %q", q.Title)
+		}
+	})
+
+	t.Run("a zero balance that was never an action produces nothing", func(t *testing.T) {
+		if q := findQuest(evaluateCatalog(withCard(0, "")), "clear_high_apr_balance"); q != nil {
+			t.Errorf("an untracked zero balance should not become an action; got %+v", q)
+		}
+	})
+
+	t.Run("a paid-off card does not hide balances with no rate", func(t *testing.T) {
+		qc := withCard(0, "clear_high_apr_balance:card")
+		qc.Accounts = append(qc.Accounts,
+			domain.PlanningAccount{ID: "store", Name: "Store Card", Type: "liability", Balance: -90_000})
+
+		quests := evaluateCatalog(qc)
+		if q := findQuest(quests, "clear_high_apr_balance:card"); q == nil || q.Status != domain.QuestStatusComplete {
+			t.Errorf("the paid-off card should still read as complete; got %+v", q)
+		}
+		var asked bool
+		for _, q := range quests {
+			if q.CatalogKey == "clear_high_apr_balance" && q.Status == domain.QuestStatusBlocked {
+				asked = true
+			}
+		}
+		if !asked {
+			t.Error("the unrated store card should still be asked about")
+		}
+	})
+
+	t.Run("a tracked promotional balance at zero completes", func(t *testing.T) {
+		expiry := time.Date(2027, time.March, 14, 0, 0, 0, 0, time.UTC)
+		qc := withCard(0, "clear_promo_balance_before_expiry:card")
+		qc.Terms["card"] = domain.AccountTerms{
+			AccountID: "card", APR: ptr(0.2699), PromoAPR: ptr(0.0), PromoExpiresOn: &expiry,
+		}
+		q := mustFind(t, evaluateCatalog(qc), "clear_promo_balance_before_expiry:card")
+		if q.Status != domain.QuestStatusComplete {
+			t.Errorf("status: got %q want complete", q.Status)
+		}
+	})
+}
+
+// A retirement account with no rate recorded read as 0% cash, so the sweep
+// would have told the user to move their 401(k) into a savings account.
+func TestSweepOnlyMovesCash(t *testing.T) {
+	qc := baseContext(nil)
+	qc.Accounts = []domain.PlanningAccount{
+		{ID: "savings", Name: "BofA Savings", Type: "asset", Balance: 2_000_000},
+		{ID: "hysa", Name: "Ally HYSA", Type: "asset", Balance: 600_000},
+		{ID: "401k", Name: "Fidelity 401(k)", Type: "asset", Balance: 4_000_000},
+	}
+	qc.Terms["savings"] = domain.AccountTerms{AccountID: "savings", APY: ptr(0.0001)}
+	qc.Terms["hysa"] = domain.AccountTerms{AccountID: "hysa", APY: ptr(0.042)}
+	qc.Cash = map[string]bool{"savings": true, "hysa": true}
+
+	quests := evaluateCatalog(qc)
+	if findQuest(quests, "sweep_idle_cash:savings") == nil {
+		t.Error("the 0.01% savings account should be swept into the 4.2% one")
+	}
+	if q := findQuest(quests, "sweep_idle_cash:401k"); q != nil {
+		t.Errorf("a 401(k) is not idle cash; got %q", q.Title)
+	}
+}
+
+// ------------------------------------------------------- the funding date
+
+// Only what the surplus actually pays for counts toward the crossover.
+//
+// The old sum added the yearly match shortfall, the monthly discretionary cap
+// and cash the user already had, and counted the first month of essentials
+// twice -- ten months for a plan the surplus finishes in seven.
+func TestFundingScheduleCountsOnlyWhatTheSurplusPays(t *testing.T) {
+	amount := func(v int64) *money.Money { m := money.Money(v); return &m }
+	open := domain.QuestStatusAvailable
+	quests := func(starterStatus string) []domain.Quest {
+		return []domain.Quest{
+			{ID: "m", CatalogKey: "capture_employer_match", Phase: PhaseLiquidity, Status: open, TargetAmount: amount(330_000)},
+			{ID: "s", CatalogKey: "starter_emergency_fund", Phase: PhaseLiquidity, Status: starterStatus, TargetAmount: amount(100_000)},
+			{ID: "c", CatalogKey: "clear_high_apr_balance:card", Phase: PhaseLiquidity, Status: open, TargetAmount: amount(382_435)},
+			{ID: "w", CatalogKey: "sweep_idle_cash:savings", Phase: PhaseLiquidity, Status: open, TargetAmount: amount(140_084)},
+			{ID: "d", CatalogKey: "discretionary_cap", Phase: PhaseLiquidity, Status: open, TargetAmount: amount(68_236)},
+			{ID: "f", CatalogKey: "full_emergency_fund", Phase: PhaseLiquidity, Status: open, TargetAmount: amount(1_204_000)},
+			{ID: "h", CatalogKey: "max_hsa", Phase: PhaseTaxAdvantaged, Status: open, TargetAmount: amount(440_000)},
+		}
+	}
+	const surplus = money.Money(238_822)
+
+	t.Run("sequenced against one surplus", func(t *testing.T) {
+		stages, crossover := fundingSchedule(quests(open), surplus)
+
+		if len(stages) != 3 {
+			t.Fatalf("expected the starter, the card and the full fund; got %+v", stages)
+		}
+		want := []struct {
+			id                     string
+			remaining              money.Money
+			startsIn, monthsToFill int
+		}{
+			{"s", 100_000, 0, 1},
+			{"c", 382_435, 0, 3},
+			// The full fund's own gap less the month the starter already adds.
+			{"f", 1_104_000, 2, 5},
+		}
+		for i, w := range want {
+			got := stages[i]
+			if got.QuestID != w.id || got.Remaining != w.remaining {
+				t.Errorf("stage %d: got %s owing %d, want %s owing %d", i, got.QuestID, got.Remaining, w.id, w.remaining)
+				continue
+			}
+			if got.StartsInMonths == nil || *got.StartsInMonths != w.startsIn ||
+				got.MonthsToComplete == nil || *got.MonthsToComplete != w.monthsToFill {
+				t.Errorf("stage %s: starts %v for %v months, want %d for %d",
+					w.id, got.StartsInMonths, got.MonthsToComplete, w.startsIn, w.monthsToFill)
+			}
+		}
+
+		// 1,586,435 owed at 238,822 a month.
+		if crossover == nil || *crossover != 7 {
+			t.Fatalf("crossover: got %v want 7", crossover)
+		}
+		last := stages[len(stages)-1]
+		if *last.StartsInMonths+*last.MonthsToComplete != *crossover {
+			t.Error("the last stage should end exactly at the crossover")
+		}
+	})
+
+	t.Run("a finished starter leaves the full fund's gap whole", func(t *testing.T) {
+		stages, _ := fundingSchedule(quests(domain.QuestStatusComplete), surplus)
+		if stages[0].Remaining != 0 || stages[0].MonthsToComplete == nil || *stages[0].MonthsToComplete != 0 {
+			t.Errorf("a complete stage owes nothing and takes no time; got %+v", stages[0])
+		}
+		if stages[2].Remaining != 1_204_000 {
+			t.Errorf("full fund: got %d want 1204000", stages[2].Remaining)
+		}
+	})
+
+	t.Run("no surplus is never, not a large number", func(t *testing.T) {
+		stages, crossover := fundingSchedule(quests(open), 0)
+		if crossover != nil {
+			t.Errorf("crossover: got %d want nil", *crossover)
+		}
+		if stages[1].MonthsToComplete != nil || stages[1].StartsInMonths != nil {
+			t.Errorf("an unfunded stage has no schedule; got %+v", stages[1])
+		}
+	})
+
+	t.Run("nothing owed is now", func(t *testing.T) {
+		_, crossover := fundingSchedule(nil, surplus)
+		if crossover == nil || *crossover != 0 {
+			t.Errorf("crossover: got %v want 0", crossover)
+		}
+	})
+}
+
+// The Cash page's spending breakdown comes from the summary. Without these
+// the movable-money figure read $0 for everyone.
+func TestSummaryCarriesTheSpendingBreakdown(t *testing.T) {
+	qc := baseContext(nil)
+	qc.Baseline.MonthlyUnbucketed = 25_000
+	qc.Baseline.MonthlySavings = 15_000
+	qc.Baseline.TotalLiabilities = -382_435
+
+	s := summarise(qc, nil)
+	if s.MonthlyWants != 60_000 || s.MonthlyUnbucketed != 25_000 || s.MonthlySavings != 15_000 {
+		t.Errorf("breakdown: wants %d, unbucketed %d, savings %d",
+			s.MonthlyWants, s.MonthlyUnbucketed, s.MonthlySavings)
+	}
+	if s.TotalLiabilities != -382_435 {
+		t.Errorf("liabilities: got %d", s.TotalLiabilities)
+	}
+	if s.Funding == nil {
+		t.Error("an empty schedule should serialise as [], not null")
+	}
+}

@@ -35,8 +35,7 @@ import type {
  * different dates for one milestone.
  */
 
-/** Phase 1 in the Go catalog: liquidity and high-cost debt. */
-const PHASE_LIQUIDITY = 1;
+/** Phase 4 in the Go catalog: investment allocation. */
 const PHASE_ALLOCATION = 4;
 
 /**
@@ -83,12 +82,12 @@ export function toBaseline(
     monthlyIncome: s?.monthly_income ?? 0,
     monthlyOutflow: s?.monthly_outflow ?? 0,
     essentialMonthly: s?.essential_monthly ?? 0,
-    monthlyWants: 0,
-    monthlySavingsSpend: 0,
-    monthlyUnbucketed: 0,
+    monthlyWants: s?.monthly_wants ?? 0,
+    monthlySavingsSpend: s?.monthly_savings ?? 0,
+    monthlyUnbucketed: s?.monthly_unbucketed ?? 0,
     monthlySurplus: s?.monthly_surplus ?? 0,
     liquidAssets: s?.liquid_assets ?? 0,
-    totalLiabilities: 0,
+    totalLiabilities: s?.total_liabilities ?? 0,
     netWorth: s?.net_worth ?? 0,
     bucketCoverage: s?.bucket_coverage ?? 1,
     usedOverrides: {
@@ -104,9 +103,11 @@ export function toBaseline(
  * Phase 1 and the investing stage, shaped as the waterfall the allocation
  * section draws.
  *
- * Ordering comes from the server, which is the point: the browser used to
- * decide that high-APR debt came before the full emergency fund, and it had the
- * starter buffer in the wrong place relative to both.
+ * The schedule comes from the server whole -- which actions the surplus pays
+ * for, what each still needs, when each starts -- so the stages here cannot
+ * disagree with the crossover beside them. Actions the surplus does not pay
+ * for (the employer match, the spending cap, moving idle cash) are left to the
+ * action list rather than drawn as stages that take months.
  */
 export function toWaterfall(
   quests: Quest[] | undefined,
@@ -114,36 +115,28 @@ export function toWaterfall(
 ): Waterfall {
   const pool = Math.max(0, summary?.monthly_surplus ?? 0);
   const crossover = summary?.crossover_months ?? null;
+  const byId = new Map((quests ?? []).map((q) => [q.id, q]));
 
-  const funding = (quests ?? [])
-    .filter((q) => q.phase === PHASE_LIQUIDITY && q.status !== "not_applicable")
-    .sort((a, b) => a.priority - b.priority);
-
-  let elapsed: number | null = 0;
   let activeAssigned = false;
+  const stages: WaterfallStage[] = [];
 
-  const stages: WaterfallStage[] = funding.map((q) => {
+  for (const f of summary?.funding ?? []) {
+    const q = byId.get(f.quest_id);
+    if (!q) continue;
+
     const complete = q.status === "complete" || q.status === "skipped";
-    const remaining = complete ? 0 : (q.target_amount ?? 0);
-    const months =
-      complete || remaining <= 0 ? 0 : pool > 0 ? Math.ceil(remaining / pool) : null;
-
-    const startsInMonths = elapsed;
-    const active = !complete && q.status === "available" && !activeAssigned;
+    const active = !complete && q.status === "available" && f.remaining > 0 && !activeAssigned;
     if (active) activeAssigned = true;
 
-    if (!complete) {
-      elapsed = elapsed === null || months === null ? null : elapsed + months;
-    }
-
-    return {
+    stages.push({
+      id: q.id,
       kind: stageKindFor(q.catalog_key),
       label: q.title,
       description: q.detail ?? "",
       monthlyCents: complete ? 0 : pool,
-      remainingCents: complete ? 0 : remaining,
-      monthsToComplete: months,
-      startsInMonths,
+      remainingCents: complete ? 0 : f.remaining,
+      monthsToComplete: f.months_to_complete,
+      startsInMonths: f.starts_in_months,
       active,
       complete,
       // A blocked action cannot be sized, and saying why is more use than
@@ -154,10 +147,11 @@ export function toWaterfall(
           : q.status === "locked"
             ? "Comes after the stages above."
             : undefined,
-    };
-  });
+    });
+  }
 
   stages.push({
+    id: "invest",
     kind: "invest",
     label: "Invest the remainder",
     description: "Long-term money, once the cushion is in place",
@@ -180,10 +174,10 @@ export function toWaterfall(
 /**
  * Maps a catalog key onto the stage kind the component styles by.
  *
- * The catalog has more actions than the old four-stage waterfall had kinds, so
- * anything unrecognised falls back to the emergency-fund styling rather than
- * being dropped -- a stage the user cannot see is worse than one that is the
- * wrong colour.
+ * Only the funding actions in the server's schedule arrive here. Anything
+ * unrecognised falls back to the emergency-fund styling rather than being
+ * dropped -- a stage the user cannot see is worse than one that is the wrong
+ * colour.
  */
 function stageKindFor(catalogKey: string): WaterfallStage["kind"] {
   const base = catalogKey.split(":")[0];
