@@ -13,6 +13,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
@@ -34,6 +37,16 @@ const (
 	personaAllyHYSA      = 623_614    // $6,236.14
 )
 
+// setRole classifies an account the way the Accounts page would. Unclassified
+// accounts count as neither cash nor investment, so fixtures must say.
+func setRole(t *testing.T, pool *pgxpool.Pool, accountID, role string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE accounts SET role = $2 WHERE id = $1`, accountID, role); err != nil {
+		t.Fatalf("set role %s on %s: %v", role, accountID, err)
+	}
+}
+
 func seedPDFPersona(t *testing.T, pool *pgxpool.Pool, svc *Service, userID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -41,10 +54,13 @@ func seedPDFPersona(t *testing.T, pool *pgxpool.Pool, svc *Service, userID strin
 	checking := mkAccount(t, pool, userID, "BofA Checking")
 	savings := mkAccount(t, pool, userID, "BofA Savings")
 	hysa := mkAccount(t, pool, userID, "Ally HYSA")
+	setRole(t, pool, checking, domain.RoleChecking)
+	setRole(t, pool, savings, domain.RoleSavings)
+	setRole(t, pool, hysa, domain.RoleSavings)
 
 	var chase string
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO accounts (user_id, name, type, currency) VALUES ($1, 'Chase Sapphire', 'liability', 'USD') RETURNING id`,
+		`INSERT INTO accounts (user_id, name, type, role, currency) VALUES ($1, 'Chase Sapphire', 'liability', 'credit_card', 'USD') RETURNING id`,
 		userID).Scan(&chase); err != nil {
 		t.Fatalf("create card: %v", err)
 	}
@@ -120,7 +136,7 @@ func seedPDFPersona(t *testing.T, pool *pgxpool.Pool, svc *Service, userID strin
 	// The $80,000 grant vesting $5,000 quarterly, first tranche ~41 days out,
 	// and the ESPP purchasing on 1 March.
 	vest := time.Now().UTC().AddDate(0, 0, 41)
-	if _, err := svc.repo.UpsertEquityGrant(ctx, userID, domain.EquityGrant{
+	if _, err := svc.UpsertEquityGrant(ctx, userID, domain.EquityGrant{
 		Kind: domain.EquityKindRSU, Label: ptr("New hire grant"),
 		GrantDate:    ptr(time.Now().UTC().AddDate(0, -2, 0)),
 		NextVestDate: &vest, VestFrequency: ptr("quarterly"), VestShare: ptr(0.0625),
@@ -129,7 +145,7 @@ func seedPDFPersona(t *testing.T, pool *pgxpool.Pool, svc *Service, userID strin
 		t.Fatalf("seed RSU grant: %v", err)
 	}
 	purchase := time.Date(time.Now().UTC().Year()+1, time.March, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := svc.repo.UpsertEquityGrant(ctx, userID, domain.EquityGrant{
+	if _, err := svc.UpsertEquityGrant(ctx, userID, domain.EquityGrant{
 		Kind: domain.EquityKindESPP, Label: ptr("ESPP"),
 		ESPPDiscountPct: ptr(0.15), ESPPHasLookback: ptr(true),
 		ESPPContributionPct: ptr(0.05), ESPPPlanMaxPct: ptr(0.15),
@@ -363,20 +379,32 @@ func TestPlanSummaryMatchesTheActionListIntegration(t *testing.T) {
 
 	// Crossover is when the surplus has paid for phase 1, worked out here from
 	// the persona's own figures rather than by re-adding the action list: the
-	// Chase balance, plus whatever a six-month fund still lacks. The forgone
-	// match is claimed through payroll and the idle savings are moved rather
-	// than saved, so neither is owed -- the old sum counted both, and put the
-	// crossover twice as far out.
+	// Chase balance and the interest it charges while it is paid down, plus
+	// whatever a six-month fund still lacks. The forgone match is claimed
+	// through payroll and the idle savings are moved rather than saved, so
+	// neither is owed -- the old sum counted both, and put the crossover twice
+	// as far out.
 	surplus := money.Money(personaMonthlyIncome - personaEssentials)
 	if summary.MonthlySurplus != surplus {
 		t.Fatalf("surplus: got %d want %d", summary.MonthlySurplus, surplus)
 	}
-	owed := money.Money(personaChaseBalance)
-	if gap := money.Money(6*personaEssentials) - summary.LiquidAssets; gap > 0 {
-		owed += gap
+	// The savings already cover the starter cushion, so the card is first in
+	// line: paid from the first month, charging 22.49% only while it is.
+	owed := float64(personaChaseBalance)
+	for card := owed; card > 0; {
+		interest := card * 0.2249 / 12
+		owed += interest
+		card += interest - float64(surplus)
 	}
-	if want := monthsToFill(owed, surplus); summary.CrossoverMonths == nil || *summary.CrossoverMonths != want {
+	if gap := money.Money(6*personaEssentials) - summary.LiquidAssets; gap > 0 {
+		owed += float64(gap)
+	}
+	want := int(math.Ceil(owed / float64(surplus)))
+	if summary.CrossoverMonths == nil || *summary.CrossoverMonths != want {
 		t.Errorf("crossover: got %v want %d", summary.CrossoverMonths, want)
+	}
+	if summary.CrossoverOn == nil || !summary.CrossoverOn.Equal(monthStart(time.Now().UTC(), want)) {
+		t.Errorf("crossover date: got %v want the first of the month %d months out", summary.CrossoverOn, want)
 	}
 
 	// The schedule the Cash page draws holds only what the surplus pays for,
@@ -428,6 +456,8 @@ func TestFundingAnAccountClosesTheActionIntegration(t *testing.T) {
 
 	checking := mkAccount(t, pool, userID, "Checking")
 	savings := mkAccount(t, pool, userID, "Savings")
+	setRole(t, pool, checking, domain.RoleChecking)
+	setRole(t, pool, savings, domain.RoleSavings)
 
 	// Essentials of $2,000/month, established over three complete months.
 	const essentials = 200_000
@@ -549,7 +579,7 @@ func TestPayingOffACardCompletesItsActionIntegration(t *testing.T) {
 
 	var card string
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO accounts (user_id, name, type, currency) VALUES ($1, 'Chase Sapphire', 'liability', 'USD') RETURNING id`,
+		`INSERT INTO accounts (user_id, name, type, role, currency) VALUES ($1, 'Chase Sapphire', 'liability', 'credit_card', 'USD') RETURNING id`,
 		userID).Scan(&card); err != nil {
 		t.Fatalf("create card: %v", err)
 	}
@@ -605,5 +635,79 @@ func TestPayingOffACardCompletesItsActionIntegration(t *testing.T) {
 	}
 	if !generated || !completed {
 		t.Errorf("history should run from generated to completed; got %+v", events)
+	}
+}
+
+// Reading the action list is a read. The first reading records what it finds;
+// a second one, with nothing changed, writes nothing at all.
+func TestReadingTheActionListWritesNothingIntegration(t *testing.T) {
+	pool := sfSetupTestDB(t)
+	ctx := context.Background()
+	svc := newRulesTestService(pool)
+	userID := sfCreateTestUser(t, pool)
+	seedPDFPersona(t, pool, svc, userID)
+
+	footprint := func() (states, events int, lastChange time.Time) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `
+			SELECT (SELECT count(*) FROM wealth_quest_state WHERE user_id = $1),
+			       (SELECT count(*) FROM wealth_quest_events WHERE user_id = $1),
+			       (SELECT COALESCE(max(changed_at), 'epoch') FROM wealth_quest_state WHERE user_id = $1)`,
+			userID).Scan(&states, &events, &lastChange); err != nil {
+			t.Fatalf("footprint: %v", err)
+		}
+		return
+	}
+
+	first, _, err := svc.GenerateQuests(ctx, userID)
+	if err != nil {
+		t.Fatalf("GenerateQuests: %v", err)
+	}
+	states, events, changed := footprint()
+	if states != len(first) {
+		t.Errorf("the first reading should record every action once: %d states for %d actions", states, len(first))
+	}
+
+	if _, _, err := svc.GenerateQuests(ctx, userID); err != nil {
+		t.Fatalf("GenerateQuests (again): %v", err)
+	}
+	s2, e2, c2 := footprint()
+	if s2 != states || e2 != events || !c2.Equal(changed) {
+		t.Errorf("an unchanged reading wrote: states %d->%d, events %d->%d, last change %v->%v",
+			states, s2, events, e2, changed, c2)
+	}
+
+	// Marking something done is the user's event; the reading after it must
+	// not add an engine event restating it.
+	if err := svc.SetQuestStatus(ctx, userID, "establish_sell_on_vest", domain.QuestStatusComplete, ""); err != nil {
+		t.Fatalf("SetQuestStatus: %v", err)
+	}
+	after, _, err := svc.GenerateQuests(ctx, userID)
+	if err != nil {
+		t.Fatalf("GenerateQuests (after mark): %v", err)
+	}
+	if q := findQuest(after, "establish_sell_on_vest"); q == nil || q.Status != domain.QuestStatusComplete {
+		t.Fatalf("the marked action should read as complete; got %+v", q)
+	}
+	evs, _ := svc.ListQuestEvents(ctx, userID, "establish_sell_on_vest")
+	var completions int
+	for _, e := range evs {
+		if e.Event == domain.QuestEventCompleted {
+			completions++
+			if e.Source != domain.QuestSourceManual {
+				t.Errorf("the completion should be the user's, got source %q", e.Source)
+			}
+		}
+	}
+	if completions != 1 {
+		t.Errorf("completion events: got %d want exactly the user's one", completions)
+	}
+
+	// Keys the catalog cannot produce are refused; fan-out keys are accepted by base.
+	if err := svc.SetQuestStatus(ctx, userID, "no_such_action", domain.QuestStatusComplete, ""); !errors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("unknown key: got %v, want ErrNotFound", err)
+	}
+	if err := svc.SetQuestStatus(ctx, userID, "clear_high_apr_balance:any-card", domain.QuestStatusSkipped, ""); err != nil {
+		t.Errorf("a fan-out key should be accepted: %v", err)
 	}
 }

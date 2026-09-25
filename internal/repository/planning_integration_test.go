@@ -32,11 +32,11 @@ func TestPlanningBaselineIntegration(t *testing.T) {
 	repo := New(pool)
 
 	userID := createTestUser(t, pool, "planning")
-	accID, err := repo.CreateAccount(ctx, userID, "Planning Checking", "asset", "USD", 0)
+	accID, err := repo.CreateAccount(ctx, userID, "Planning Checking", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
-	cardID, err := repo.CreateAccount(ctx, userID, "Planning Card", "liability", "USD", 0)
+	cardID, err := repo.CreateAccount(ctx, userID, "Planning Card", "liability", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount (liability): %v", err)
 	}

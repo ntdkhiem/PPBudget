@@ -434,7 +434,11 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 
 			var targetAccountID string
 			if mappedAccountID == "new" {
-				newID, err := s.repo.UpsertSimplefinAccount(bgCtx, userID, acc.ID, acc.Name, acc.Currency)
+				// An unparseable balance infers from the name alone; the
+				// snapshot below reports the parse failure itself.
+				balance, _ := money.NewFromString(acc.Balance)
+				accType, role := inferAccountKind(acc.Name, balance)
+				newID, err := s.repo.UpsertSimplefinAccount(bgCtx, userID, acc.ID, acc.Name, acc.Currency, accType, role)
 				if err != nil {
 					s.logger.Error("failed to create account", "error", err, "sf_id", acc.ID, "user_id", userID)
 					continue

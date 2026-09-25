@@ -6,6 +6,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -221,99 +223,13 @@ func TestTaxLimitsIntegration(t *testing.T) {
 	}
 }
 
-// Regeneration runs whenever the profile changes, so it must never undo work.
-func TestQuestReplacePreservesCompletionIntegration(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	repo := New(pool)
-	userID := createTestUser(t, pool, "wealth-quests")
-
-	initial := []domain.Quest{
-		{CatalogKey: "capture_employer_match", Phase: 1, Priority: 0,
-			Status: domain.QuestStatusAvailable, Title: "Capture $4,000 of employer match",
-			Verification: domain.QuestVerificationManual},
-		{CatalogKey: "starter_emergency_fund", Phase: 1, Priority: 10,
-			Status: domain.QuestStatusAvailable, Title: "Build a one-month buffer",
-			Verification: domain.QuestVerificationManual},
-		{CatalogKey: "max_hsa", Phase: 3, Priority: 20,
-			Status: domain.QuestStatusLocked, Title: "Max your HSA",
-			Verification: domain.QuestVerificationManual},
-	}
-	if err := repo.ReplaceQuests(ctx, userID, initial); err != nil {
-		t.Fatalf("ReplaceQuests: %v", err)
-	}
-
-	quests, err := repo.ListQuests(ctx, userID)
-	if err != nil {
-		t.Fatalf("ListQuests: %v", err)
-	}
-	if len(quests) != 3 {
-		t.Fatalf("expected 3 quests, got %d", len(quests))
-	}
-	// Ordering is phase then priority: the match must lead.
-	if quests[0].CatalogKey != "capture_employer_match" {
-		t.Errorf("employer match should sort first, got %q", quests[0].CatalogKey)
-	}
-
-	if _, err := repo.SetQuestStatus(ctx, userID, quests[0].ID,
-		domain.QuestStatusComplete, domain.QuestSourceManual, "done in payroll"); err != nil {
-		t.Fatalf("SetQuestStatus: %v", err)
-	}
-
-	// Regenerate with fresh text and a dropped action.
-	regenerated := []domain.Quest{
-		{CatalogKey: "capture_employer_match", Phase: 1, Priority: 0,
-			Status: domain.QuestStatusAvailable, Title: "REGENERATED TITLE",
-			Verification: domain.QuestVerificationManual},
-		{CatalogKey: "starter_emergency_fund", Phase: 1, Priority: 10,
-			Status: domain.QuestStatusAvailable, Title: "Build a one-month buffer",
-			Verification: domain.QuestVerificationManual},
-	}
-	if err := repo.ReplaceQuests(ctx, userID, regenerated); err != nil {
-		t.Fatalf("ReplaceQuests (regenerate): %v", err)
-	}
-
-	quests, _ = repo.ListQuests(ctx, userID)
-	byKey := map[string]domain.Quest{}
-	for _, q := range quests {
-		byKey[q.CatalogKey] = q
-	}
-
-	match := byKey["capture_employer_match"]
-	if match.Status != domain.QuestStatusComplete {
-		t.Errorf("regeneration undid a completion: status %q", match.Status)
-	}
-	if match.CompletedAt == nil {
-		t.Error("completed_at lost on regeneration")
-	}
-	// Text still refreshes on a completed action, so the record reads correctly.
-	if match.Title != "REGENERATED TITLE" {
-		t.Errorf("title should refresh even when complete, got %q", match.Title)
-	}
-	// An action the catalog stopped producing is pruned, unless it was done.
-	if _, still := byKey["max_hsa"]; still {
-		t.Error("max_hsa was dropped by the catalog and not complete; expected it pruned")
-	}
-
-	events, err := repo.ListQuestEvents(ctx, userID, match.ID)
-	if err != nil {
-		t.Fatalf("ListQuestEvents: %v", err)
-	}
-	if len(events) != 1 || events[0].Event != domain.QuestEventCompleted {
-		t.Errorf("expected one 'completed' event, got %+v", events)
-	}
-	if events[0].Source != domain.QuestSourceManual {
-		t.Errorf("event source: got %q want manual", events[0].Source)
-	}
-}
-
 func TestPlannedExpensesAndTermsIntegration(t *testing.T) {
 	pool := setupTestDB(t)
 	ctx := context.Background()
 	repo := New(pool)
 	userID := createTestUser(t, pool, "wealth-terms")
 
-	cardID, err := repo.CreateAccount(ctx, userID, "Wealth Test Card", "liability", "USD", 0)
+	cardID, err := repo.CreateAccount(ctx, userID, "Wealth Test Card", "liability", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -423,158 +339,246 @@ func TestEquityGrantsIntegration(t *testing.T) {
 	}
 }
 
-// Regeneration must be free to revise what the ENGINE concluded while leaving
-// what the USER claimed alone.
-//
-// A computed completion is only a reading of the data -- "your cushion covers a
-// month" -- and has to move when the data does. A manual completion is a claim
-// about something the app cannot observe -- "I set up the 10b5-1" -- and the
-// engine has no standing to contradict it. Collapsing the two either way is a
-// real failure: sticky auto-completions let a plan report success built on a
-// balance that has since fallen, and revisable manual ones silently undo work.
-func TestQuestCompletionStickinessDependsOnSourceIntegration(t *testing.T) {
+// Roles decide what the plan counts as cash, debt and investment, so the
+// write path has to keep them consistent with the balance-sheet side and
+// leave them alone when an edit does not mention them.
+func TestAccountRolesIntegration(t *testing.T) {
 	pool := setupTestDB(t)
 	ctx := context.Background()
 	repo := New(pool)
-	userID := createTestUser(t, pool, "wealth-sticky")
+	userID := createTestUser(t, pool, "account-roles")
 
-	// Two actions the generator itself closed.
-	completedAt := time.Now().UTC()
-	if err := repo.ReplaceQuests(ctx, userID, []domain.Quest{
-		{CatalogKey: "starter_emergency_fund", Phase: 1, Status: domain.QuestStatusComplete,
-			Title: "You have a one-month cushion", Verification: domain.QuestVerificationAuto,
-			CompletedAt: &completedAt},
-		{CatalogKey: "establish_sell_on_vest", Phase: 2, Status: domain.QuestStatusComplete,
-			Title: "Selling on vest is automatic", Verification: domain.QuestVerificationManual,
-			CompletedAt: &completedAt},
-	}); err != nil {
-		t.Fatalf("ReplaceQuests: %v", err)
-	}
-
-	quests, _ := repo.ListQuests(ctx, userID)
-	for _, q := range quests {
-		if q.CompletedSource != domain.QuestSourceAuto {
-			t.Errorf("%s: generator-closed actions must be stamped auto, got %q",
-				q.CatalogKey, q.CompletedSource)
+	roleOf := func(id string) *string {
+		t.Helper()
+		a, err := repo.GetAccount(ctx, userID, id)
+		if err != nil {
+			t.Fatalf("GetAccount: %v", err)
 		}
+		return a.Role
 	}
 
-	// The user then claims the second one themselves.
-	var sellID string
-	for _, q := range quests {
-		if q.CatalogKey == "establish_sell_on_vest" {
-			sellID = q.ID
-		}
+	id, err := repo.CreateAccount(ctx, userID, "Ally HYSA", "asset", "USD", 623_614, ptr(domain.RoleSavings))
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
 	}
-	if _, err := repo.SetQuestStatus(ctx, userID, sellID,
-		domain.QuestStatusComplete, domain.QuestSourceManual, "set up the plan"); err != nil {
-		t.Fatalf("SetQuestStatus: %v", err)
+	if r := roleOf(id); r == nil || *r != domain.RoleSavings {
+		t.Fatalf("role on create: got %v want savings", r)
 	}
 
-	// Regenerate with both now computing as NOT complete -- the cushion was
-	// spent, and the engine cannot see the 10b5-1 at all.
-	if err := repo.ReplaceQuests(ctx, userID, []domain.Quest{
-		{CatalogKey: "starter_emergency_fund", Phase: 1, Status: domain.QuestStatusAvailable,
-			Title: "Put $4,435 aside as a starter cushion", Verification: domain.QuestVerificationAuto},
-		{CatalogKey: "establish_sell_on_vest", Phase: 2, Status: domain.QuestStatusAvailable,
-			Title: "Set up automatic selling when equity vests", Verification: domain.QuestVerificationManual},
+	// An edit that does not mention the role leaves it alone.
+	if err := repo.UpdateAccount(ctx, userID, id, domain.AccountUpdate{Name: "Ally Savings", Type: "asset"}); err != nil {
+		t.Fatalf("UpdateAccount (rename): %v", err)
+	}
+	if r := roleOf(id); r == nil || *r != domain.RoleSavings {
+		t.Errorf("a rename cleared the role: got %v", r)
+	}
+
+	// A role that disagrees with the type is refused as bad input, not a 500.
+	err = repo.UpdateAccount(ctx, userID, id, domain.AccountUpdate{
+		Name: "Ally Savings", Type: "liability", RoleSet: true, Role: ptr(domain.RoleSavings),
+	})
+	if !errors.Is(err, apperrors.ErrInvalidInput) {
+		t.Errorf("savings on a liability: got %v, want ErrInvalidInput", err)
+	}
+
+	// Clearing is explicit.
+	if err := repo.UpdateAccount(ctx, userID, id, domain.AccountUpdate{
+		Name: "Ally Savings", Type: "asset", RoleSet: true,
 	}); err != nil {
-		t.Fatalf("ReplaceQuests (regenerate): %v", err)
+		t.Fatalf("UpdateAccount (clear): %v", err)
+	}
+	if r := roleOf(id); r != nil {
+		t.Errorf("role should be cleared, got %q", *r)
 	}
 
-	byKey := map[string]domain.Quest{}
-	after, _ := repo.ListQuests(ctx, userID)
-	for _, q := range after {
-		byKey[q.CatalogKey] = q
+	// Linking a tax treatment makes the account an investment in the same write.
+	if err := repo.UpsertRetirementAccountTerms(ctx, userID, domain.RetirementAccountTerms{
+		AccountID: id, Kind: domain.RetirementKindRothIRA, MonthlyContribution: 43_333,
+	}); err != nil {
+		t.Fatalf("UpsertRetirementAccountTerms: %v", err)
+	}
+	if r := roleOf(id); r == nil || *r != domain.RoleInvestment {
+		t.Errorf("a linked account should be an investment, got %v", r)
 	}
 
-	if got := byKey["starter_emergency_fund"].Status; got != domain.QuestStatusAvailable {
-		t.Errorf("an auto-completion must be revisable when the data changes; status %q", got)
+	// A debt cannot hold retirement savings.
+	card, err := repo.CreateAccount(ctx, userID, "Chase Sapphire", "liability", "USD", -382_435, ptr(domain.RoleCreditCard))
+	if err != nil {
+		t.Fatalf("CreateAccount (card): %v", err)
 	}
-	if byKey["starter_emergency_fund"].CompletedAt != nil {
-		t.Error("a reopened auto-completion should clear its timestamp")
+	err = repo.UpsertRetirementAccountTerms(ctx, userID, domain.RetirementAccountTerms{
+		AccountID: card, Kind: domain.RetirementKind401k,
+	})
+	if !errors.Is(err, apperrors.ErrInvalidInput) {
+		t.Errorf("linking a card: got %v, want ErrInvalidInput", err)
 	}
-	if got := byKey["establish_sell_on_vest"].Status; got != domain.QuestStatusComplete {
-		t.Errorf("a manual claim must survive regeneration; status %q", got)
-	}
-	if got := byKey["establish_sell_on_vest"].CompletedSource; got != domain.QuestSourceManual {
-		t.Errorf("manual source should persist; got %q", got)
+	if terms, _ := repo.ListRetirementAccountTerms(ctx, userID); len(terms) != 1 {
+		t.Errorf("the refused link should not have written terms; got %+v", terms)
 	}
 }
 
-// `verification` decides whether the engine may overturn a manual claim.
-//
-// The rule is about what the app can SEE. For an action it can observe -- a
-// balance, a contribution rate -- a stale claim that something was done is
-// worse than no claim, because the user is now looking at a plan that reports
-// success it can itself disprove. For one it cannot observe -- setting up a
-// 10b5-1 -- their word is the only evidence in existence and the engine has no
-// standing to contradict it.
-func TestManualClaimSurvivesOnlyWhereTheAppCannotSeeIntegration(t *testing.T) {
+// A reading of the action list writes only what changed. The same status twice
+// is no write at all, and the first achievement survives a later dip.
+func TestQuestTransitionsRecordOnlyChangesIntegration(t *testing.T) {
 	pool := setupTestDB(t)
 	ctx := context.Background()
 	repo := New(pool)
-	userID := createTestUser(t, pool, "wealth-verification")
+	userID := createTestUser(t, pool, "quest-transitions")
+	const key = "starter_emergency_fund"
 
-	completedAt := time.Now().UTC()
-	seed := []domain.Quest{
-		{CatalogKey: "starter_emergency_fund", Phase: 1, Status: domain.QuestStatusAvailable,
-			Title: "Put aside a starter cushion", Verification: domain.QuestVerificationAuto},
-		{CatalogKey: "establish_sell_on_vest", Phase: 2, Status: domain.QuestStatusAvailable,
-			Title: "Set up automatic selling", Verification: domain.QuestVerificationManual},
-		{CatalogKey: "max_hsa", Phase: 3, Status: domain.QuestStatusAvailable,
-			Title: "Max your HSA", Verification: domain.QuestVerificationAuto},
+	record := func(status, event string) bool {
+		t.Helper()
+		changed, err := repo.RecordQuestTransition(ctx, userID, key, status, event, domain.QuestSourceAuto, "")
+		if err != nil {
+			t.Fatalf("RecordQuestTransition(%s): %v", status, err)
+		}
+		return changed
 	}
-	if err := repo.ReplaceQuests(ctx, userID, seed); err != nil {
-		t.Fatalf("ReplaceQuests: %v", err)
-	}
-
-	stored, _ := repo.ListQuests(ctx, userID)
-	byKey := map[string]domain.Quest{}
-	for _, q := range stored {
-		byKey[q.CatalogKey] = q
+	events := func() []domain.QuestEvent {
+		t.Helper()
+		evs, err := repo.ListQuestEvents(ctx, userID, key)
+		if err != nil {
+			t.Fatalf("ListQuestEvents: %v", err)
+		}
+		return evs
 	}
 
-	// The user claims all three by hand.
-	for _, key := range []string{"starter_emergency_fund", "establish_sell_on_vest", "max_hsa"} {
-		if _, err := repo.SetQuestStatus(ctx, userID, byKey[key].ID,
-			domain.QuestStatusComplete, domain.QuestSourceManual, ""); err != nil {
-			t.Fatalf("SetQuestStatus(%s): %v", key, err)
+	if !record(domain.QuestStatusAvailable, domain.QuestEventGenerated) {
+		t.Fatal("first sight should write")
+	}
+	if record(domain.QuestStatusAvailable, domain.QuestEventGenerated) {
+		t.Error("the same status again should write nothing")
+	}
+	if n := len(events()); n != 1 {
+		t.Errorf("events after an unchanged reading: got %d want 1", n)
+	}
+
+	if !record(domain.QuestStatusComplete, domain.QuestEventCompleted) {
+		t.Fatal("completion should write")
+	}
+	// A change with no event worth recording still moves the status.
+	if !record(domain.QuestStatusAvailable, "") {
+		t.Fatal("reopening should write")
+	}
+	state, err := repo.ListQuestState(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListQuestState: %v", err)
+	}
+	if s := state[key]; s.Status != domain.QuestStatusAvailable || s.AchievedAt == nil {
+		t.Errorf("after a dip: status %q, achieved %v -- the first achievement must be kept", s.Status, s.AchievedAt)
+	}
+	if n := len(events()); n != 2 {
+		t.Errorf("events: got %d want 2 (generated, completed)", n)
+	}
+}
+
+// Two tabs reading the list at once both see the same change. The transition
+// must be written, and its event appended, exactly once.
+func TestQuestTransitionIsRecordedOnceUnderConcurrencyIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+	userID := createTestUser(t, pool, "quest-concurrency")
+	const key = "full_emergency_fund"
+
+	if _, err := repo.RecordQuestTransition(ctx, userID, key, domain.QuestStatusAvailable,
+		domain.QuestEventGenerated, domain.QuestSourceAuto, ""); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	const readers = 8
+	var wins atomic.Int32
+	var wg sync.WaitGroup
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			changed, err := repo.RecordQuestTransition(ctx, userID, key, domain.QuestStatusComplete,
+				domain.QuestEventCompleted, domain.QuestSourceAuto, "verified from your accounts")
+			if err != nil {
+				t.Errorf("RecordQuestTransition: %v", err)
+			}
+			if changed {
+				wins.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if w := wins.Load(); w != 1 {
+		t.Errorf("exactly one reader should record the change; %d did", w)
+	}
+	evs, _ := repo.ListQuestEvents(ctx, userID, key)
+	var completed int
+	for _, e := range evs {
+		if e.Event == domain.QuestEventCompleted {
+			completed++
 		}
 	}
-	_ = completedAt
+	if completed != 1 {
+		t.Errorf("completed events: got %d want 1", completed)
+	}
+}
 
-	// Regeneration disagrees about the first (it can see the balance), cannot
-	// work out the third (an answer went missing), and says nothing about the
-	// second that it is entitled to say.
-	regenerated := []domain.Quest{
-		{CatalogKey: "starter_emergency_fund", Phase: 1, Status: domain.QuestStatusAvailable,
-			Title: "Put aside a starter cushion", Verification: domain.QuestVerificationAuto},
-		{CatalogKey: "establish_sell_on_vest", Phase: 2, Status: domain.QuestStatusAvailable,
-			Title: "Set up automatic selling", Verification: domain.QuestVerificationManual},
-		{CatalogKey: "max_hsa", Phase: 3, Status: domain.QuestStatusBlocked,
-			Title: "Work out your HSA contribution headroom", Verification: domain.QuestVerificationAuto,
-			MissingFields: []string{"hsa_coverage_tier"}},
+// Marks are the user's word. Setting one moves the stored status with it, so
+// the next reading has nothing new to record; taking one back reopens the
+// action and keeps the history of both.
+func TestQuestMarksIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+	userID := createTestUser(t, pool, "quest-marks")
+	const done, notForMe = "establish_sell_on_vest", "harvest_tax_losses"
+
+	if err := repo.SetQuestMark(ctx, userID, done, domain.QuestStatusComplete, "set up the 10b5-1"); err != nil {
+		t.Fatalf("SetQuestMark(complete): %v", err)
 	}
-	if err := repo.ReplaceQuests(ctx, userID, regenerated); err != nil {
-		t.Fatalf("ReplaceQuests (regenerate): %v", err)
+	if err := repo.SetQuestMark(ctx, userID, notForMe, domain.QuestStatusSkipped, ""); err != nil {
+		t.Fatalf("SetQuestMark(skipped): %v", err)
+	}
+	if err := repo.SetQuestMark(ctx, userID, done, "available", ""); !errors.Is(err, apperrors.ErrInvalidInput) {
+		t.Errorf("a mark other than done or skipped: got %v, want ErrInvalidInput", err)
 	}
 
-	after, _ := repo.ListQuests(ctx, userID)
-	got := map[string]domain.Quest{}
-	for _, q := range after {
-		got[q.CatalogKey] = q
+	marks, err := repo.ListQuestMarks(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListQuestMarks: %v", err)
+	}
+	if m := marks[done]; m.Mark != domain.QuestStatusComplete || m.Note != "set up the 10b5-1" {
+		t.Errorf("done mark: got %+v", m)
+	}
+	if m := marks[notForMe]; m.Mark != domain.QuestStatusSkipped {
+		t.Errorf("skip mark: got %+v", m)
+	}
+	state, _ := repo.ListQuestState(ctx, userID)
+	if s := state[done]; s.Status != domain.QuestStatusComplete || s.AchievedAt == nil {
+		t.Errorf("the stored status should move with the mark; got %+v", s)
+	}
+	// The next reading sees the same status and records nothing more.
+	if changed, _ := repo.RecordQuestTransition(ctx, userID, done, domain.QuestStatusComplete,
+		domain.QuestEventCompleted, domain.QuestSourceAuto, ""); changed {
+		t.Error("a reading that agrees with the mark should not write")
 	}
 
-	if s := got["starter_emergency_fund"].Status; s != domain.QuestStatusAvailable {
-		t.Errorf("an auto-verifiable action the data contradicts should reopen; status %q", s)
+	if err := repo.ClearQuestMark(ctx, userID, done); err != nil {
+		t.Fatalf("ClearQuestMark: %v", err)
 	}
-	if s := got["establish_sell_on_vest"].Status; s != domain.QuestStatusComplete {
-		t.Errorf("the app cannot see a 10b5-1; the user's claim stands. status %q", s)
+	if err := repo.ClearQuestMark(ctx, userID, done); !errors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("clearing twice: got %v, want ErrNotFound", err)
 	}
-	// "We could not work it out" is not the same as "it is not done", and only
-	// the second justifies overturning someone.
-	if s := got["max_hsa"].Status; s != domain.QuestStatusComplete {
-		t.Errorf("a blocked recomputation must not overturn a manual claim; status %q", s)
+	marks, _ = repo.ListQuestMarks(ctx, userID)
+	if _, still := marks[done]; still {
+		t.Error("the mark should be gone")
+	}
+
+	evs, err := repo.ListQuestEvents(ctx, userID, done)
+	if err != nil {
+		t.Fatalf("ListQuestEvents: %v", err)
+	}
+	if len(evs) != 2 || evs[0].Event != domain.QuestEventUncompleted || evs[1].Event != domain.QuestEventCompleted {
+		t.Fatalf("history newest first: got %+v", evs)
+	}
+	if evs[1].Source != domain.QuestSourceManual || evs[1].Note != "set up the 10b5-1" {
+		t.Errorf("the completion should be the user's, with their note; got %+v", evs[1])
 	}
 }

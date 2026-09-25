@@ -2,21 +2,26 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, Account } from "@/lib/api";
+import { apiFetch, Account, ACCOUNT_ROLES, type AccountRole } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { Wallet, CreditCard, Plus, ReceiptText, ArrowUpRight, RefreshCw, History } from "lucide-react";
 import { toast } from "sonner";
-import { EmptyState } from "@/components/ui/empty-state";
-import { PageContainer } from "@/components/page-container";
-import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
 import { UpdateBalanceDialog } from "@/components/update-balance-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -29,7 +34,60 @@ function isStale(balanceAsOf: string): boolean {
   return diffMs > STALE_DAYS * 24 * 60 * 60 * 1000;
 }
 
-type PendingBalanceOnlyEdit = { id: string; name: string; type: string };
+type PendingBalanceOnlyEdit = { id: string; name: string; type: string; role: AccountRole | null };
+
+const ROLE_LABEL: Record<string, string> = Object.fromEntries(
+  ACCOUNT_ROLES.map((r) => [r.value, r.label]),
+);
+
+/**
+ * One picker for what an account is. Assets and debts pick a role, which
+ * decides the side of the balance sheet and is what the Wealth Strategy plan
+ * reads -- checking and savings count as cash, investments as invested. The
+ * "not sure yet" options keep an account unclassified, and the plan asks
+ * about those rather than guessing.
+ */
+function KindSelect({ id, defaultValue }: { id: string; defaultValue: string }) {
+  return (
+    <Select name="kind" required defaultValue={defaultValue}>
+      <SelectTrigger id={id} className="rounded-xl border-slate-200 dark:border-slate-700">
+        <SelectValue placeholder="Select what it is" />
+      </SelectTrigger>
+      <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
+        <SelectGroup>
+          <SelectLabel>Assets</SelectLabel>
+          {ACCOUNT_ROLES.filter((r) => r.type === "asset").map((r) => (
+            <SelectItem key={r.value} value={`role:${r.value}`}>{r.label}</SelectItem>
+          ))}
+          <SelectItem value="type:asset">Other asset (not sure yet)</SelectItem>
+        </SelectGroup>
+        <SelectGroup>
+          <SelectLabel>Debts</SelectLabel>
+          {ACCOUNT_ROLES.filter((r) => r.type === "liability").map((r) => (
+            <SelectItem key={r.value} value={`role:${r.value}`}>{r.label}</SelectItem>
+          ))}
+          <SelectItem value="type:liability">Other debt (not sure yet)</SelectItem>
+        </SelectGroup>
+        <SelectGroup>
+          <SelectLabel>Tracking only</SelectLabel>
+          <SelectItem value="type:expense">Expense (Rent, Groceries)</SelectItem>
+          <SelectItem value="type:income">Income (Salary, Bonus)</SelectItem>
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** The picker's value, split back into the type and role the API takes. */
+function parseKind(value: string): { type: string; role: AccountRole | null } {
+  const [kind, v] = value.split(":");
+  const role = kind === "role" ? ACCOUNT_ROLES.find((r) => r.value === v) : undefined;
+  return role ? { type: role.type, role: role.value } : { type: v || "asset", role: null };
+}
+
+function kindOf(account: Account): string {
+  return account.role ? `role:${account.role}` : `type:${account.type}`;
+}
 
 export default function AccountsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -45,7 +103,7 @@ export default function AccountsPage() {
   });
 
   const createAccountMutation = useMutation({
-    mutationFn: (newAccount: { name: string; type: string; opening_balance: number }) =>
+    mutationFn: (newAccount: { name: string; type: string; role: AccountRole | null; opening_balance: number }) =>
       apiFetch<Account>("/accounts", {
         method: "POST",
         body: JSON.stringify(newAccount),
@@ -55,16 +113,17 @@ export default function AccountsPage() {
       setIsDialogOpen(false);
       toast.success("Account created successfully");
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast.error(error.message || "Failed to create account");
     },
   });
 
   const updateAccountMutation = useMutation({
-    mutationFn: async (data: { id: string; name: string; type: string; balanceOnly: boolean; prevBalanceOnly: boolean }) => {
+    mutationFn: async (data: { id: string; name: string; type: string; role: AccountRole | null; balanceOnly: boolean; prevBalanceOnly: boolean }) => {
+      // The role is always sent: null is "not sure yet", which clears it.
       await apiFetch<Account>(`/accounts/${data.id}`, {
         method: "PUT",
-        body: JSON.stringify({ name: data.name, type: data.type }),
+        body: JSON.stringify({ name: data.name, type: data.type, role: data.role }),
       }, token);
 
       if (data.balanceOnly === data.prevBalanceOnly) {
@@ -82,6 +141,8 @@ export default function AccountsPage() {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["reports"] });
+      // Roles decide what the plan counts as cash, debt and investment.
+      queryClient.invalidateQueries({ queryKey: ["wealth"] });
       setSelectedAccount(null);
       setPendingBalanceOnlyEdit(null);
       if (result.balanceOnlyChanged) {
@@ -94,7 +155,7 @@ export default function AccountsPage() {
         toast.success("Account updated successfully");
       }
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast.error(error.message || "Failed to update account");
       setPendingBalanceOnlyEdit(null);
       // The name/type update may have succeeded before the balance-only request failed.
@@ -112,7 +173,7 @@ export default function AccountsPage() {
       setSelectedAccount(null);
       toast.success("Account deleted successfully");
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast.error(error.message || "Failed to delete account");
     },
   });
@@ -121,11 +182,11 @@ export default function AccountsPage() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const name = formData.get("name") as string;
-    const type = formData.get("type") as string;
+    const { type, role } = parseKind(formData.get("kind") as string);
     const balanceStr = formData.get("opening_balance") as string;
     const opening_balance = Math.round(parseFloat(balanceStr) * 100);
 
-    createAccountMutation.mutate({ name, type, opening_balance });
+    createAccountMutation.mutate({ name, type, role, opening_balance });
   };
 
   const handleEditAccount = (e: React.FormEvent<HTMLFormElement>) => {
@@ -133,16 +194,16 @@ export default function AccountsPage() {
     if (!selectedAccount) return;
     const formData = new FormData(e.currentTarget);
     const name = formData.get("name") as string;
-    const type = formData.get("type") as string;
+    const { type, role } = parseKind(formData.get("kind") as string);
     const balanceOnly = formData.get("balance_only") === "on";
 
     if (balanceOnly && !selectedAccount.balance_only) {
       // Turning balance-only on deletes transactions — confirm first.
-      setPendingBalanceOnlyEdit({ id: selectedAccount.id, name, type });
+      setPendingBalanceOnlyEdit({ id: selectedAccount.id, name, type, role });
       return;
     }
 
-    updateAccountMutation.mutate({ id: selectedAccount.id, name, type, balanceOnly, prevBalanceOnly: selectedAccount.balance_only });
+    updateAccountMutation.mutate({ id: selectedAccount.id, name, type, role, balanceOnly, prevBalanceOnly: selectedAccount.balance_only });
   };
 
   const assets = accounts?.filter((a) => a.type === "asset") || [];
@@ -173,6 +234,8 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
   }
 
   const showStale = account.balance_source === "simplefin" && !!account.balance_as_of && isStale(account.balance_as_of);
+  // Only assets and debts need a role; the plan leaves an unclassified one out.
+  const needsRole = !account.role && (account.type === "asset" || account.type === "liability");
 
   return (
     <motion.div
@@ -186,15 +249,25 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
         <div className={`p-3 rounded-2xl ${colorClass}`}>
           <Icon className="h-6 w-6" />
         </div>
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">{account.type}</span>
+        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
+          {account.role ? ROLE_LABEL[account.role] : account.type}
+        </span>
       </div>
       <div>
         <h3 className="text-lg font-medium mb-2 text-slate-600 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{account.name}</h3>
         <p className={`text-3xl font-bold font-heading tracking-tight text-slate-900 dark:text-white`}>
           {formatCurrency(account.current_balance)}
         </p>
-        {(account.balance_as_of || account.balance_only) && (
+        {(account.balance_as_of || account.balance_only || needsRole) && (
           <div className="mt-1 flex items-center gap-2 flex-wrap">
+            {needsRole && (
+              <Badge
+                className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 border-0"
+                title="Edit the account to say what it is. Until then the Wealth Strategy plan leaves it out of your cash and your investments."
+              >
+                No role yet
+              </Badge>
+            )}
             {account.balance_as_of && (
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 as of {formatDate(account.balance_as_of)} &middot; {account.balance_source === "simplefin" ? "SimpleFin" : "Manual"}
@@ -255,18 +328,8 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
                 <Input id="name" name="name" placeholder="e.g. Chase Checking" required className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="type" className="text-slate-700 dark:text-slate-300">Account Type</Label>
-                <Select name="type" required defaultValue="asset">
-                  <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                    <SelectItem value="asset">Asset (Bank, Cash, Investment)</SelectItem>
-                    <SelectItem value="liability">Liability (Credit Card, Loan)</SelectItem>
-                    <SelectItem value="expense">Expense (Rent, Groceries)</SelectItem>
-                    <SelectItem value="income">Income (Salary, Bonus)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="kind" className="text-slate-700 dark:text-slate-300">What is it?</Label>
+                <KindSelect id="kind" defaultValue="role:checking" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="opening_balance" className="text-slate-700 dark:text-slate-300">Opening Balance ($)</Label>
@@ -293,18 +356,8 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
                   <Input id="edit-name" name="name" defaultValue={selectedAccount.name} required className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-type" className="text-slate-700 dark:text-slate-300">Account Type</Label>
-                  <Select name="type" required defaultValue={selectedAccount.type}>
-                    <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-700">
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-                      <SelectItem value="asset">Asset (Bank, Cash, Investment)</SelectItem>
-                      <SelectItem value="liability">Liability (Credit Card, Loan)</SelectItem>
-                      <SelectItem value="expense">Expense (Rent, Groceries)</SelectItem>
-                      <SelectItem value="income">Income (Salary, Bonus)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="edit-kind" className="text-slate-700 dark:text-slate-300">What is it?</Label>
+                  <KindSelect id="edit-kind" defaultValue={kindOf(selectedAccount)} />
                 </div>
                 <label
                   htmlFor="edit-balance-only"
@@ -351,6 +404,7 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
               id: pendingBalanceOnlyEdit.id,
               name: pendingBalanceOnlyEdit.name,
               type: pendingBalanceOnlyEdit.type,
+              role: pendingBalanceOnlyEdit.role,
               balanceOnly: true,
               prevBalanceOnly: selectedAccount.balance_only,
             });

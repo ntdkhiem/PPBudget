@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -233,9 +232,8 @@ func (r *Repository) ListAccountTerms(ctx context.Context, userID string) (map[s
 }
 
 // UpsertAccountTerms records the facts an aggregator does not return -- APR
-// above all, which currently lives in the financial_plan blob and is why the
-// cash-plan waterfall has a "you have liabilities but no interest rates
-// entered" blocked state.
+// above all, which no bank feed supplies. Without it a card gets no payoff
+// action of its own, only a blocked request for the rate.
 func (r *Repository) UpsertAccountTerms(ctx context.Context, userID string, t domain.AccountTerms) error {
 	if err := r.checkOwnership(ctx, nil, "accounts", t.AccountID, userID); err != nil {
 		return err
@@ -286,20 +284,56 @@ func (r *Repository) ListRetirementAccountTerms(ctx context.Context, userID stri
 	return out, rows.Err()
 }
 
+// UpsertRetirementAccountTerms records an account's tax treatment, and marks
+// the account itself as an investment: a tax treatment is only meaningful on
+// invested money, and the two must not disagree about what the account is.
 func (r *Repository) UpsertRetirementAccountTerms(ctx context.Context, userID string, t domain.RetirementAccountTerms) error {
 	if err := r.checkOwnership(ctx, nil, "accounts", t.AccountID, userID); err != nil {
 		return err
 	}
-	_, err := r.pool.Exec(ctx, `
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx,
+		`UPDATE accounts SET role = 'investment', updated_at = NOW()
+		 WHERE id = $1 AND user_id = $2 AND type = 'asset'`, t.AccountID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to mark account as an investment: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: only an asset account can hold retirement savings", apperrors.ErrInvalidInput)
+	}
+
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO retirement_account_terms (account_id, user_id, kind, monthly_contribution)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (account_id) DO UPDATE SET
 			kind = EXCLUDED.kind,
 			monthly_contribution = EXCLUDED.monthly_contribution,
 			updated_at = NOW()`,
-		t.AccountID, userID, t.Kind, t.MonthlyContribution.ToInt64())
-	if err != nil {
+		t.AccountID, userID, t.Kind, t.MonthlyContribution.ToInt64()); err != nil {
 		return constraintError(err, "retirement account terms")
+	}
+	return tx.Commit(ctx)
+}
+
+// MarkAccountsAsCash classifies the given asset accounts as savings unless
+// they already count as cash. Used to carry a legacy hand-picked cash list
+// over into roles.
+func (r *Repository) MarkAccountsAsCash(ctx context.Context, userID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE accounts SET role = 'savings', updated_at = NOW()
+		WHERE user_id = $1 AND id = ANY($2) AND type = 'asset'
+		  AND (role IS NULL OR role NOT IN ('checking', 'savings'))`, userID, ids)
+	if err != nil {
+		return fmt.Errorf("failed to mark accounts as cash: %w", err)
 	}
 	return nil
 }
@@ -713,318 +747,210 @@ func (r *Repository) GetTaxLimits(ctx context.Context, taxYear int) (domain.TaxL
 }
 
 // ----------------------------------------------------------------- quests
-
-const questColumns = `
-	id, catalog_key, phase, priority, status, title, COALESCE(detail, ''),
-	target_amount, due_date, verification, stale, missing_fields,
-	completed_at, COALESCE(completed_source, ''), generated_at`
-
-func scanQuest(row pgx.Row) (domain.Quest, error) {
-	var q domain.Quest
-	var target *int64
-	err := row.Scan(&q.ID, &q.CatalogKey, &q.Phase, &q.Priority, &q.Status,
-		&q.Title, &q.Detail, &target, &q.DueDate, &q.Verification, &q.Stale,
-		&q.MissingFields, &q.CompletedAt, &q.CompletedSource, &q.GeneratedAt)
-	if err != nil {
-		return q, err
-	}
-	if target != nil {
-		m := money.Money(*target)
-		q.TargetAmount = &m
-	}
-	return q, nil
-}
-
-// ListQuests returns the user's generated actions in execution order.
 //
-// Ordered by phase then priority, which is the order the engine intends them to
-// be worked. Callers that surface dated actions ahead of their phase filter on
-// DueDate rather than re-sorting.
-func (r *Repository) ListQuests(ctx context.Context, userID string) ([]domain.Quest, error) {
+// The action list itself is not stored: it is worked out on every read. What
+// is kept is what cannot be recomputed -- the user's marks, the last status the
+// engine saw for each action, and the history of both. See migration 0031.
+
+// ListQuestState returns the last observed status of each action, by key.
+func (r *Repository) ListQuestState(ctx context.Context, userID string) (map[string]domain.QuestState, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+questColumns+` FROM wealth_quests WHERE user_id = $1 ORDER BY phase, priority, catalog_key`, userID)
+		`SELECT catalog_key, status, achieved_at, changed_at FROM wealth_quest_state WHERE user_id = $1`, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list quests: %w", err)
+		return nil, fmt.Errorf("failed to list quest state: %w", err)
 	}
 	defer rows.Close()
 
-	var out []domain.Quest
+	out := make(map[string]domain.QuestState)
 	for rows.Next() {
-		q, err := scanQuest(rows)
-		if err != nil {
+		var key string
+		var s domain.QuestState
+		if err := rows.Scan(&key, &s.Status, &s.AchievedAt, &s.ChangedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, q)
+		out[key] = s
 	}
 	return out, rows.Err()
 }
 
-// ReplaceQuests writes a freshly generated set, preserving completion.
+// ListQuestMarks returns what the user has said about each action, by key.
+func (r *Repository) ListQuestMarks(ctx context.Context, userID string) (map[string]domain.QuestMark, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT catalog_key, mark, COALESCE(note, ''), created_at FROM wealth_quest_marks WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list quest marks: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]domain.QuestMark)
+	for rows.Next() {
+		var key string
+		var m domain.QuestMark
+		if err := rows.Scan(&key, &m.Mark, &m.Note, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[key] = m
+	}
+	return out, rows.Err()
+}
+
+// RecordQuestTransition stores a newly observed status for one action and, if
+// event is non-empty, appends it to the history -- but only when the stored
+// status actually changes.
 //
-// Regeneration must not undo work the USER has done, but it must be free to
-// revise what the ENGINE concluded. A manual completion is a claim about
-// something the app cannot observe -- "I set up the 10b5-1" -- and it has no
-// standing to contradict that. A computed completion is only a reading of the
-// data, and it has to move when the data does; leaving it sticky lets a plan go
-// on reporting success built on a balance that has since fallen, or on spending
-// history that was never there in the first place.
+// The upsert's WHERE clause is the concurrency guard. Two page loads that both
+// see the same change race on the row; the second waits for the first, then
+// finds the status already written and updates nothing. Only the caller whose
+// write changed the row appends the event, so a transition is recorded once
+// however many tabs are open. Reports whether this call changed anything.
+func (r *Repository) RecordQuestTransition(
+	ctx context.Context, userID, key, status, event, source, note string,
+) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO wealth_quest_state (user_id, catalog_key, status, achieved_at, changed_at)
+		VALUES ($1, $2, $3, CASE WHEN $3 = 'complete' THEN NOW() END, NOW())
+		ON CONFLICT (user_id, catalog_key) DO UPDATE SET
+			status = EXCLUDED.status,
+			changed_at = NOW(),
+			-- The first achievement is kept for good.
+			achieved_at = COALESCE(wealth_quest_state.achieved_at, EXCLUDED.achieved_at)
+		WHERE wealth_quest_state.status IS DISTINCT FROM EXCLUDED.status`,
+		userID, key, status)
+	if err != nil {
+		return false, constraintError(err, fmt.Sprintf("quest state %q", key))
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+
+	if event != "" {
+		if err := appendQuestEvent(ctx, tx, userID, key, event, source, note); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit(ctx)
+}
+
+// SetQuestMark records the user marking an action done or not for them.
 //
-// So: skips and manual completions survive. Everything else -- auto-completions
-// included -- is recomputed, along with the interpolated text, targets and due
-// dates that go stale as balances move.
-func (r *Repository) ReplaceQuests(ctx context.Context, userID string, quests []domain.Quest) error {
+// The stored status moves with the mark, in the same write, so the next read
+// finds nothing new to record: the user's own event is the one that stands,
+// rather than an engine event restating it.
+func (r *Repository) SetQuestMark(ctx context.Context, userID, key, mark, note string) error {
+	var event string
+	switch mark {
+	case domain.QuestStatusComplete:
+		event = domain.QuestEventCompleted
+	case domain.QuestStatusSkipped:
+		event = domain.QuestEventSkipped
+	default:
+		return fmt.Errorf("%w: cannot mark an action %q", apperrors.ErrInvalidInput, mark)
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	seen := make([]string, 0, len(quests))
-	for _, q := range quests {
-		seen = append(seen, q.CatalogKey)
-
-		var target *int64
-		if q.TargetAmount != nil {
-			v := q.TargetAmount.ToInt64()
-			target = &v
-		}
-		missing := q.MissingFields
-		if missing == nil {
-			missing = []string{}
-		}
-		// Anything the generator closes is a computed conclusion, never a user
-		// claim, so it is stamped as such and stays revisable.
-		var completedSource *string
-		if q.Status == domain.QuestStatusComplete {
-			src := domain.QuestSourceAuto
-			completedSource = &src
-		}
-
-		var questID string
-		err := tx.QueryRow(ctx, `
-			INSERT INTO wealth_quests
-				(user_id, catalog_key, phase, priority, status, title, detail,
-				 target_amount, due_date, verification, stale, missing_fields,
-				 completed_at, completed_source, generated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
-			ON CONFLICT (user_id, catalog_key) DO UPDATE SET
-				phase = EXCLUDED.phase,
-				priority = EXCLUDED.priority,
-				title = EXCLUDED.title,
-				detail = EXCLUDED.detail,
-				target_amount = EXCLUDED.target_amount,
-				due_date = EXCLUDED.due_date,
-				verification = EXCLUDED.verification,
-				missing_fields = EXCLUDED.missing_fields,
-				generated_at = NOW(),
-				-- Sticky for a skip, or for a manual completion the engine has
-				-- no standing to overturn. An AUTO-verifiable action whose data
-				-- now says otherwise is reopened: the app can see the balance,
-				-- so a stale claim that it was funded is worse than no claim.
-				status = CASE WHEN (
-					wealth_quests.status = 'skipped'
-					OR (
-						wealth_quests.status = 'complete'
-						AND wealth_quests.completed_source = 'manual'
-						AND (
-							-- The app cannot see this, so the user's word is the
-							-- only evidence there is.
-							EXCLUDED.verification = 'manual'
-							-- Or it can see it but could not work it out this
-							-- time. "We do not know" is not grounds to
-							-- contradict someone.
-							OR EXCLUDED.status IN ('blocked', 'locked')
-						)
-					)
-				)
-					THEN wealth_quests.status ELSE EXCLUDED.status END,
-				completed_at = CASE WHEN (
-					wealth_quests.status = 'skipped'
-					OR (
-						wealth_quests.status = 'complete'
-						AND wealth_quests.completed_source = 'manual'
-						AND (
-							-- The app cannot see this, so the user's word is the
-							-- only evidence there is.
-							EXCLUDED.verification = 'manual'
-							-- Or it can see it but could not work it out this
-							-- time. "We do not know" is not grounds to
-							-- contradict someone.
-							OR EXCLUDED.status IN ('blocked', 'locked')
-						)
-					)
-				)
-					THEN wealth_quests.completed_at ELSE EXCLUDED.completed_at END,
-				completed_source = CASE WHEN (
-					wealth_quests.status = 'skipped'
-					OR (
-						wealth_quests.status = 'complete'
-						AND wealth_quests.completed_source = 'manual'
-						AND (
-							-- The app cannot see this, so the user's word is the
-							-- only evidence there is.
-							EXCLUDED.verification = 'manual'
-							-- Or it can see it but could not work it out this
-							-- time. "We do not know" is not grounds to
-							-- contradict someone.
-							OR EXCLUDED.status IN ('blocked', 'locked')
-						)
-					)
-				)
-					THEN wealth_quests.completed_source ELSE EXCLUDED.completed_source END,
-				stale = CASE WHEN (
-					wealth_quests.status = 'skipped'
-					OR (
-						wealth_quests.status = 'complete'
-						AND wealth_quests.completed_source = 'manual'
-						AND (
-							-- The app cannot see this, so the user's word is the
-							-- only evidence there is.
-							EXCLUDED.verification = 'manual'
-							-- Or it can see it but could not work it out this
-							-- time. "We do not know" is not grounds to
-							-- contradict someone.
-							OR EXCLUDED.status IN ('blocked', 'locked')
-						)
-					)
-				)
-					THEN wealth_quests.stale ELSE EXCLUDED.stale END,
-				updated_at = NOW()
-			RETURNING id`,
-			userID, q.CatalogKey, q.Phase, q.Priority, q.Status, q.Title, q.Detail,
-			target, q.DueDate, q.Verification, q.Stale, missing, q.CompletedAt,
-			completedSource,
-		).Scan(&questID)
-		if err != nil {
-			return constraintError(err, fmt.Sprintf("quest %q", q.CatalogKey))
-		}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO wealth_quest_marks (user_id, catalog_key, mark, note)
+		VALUES ($1, $2, $3, NULLIF($4, ''))
+		ON CONFLICT (user_id, catalog_key) DO UPDATE SET
+			mark = EXCLUDED.mark, note = EXCLUDED.note, created_at = NOW()`,
+		userID, key, mark, note); err != nil {
+		return constraintError(err, fmt.Sprintf("quest mark %q", key))
 	}
-
-	// Actions the catalog no longer produces for this profile are removed --
-	// the user changed something that made them irrelevant (sold the house,
-	// left the HDHP). Completed ones are kept so the history survives.
-	if len(seen) > 0 {
-		if _, err := tx.Exec(ctx,
-			`DELETE FROM wealth_quests
-			 WHERE user_id = $1 AND catalog_key <> ALL($2) AND status NOT IN ('complete','skipped')`,
-			userID, seen,
-		); err != nil {
-			return fmt.Errorf("failed to prune stale quests: %w", err)
-		}
+	if err := setQuestStatus(ctx, tx, userID, key, mark); err != nil {
+		return err
 	}
-
+	if err := appendQuestEvent(ctx, tx, userID, key, event, domain.QuestSourceManual, note); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
-// SetQuestStatus transitions one action and appends the matching event.
-//
-// The event log is the reason this is not a bare UPDATE. Duration conditions
-// ("under the discretionary cap for 90 consecutive days") are queries over
-// history, and a mutable status column cannot answer them.
-func (r *Repository) SetQuestStatus(ctx context.Context, userID, questID, status, source, note string) (*domain.Quest, error) {
-	var event string
-	switch status {
-	case domain.QuestStatusComplete:
-		event = domain.QuestEventCompleted
-	case domain.QuestStatusSkipped:
-		event = domain.QuestEventSkipped
-	case domain.QuestStatusAvailable:
-		event = domain.QuestEventUncompleted
-	default:
-		return nil, fmt.Errorf("%w: cannot transition to status %q", apperrors.ErrInvalidInput, status)
-	}
-
+// ClearQuestMark takes a mark back: the action reopens, and what it becomes
+// is the engine's to say on the next read. Returns ErrNotFound when there was
+// no mark to clear.
+func (r *Repository) ClearQuestMark(ctx context.Context, userID, key string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	var completedAt *time.Time
-	if status == domain.QuestStatusComplete {
-		now := time.Now().UTC()
-		completedAt = &now
+	var prior string
+	err = tx.QueryRow(ctx,
+		`DELETE FROM wealth_quest_marks WHERE user_id = $1 AND catalog_key = $2 RETURNING mark`,
+		userID, key).Scan(&prior)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apperrors.ErrNotFound
 	}
-
-	// A user-driven completion is stamped with its source so regeneration
-	// leaves it alone; the engine may revise its own conclusions but not theirs.
-	var completedSource *string
-	if status == domain.QuestStatusComplete {
-		completedSource = &source
-	}
-
-	tag, err := tx.Exec(ctx,
-		`UPDATE wealth_quests SET status = $1, completed_at = $2, completed_source = $3, updated_at = NOW()
-		 WHERE id = $4 AND user_id = $5`,
-		status, completedAt, completedSource, questID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set quest status: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, apperrors.ErrNotFound
+		return fmt.Errorf("failed to clear quest mark: %w", err)
 	}
 
-	var notePtr *string
-	if note != "" {
-		notePtr = &note
+	event := domain.QuestEventUncompleted
+	if prior == domain.QuestStatusSkipped {
+		event = domain.QuestEventUnskipped
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO wealth_quest_events (quest_id, user_id, event, source, note)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		questID, userID, event, source, notePtr,
-	); err != nil {
-		return nil, fmt.Errorf("failed to record quest event: %w", err)
+	// Available is a placeholder until the next read works the status out;
+	// any move from there is ordinary churn and records no event.
+	if err := setQuestStatus(ctx, tx, userID, key, domain.QuestStatusAvailable); err != nil {
+		return err
 	}
-
-	q, err := scanQuest(tx.QueryRow(ctx,
-		`SELECT `+questColumns+` FROM wealth_quests WHERE id = $1`, questID))
-	if err != nil {
-		return nil, err
+	if err := appendQuestEvent(ctx, tx, userID, key, event, domain.QuestSourceManual, ""); err != nil {
+		return err
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return &q, nil
+	return tx.Commit(ctx)
 }
 
-// AppendQuestEvent records something that happened to an action without
-// changing it.
-//
-// Separate from SetQuestStatus because the evaluator observes transitions it
-// did not cause: regeneration writes the new status, and this records that it
-// happened. Without it an auto-completion leaves no trace at all, and the
-// history reads as though the user did everything by hand.
-func (r *Repository) AppendQuestEvent(ctx context.Context, userID, questID, event, source, note string) error {
-	var notePtr *string
-	if note != "" {
-		notePtr = &note
+func setQuestStatus(ctx context.Context, tx pgx.Tx, userID, key, status string) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO wealth_quest_state (user_id, catalog_key, status, achieved_at, changed_at)
+		VALUES ($1, $2, $3, CASE WHEN $3 = 'complete' THEN NOW() END, NOW())
+		ON CONFLICT (user_id, catalog_key) DO UPDATE SET
+			status = EXCLUDED.status,
+			changed_at = NOW(),
+			achieved_at = COALESCE(wealth_quest_state.achieved_at, EXCLUDED.achieved_at)`,
+		userID, key, status); err != nil {
+		return constraintError(err, fmt.Sprintf("quest state %q", key))
 	}
-	_, err := r.pool.Exec(ctx,
-		`INSERT INTO wealth_quest_events (quest_id, user_id, event, source, note)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		questID, userID, event, source, notePtr)
-	if err != nil {
-		return fmt.Errorf("failed to append quest event: %w", err)
+	return nil
+}
+
+func appendQuestEvent(ctx context.Context, tx pgx.Tx, userID, key, event, source, note string) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO wealth_quest_events (user_id, catalog_key, event, source, note)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''))`,
+		userID, key, event, source, note); err != nil {
+		return fmt.Errorf("failed to record quest event: %w", err)
 	}
 	return nil
 }
 
 // ListQuestEvents returns one action's history, newest first.
-func (r *Repository) ListQuestEvents(ctx context.Context, userID, questID string) ([]domain.QuestEvent, error) {
+func (r *Repository) ListQuestEvents(ctx context.Context, userID, key string) ([]domain.QuestEvent, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, quest_id, event, source, COALESCE(note, ''), created_at
-		 FROM wealth_quest_events WHERE user_id = $1 AND quest_id = $2
-		 ORDER BY created_at DESC`, userID, questID)
+		`SELECT id, catalog_key, event, source, COALESCE(note, ''), created_at
+		 FROM wealth_quest_events WHERE user_id = $1 AND catalog_key = $2
+		 ORDER BY created_at DESC, id`, userID, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quest events: %w", err)
 	}
 	defer rows.Close()
 
-	var out []domain.QuestEvent
+	out := []domain.QuestEvent{}
 	for rows.Next() {
 		var e domain.QuestEvent
-		if err := rows.Scan(&e.ID, &e.QuestID, &e.Event, &e.Source, &e.Note, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.CatalogKey, &e.Event, &e.Source, &e.Note, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

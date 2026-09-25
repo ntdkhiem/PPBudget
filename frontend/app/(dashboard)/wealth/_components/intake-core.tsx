@@ -7,9 +7,9 @@ import { apiFetch, getStoredToken, type Account } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { useSaveProfile, usd, type WealthProfile } from "./wealth-data";
+import { Choice, Field, toCents, toFraction, toInputValue } from "./form-bits";
+import { useFieldRegistry, useSaveProfile, usd, type WealthProfile } from "./wealth-data";
 
 /**
  * The eight-screen core intake.
@@ -90,66 +90,6 @@ const STEPS: Array<{ id: StepId; title: string; blurb: string }> = [
   },
 ];
 
-/** Dollars in the input, cents on the wire. */
-function toCents(v: string): number | null {
-  const n = Number.parseFloat(v.replace(/[^0-9.\-]/g, ""));
-  return Number.isFinite(n) ? Math.round(n * 100) : null;
-}
-
-/** Percent in the input, fraction on the wire. */
-function toFraction(v: string): number | null {
-  const n = Number.parseFloat(v.replace(/[^0-9.\-]/g, ""));
-  return Number.isFinite(n) ? n / 100 : null;
-}
-
-function Choice<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T | undefined;
-  options: Array<{ value: T; label: string }>;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          onClick={() => onChange(opt.value)}
-          className={cn(
-            "rounded-xl border px-4 py-2 text-sm font-medium transition-colors",
-            value === opt.value
-              ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-500/15 dark:text-indigo-300"
-              : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-600",
-          )}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      {children}
-      {hint && <p className="text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
-    </div>
-  );
-}
-
 export function IntakeCore({
   profile,
   onDone,
@@ -173,8 +113,24 @@ export function IntakeCore({
     [accounts],
   );
 
+  // What is already on file, in the inputs' own units, so running setup again
+  // starts from the current answers instead of a row of empty boxes that read
+  // as lost. Shown, never saved as is: only what is changed here is written
+  // back, so clicking through does not relabel a figure we worked out as one
+  // the user told us.
+  const { data: registry } = useFieldRegistry();
+  const onFile = useMemo(() => {
+    const values = profile as unknown as Record<string, unknown> | undefined;
+    const out: Record<string, string> = {};
+    for (const f of registry?.fields ?? []) {
+      const v = values?.[f.key];
+      if (v !== undefined && v !== null) out[f.key] = toInputValue(f.kind, v);
+    }
+    return out;
+  }, [profile, registry]);
+
   const set = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
-  const val = (key: string) => draft[key] ?? "";
+  const val = (key: string) => draft[key] ?? onFile[key] ?? "";
 
   const current = STEPS[step];
   const isLast = step === STEPS.length - 1;
@@ -365,7 +321,7 @@ export function IntakeCore({
                 ]}
               />
             </Field>
-            {draft.marital_status && draft.marital_status !== "single" && (
+            {val("marital_status") && val("marital_status") !== "single" && (
               <>
                 <Field
                   label="Your spouse's gross annual income"
@@ -574,14 +530,21 @@ export function IntakeCore({
                 ]}
               />
             </Field>
-            {draft.employer_is_public === "yes" && (
-              <Field label="Ticker" hint="Used to value your vests.">
-                <Input
-                  className="w-32 uppercase"
-                  value={val("employer_ticker")}
-                  onChange={(e) => set("employer_ticker", e.target.value.toUpperCase())}
-                />
-              </Field>
+            {val("employer_is_public") === "yes" && (
+              <>
+                <Field label="Ticker" hint="Used to value your vests.">
+                  <Input
+                    className="w-32 uppercase"
+                    value={val("employer_ticker")}
+                    onChange={(e) => set("employer_ticker", e.target.value.toUpperCase())}
+                  />
+                </Field>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Once setup is done, add your RSU and ESPP grants under Company stock on the
+                  Profile tab. Their vest and purchase dates are what put this part of the plan
+                  on the calendar.
+                </p>
+              </>
             )}
             <Field label="Do you hold stock options?">
               <Choice
@@ -598,11 +561,11 @@ export function IntakeCore({
 
         {current.id === "cushion" && (
           <Field
-            label={`${draft.emergency_fund_target_months ?? 6} months of essentials`}
+            label={`${val("emergency_fund_target_months") || 6} months of essentials`}
             hint="Six is the usual starting point. A second income argues for less; dependents or variable pay argue for more."
           >
             <Slider
-              value={[Number.parseInt(draft.emergency_fund_target_months ?? "6", 10)]}
+              value={[Number.parseInt(val("emergency_fund_target_months") || "6", 10)]}
               min={1}
               max={12}
               step={1}

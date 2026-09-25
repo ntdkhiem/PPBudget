@@ -9,6 +9,7 @@ import type {
   Waterfall,
   WaterfallStage,
 } from "../cash/_components/planning-math";
+import type { PlanningAccount } from "@/lib/api";
 import type { Flag, RetirementProfile } from "../retirement/_components/retirement-math";
 import type {
   Goal,
@@ -55,7 +56,6 @@ export function toFinancialPlan(
     overrides: {
       monthly_income_cents: profile?.override_monthly_income,
       essential_expenses_cents: profile?.override_essential_expenses,
-      liquid_account_ids: profile?.override_liquid_account_ids,
     },
     emergency_fund: { target_months: profile?.emergency_fund_target_months ?? 6 },
     goals: (goals ?? []).map((g) => ({
@@ -93,7 +93,6 @@ export function toBaseline(
     usedOverrides: {
       income: profile?.override_monthly_income != null,
       essentials: profile?.override_essential_expenses != null,
-      liquid: (profile?.override_liquid_account_ids ?? []).length > 0,
     },
     monthsOfData: s?.months_of_data ?? 0,
   };
@@ -137,6 +136,7 @@ export function toWaterfall(
       remainingCents: complete ? 0 : f.remaining,
       monthsToComplete: f.months_to_complete,
       startsInMonths: f.starts_in_months,
+      completesOn: f.completes_on ?? null,
       active,
       complete,
       // A blocked action cannot be sized, and saying why is more use than
@@ -159,6 +159,7 @@ export function toWaterfall(
     remainingCents: null,
     monthsToComplete: null,
     startsInMonths: crossover,
+    completesOn: null,
     active: !activeAssigned,
     complete: false,
   });
@@ -168,6 +169,7 @@ export function toWaterfall(
     targetPoolCents: Math.round((summary?.monthly_income ?? 0) * (summary?.target_savings_rate ?? 0)),
     stages,
     crossoverMonths: crossover,
+    crossoverOn: summary?.crossover_on ?? null,
   };
 }
 
@@ -267,8 +269,12 @@ export function toHeadline(
 
 
 /**
- * The profile and its account mappings, shaped as the retirement profile the
- * projection components expect.
+ * The profile and its investment accounts, shaped as the retirement profile
+ * the projection components expect.
+ *
+ * The accounts are every one whose role is investment, with its tax treatment
+ * and contribution where the user has set them. An account with no treatment
+ * yet still counts: its balance is invested money whatever it is called.
  *
  * Age is derived from date of birth rather than stored, which is the point of
  * having replaced one with the other: an age is correct for exactly one year
@@ -276,8 +282,10 @@ export function toHeadline(
  */
 export function toRetirementProfile(
   profile: WealthProfile | undefined,
-  accounts: RetirementAccountTerms[] | undefined,
+  terms: RetirementAccountTerms[] | undefined,
+  accounts: PlanningAccount[] | undefined,
 ): RetirementProfile {
+  const termsFor = new Map((terms ?? []).map((t) => [t.account_id, t]));
   const currentAge = profile?.date_of_birth
     ? ageFrom(profile.date_of_birth)
     : 0;
@@ -291,15 +299,16 @@ export function toRetirementProfile(
     inflation_apr: profile?.inflation_apr ?? 0.03,
     withdrawal_rate: profile?.withdrawal_rate ?? 0.04,
     target_annual_spend_cents: profile?.target_annual_spend,
-    accounts: (accounts ?? []).map((a) => ({
-      account_id: a.account_id,
-      kind: a.kind,
-      monthly_contribution_cents: a.monthly_contribution,
-      // Match terms describe one workplace plan, so they live on the profile
-      // now rather than being repeated per account.
-      employer_match_pct: profile?.match_pct,
-      employer_match_limit_pct: profile?.match_limit_pct,
-    })),
+    accounts: (accounts ?? [])
+      .filter((a) => a.role === "investment")
+      .map((a) => {
+        const t = termsFor.get(a.id);
+        return {
+          account_id: a.id,
+          kind: t?.kind,
+          monthly_contribution_cents: t?.monthly_contribution ?? 0,
+        };
+      }),
   };
 }
 
@@ -327,7 +336,7 @@ function ageFrom(iso: string): number {
  */
 export function toRetirementFlags(
   quests: Quest[] | undefined,
-  accounts: RetirementAccountTerms[] | undefined,
+  accounts: RetirementProfile["accounts"],
 ): Flag[] {
   const out: Flag[] = [];
   const live = quests ?? [];
@@ -340,13 +349,13 @@ export function toRetirementFlags(
   const detailOf = (key: string) =>
     live.find((q) => q.catalog_key === key)?.detail ?? "";
 
-  if ((accounts ?? []).length === 0) {
+  if (accounts.length === 0) {
     out.push({
       kind: "no_accounts",
       severity: "warn",
-      title: "No retirement accounts linked",
+      title: "No investment accounts yet",
       detail:
-        "Link the accounts you save into so balances and contributions come from real data rather than guesses.",
+        "Mark your 401(k), IRA, HSA and brokerage accounts as “Investment or retirement” on the Accounts page, so their balances count here.",
     });
   }
 
@@ -360,9 +369,8 @@ export function toRetirementFlags(
     });
   }
 
-  // An over-contribution reads as a withdrawal instruction in the catalog.
   const hsa = live.find((q) => q.catalog_key === "max_hsa");
-  if (hsa && hsa.title.toLowerCase().includes("withdraw")) {
+  if (hsa?.variant === "over_limit") {
     out.push({
       kind: "over_limit",
       severity: "warn",

@@ -4,7 +4,13 @@ import Link from "next/link";
 import { ArrowRight, CircleAlert, CircleCheck, Target, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatMonths, type Headline, type Health, type Waterfall } from "./planning-math";
+import {
+  formatMonths,
+  formatMonthYear,
+  type Headline,
+  type Health,
+  type Waterfall,
+} from "./planning-math";
 
 const TONE_STYLES: Record<Health, { card: string; icon: string; accent: string }> = {
   good: {
@@ -95,8 +101,11 @@ export function HeadlineAction({
 
             {showCrossover && (
               <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                Everything below is funded in {formatMonths(waterfall.crossoverMonths)}, after
-                which the whole surplus is invested.
+                Everything below is funded in{" "}
+                {waterfall.crossoverOn
+                  ? formatMonthYear(waterfall.crossoverOn)
+                  : formatMonths(waterfall.crossoverMonths)}
+                , after which the whole surplus is invested.
               </span>
             )}
           </div>

@@ -2,20 +2,22 @@ package service
 
 import (
 	"math"
+	"slices"
+	"time"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
 	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
-// The trailing baseline, ported from computeBaseline() in
-// frontend/app/(dashboard)/cash-plan/_components/planning-math.ts.
+// The trailing baseline, ported from the computeBaseline() the Cash page used
+// to run in the browser.
 //
-// This is a DELIBERATE PORT, not a reimplementation. The Cash Plan page has
-// shown these figures for a while and the action engine now decides against
-// them, so the two must agree exactly -- a user who sees "essentials $4,435" on
-// one screen and an emergency fund target built on a different number on
-// another has no reason to trust either. The rounding below matches JavaScript
-// Math.round rather than Go's for the same reason; see mean().
+// This is now the only implementation: the browser copy was deleted, and every
+// wealth surface reads these figures from the plan summary. A user who sees
+// "essentials $4,435" on one screen and an emergency fund target built on a
+// different number on another has no reason to trust either, and two copies of
+// one average are how that happens. The rounding still matches JavaScript
+// Math.round, so no figure moved by a cent in the move; see mean().
 //
 // Everything downstream of this file works in integer cents.
 
@@ -48,9 +50,8 @@ type Baseline struct {
 //
 // Math.round breaks ties toward positive infinity (-2.5 rounds to -2), while
 // Go's math.Round breaks them away from zero (-2.5 rounds to -3). Floor(x+0.5)
-// reproduces the JavaScript behaviour. The case is rare, but a one-cent
-// divergence between the two implementations is exactly the kind of thing that
-// costs an afternoon later.
+// reproduces the JavaScript behaviour. The case is rare, but kept so the
+// figures the browser used to show did not shift when the average moved here.
 func mean(values []money.Money) money.Money {
 	if len(values) == 0 {
 		return 0
@@ -82,12 +83,21 @@ func activeMonths(months []domain.PlanningMonth) []domain.PlanningMonth {
 // Including a half-finished month understates spending, which inflates the
 // surplus and shortens every projected timeline. Kept only when it is the sole
 // month of data, since some baseline beats none.
-func completeMonths(months []domain.PlanningMonth) []domain.PlanningMonth {
+//
+// Only the calendar month now falls in is partial. Dropping the last month
+// with activity instead threw a finished month away whenever nothing had
+// posted yet this month, or the accounts had stopped syncing. Months are
+// compared in UTC, as the database dates them.
+func completeMonths(months []domain.PlanningMonth, now time.Time) []domain.PlanningMonth {
 	active := activeMonths(months)
 	if len(active) <= 1 {
 		return active
 	}
-	return active[:len(active)-1]
+	year, month, _ := now.UTC().Date()
+	return slices.DeleteFunc(active, func(m domain.PlanningMonth) bool {
+		y, mo, _ := m.Month.UTC().Date()
+		return y == year && mo == month
+	})
 }
 
 // ComputeBaseline averages the trailing window and folds in current balances.
@@ -96,11 +106,11 @@ func completeMonths(months []domain.PlanningMonth) []domain.PlanningMonth {
 // financial_plan blob, and their replacements are profile answers that
 // applyProfile folds in afterwards. This stays a plain reading of the ledger
 // because the intake's confirmation screen offers exactly these figures.
-func ComputeBaseline(pb *domain.PlanningBaseline) Baseline {
+func ComputeBaseline(pb *domain.PlanningBaseline, now time.Time) Baseline {
 	if pb == nil {
 		return Baseline{BucketCoverage: 1}
 	}
-	months := completeMonths(pb.Months)
+	months := completeMonths(pb.Months, now)
 
 	income := make([]money.Money, 0, len(months))
 	outflow := make([]money.Money, 0, len(months))
@@ -152,36 +162,17 @@ func ComputeBaseline(pb *domain.PlanningBaseline) Baseline {
 	}
 }
 
-// cashAccountIDs names the accounts an emergency could actually draw on.
+// cashAccountIDs names the accounts an emergency could actually draw on: the
+// ones whose role is checking or savings.
 //
-// The user's own choice wins outright. Without one, every asset account counts
-// except those linked to a tax treatment on the Retirement tab: a 401(k) or a
-// brokerage balance is not an emergency fund, and counting it declared the
-// cushion finished before a dollar of cash had been set aside.
-func cashAccountIDs(
-	accounts []domain.PlanningAccount, chosen []string, invested []domain.RetirementAccountTerms,
-) map[string]bool {
+// A 401(k) or a brokerage balance is not an emergency fund, and counting every
+// asset declared the cushion finished before a dollar of cash had been set
+// aside. An unclassified account counts as nothing until the user says what
+// it is; see classify_accounts.
+func cashAccountIDs(accounts []domain.PlanningAccount) map[string]bool {
 	cash := make(map[string]bool)
-
-	if len(chosen) > 0 {
-		picked := make(map[string]bool, len(chosen))
-		for _, id := range chosen {
-			picked[id] = true
-		}
-		for _, a := range accounts {
-			if a.Type == "asset" && picked[a.ID] {
-				cash[a.ID] = true
-			}
-		}
-		return cash
-	}
-
-	skip := make(map[string]bool, len(invested))
-	for _, r := range invested {
-		skip[r.AccountID] = true
-	}
 	for _, a := range accounts {
-		if a.Type == "asset" && !skip[a.ID] {
+		if a.HasRole(domain.RoleChecking, domain.RoleSavings) {
 			cash[a.ID] = true
 		}
 	}

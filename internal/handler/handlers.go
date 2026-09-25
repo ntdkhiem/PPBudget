@@ -603,10 +603,11 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name           string `json:"name"`
-		Type           string `json:"type"`
-		Currency       string `json:"currency"`
-		OpeningBalance int64  `json:"opening_balance"`
+		Name           string         `json:"name"`
+		Type           string         `json:"type"`
+		Role           optionalString `json:"role"`
+		Currency       string         `json:"currency"`
+		OpeningBalance int64          `json:"opening_balance"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
@@ -614,6 +615,9 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(body.Name) == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if !applyRoleType(w, body.Role.Value, &body.Type) {
 		return
 	}
 	if !validAccountTypes[body.Type] {
@@ -624,12 +628,55 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		body.Currency = "USD"
 	}
 
-	id, err := h.svc.CreateAccount(r.Context(), userID, body.Name, body.Type, body.Currency, body.OpeningBalance)
+	id, err := h.svc.CreateAccount(r.Context(), userID, body.Name, body.Type, body.Currency, body.OpeningBalance, body.Role.Value)
 	if err != nil {
+		if errors.Is(err, apperrors.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create account")
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok", "id": id})
+}
+
+// optionalString tells a JSON key that was absent from one sent as null or
+// "": UnmarshalJSON runs only for keys present in the body.
+type optionalString struct {
+	Set   bool
+	Value *string
+}
+
+func (o *optionalString) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	if s != "" {
+		o.Value = &s
+	}
+	return nil
+}
+
+// applyRoleType sets an account's type from its role. The role decides which
+// side of the balance sheet an account is on, so a client that picks a role
+// cannot also pick the wrong type. Writes a 400 and returns false for a role
+// the schema does not know.
+func applyRoleType(w http.ResponseWriter, role *string, accType *string) bool {
+	if role == nil {
+		return true
+	}
+	t, ok := domain.AccountTypeForRole(*role)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid account role")
+		return false
+	}
+	*accType = t
+	return true
 }
 
 func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
@@ -671,23 +718,38 @@ func (h *Handler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name           string `json:"name"`
-		Type           string `json:"type"`
-		Currency       string `json:"currency"`
-		OpeningBalance *int64 `json:"opening_balance"`
+		Name     string `json:"name"`
+		Type     string `json:"type"`
+		Currency string `json:"currency"`
+		// Absent leaves the role alone; null or "" clears it to unclassified.
+		Role           optionalString `json:"role"`
+		OpeningBalance *int64         `json:"opening_balance"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
+	if !applyRoleType(w, body.Role.Value, &body.Type) {
+		return
+	}
 
-	err := h.svc.UpdateAccount(r.Context(), userID, id, body.Name, body.Type, body.Currency, body.OpeningBalance)
+	err := h.svc.UpdateAccount(r.Context(), userID, id, domain.AccountUpdate{
+		Name:           body.Name,
+		Type:           body.Type,
+		Currency:       body.Currency,
+		OpeningBalance: body.OpeningBalance,
+		RoleSet:        body.Role.Set,
+		Role:           body.Role.Value,
+	})
 	if err != nil {
-		if errors.Is(err, apperrors.ErrNotFound) {
+		switch {
+		case errors.Is(err, apperrors.ErrNotFound):
 			writeError(w, http.StatusNotFound, "account not found")
-			return
+		case errors.Is(err, apperrors.ErrInvalidInput):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to update account")
 		}
-		writeError(w, http.StatusInternalServerError, "failed to update account")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

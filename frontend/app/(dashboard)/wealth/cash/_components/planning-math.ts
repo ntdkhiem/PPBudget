@@ -9,7 +9,7 @@
  * until the moment they are formatted.
  */
 
-import type { PlanningAccount, PlanningBaseline, PlanningMonth } from "@/lib/api";
+import type { PlanningAccount, PlanningMonth } from "@/lib/api";
 
 // ---------------------------------------------------------------- plan shape
 
@@ -37,7 +37,6 @@ export interface FinancialPlan {
   overrides: {
     monthly_income_cents?: number;
     essential_expenses_cents?: number;
-    liquid_account_ids?: string[];
   };
   emergency_fund: { target_months: number };
   goals: Goal[];
@@ -105,7 +104,7 @@ export interface Baseline {
   /** Share of outflow attributed to a bucket, 0..1. 1 means fully bucketed. */
   bucketCoverage: number;
   /** True when any override changed a figure away from its computed value. */
-  usedOverrides: { income: boolean; essentials: boolean; liquid: boolean };
+  usedOverrides: { income: boolean; essentials: boolean };
   monthsOfData: number;
 }
 
@@ -121,11 +120,20 @@ export function activeMonths(months: PlanningMonth[]): PlanningMonth[] {
 /**
  * The current month is partial, so including it understates spending. It is
  * dropped from averages whenever there is at least one complete month.
+ *
+ * Only the calendar month `now` falls in is partial -- the same rule as
+ * completeMonths in wealth_baseline.go. Dropping the last month with activity
+ * instead threw a finished month away whenever nothing had posted yet this
+ * month, or the accounts had stopped syncing. Compared in UTC, as the server
+ * dates the months.
  */
-export function completeMonths(months: PlanningMonth[]): PlanningMonth[] {
+export function completeMonths(months: PlanningMonth[], now: Date = new Date()): PlanningMonth[] {
   const active = activeMonths(months);
   if (active.length <= 1) return active;
-  return active.slice(0, -1);
+  return active.filter((m) => {
+    const d = new Date(m.month);
+    return !(d.getUTCFullYear() === now.getUTCFullYear() && d.getUTCMonth() === now.getUTCMonth());
+  });
 }
 
 // computeBaseline() lived here.
@@ -202,6 +210,8 @@ export interface WaterfallStage {
   monthsToComplete: number | null;
   /** Months from today until this stage starts receiving money. */
   startsInMonths: number | null;
+  /** The month this stage is finished, as an ISO date; null if never or open-ended. */
+  completesOn: string | null;
   /** True when this is the stage your money is going to right now. */
   active: boolean;
   /** True when the stage is already satisfied and takes no money. */
@@ -218,6 +228,8 @@ export interface Waterfall {
   stages: WaterfallStage[];
   /** Months until every funding stage completes and everything flows to investing. */
   crossoverMonths: number | null;
+  /** The month that happens, as an ISO date; null if never or already. */
+  crossoverOn: string | null;
 }
 
 /**
@@ -250,6 +262,8 @@ export interface GoalProgress {
   offTrack: boolean;
   /** Months until this goal starts receiving money. Set by computeGoalPlan. */
   startsInMonths?: number | null;
+  /** The month it is funded, as an ISO date, when the server's schedule says. */
+  completesOn?: string | null;
   targetDate?: string;
   isEmergencyFund?: boolean;
 }
@@ -593,15 +607,6 @@ export interface Headline {
 
 // ------------------------------------------------------------------ format
 
-/** Whole-dollar rendering for prose, where cents would be noise. */
-function centsToDollars(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(Math.round(cents / 100));
-}
-
 export function formatPct(fraction: number, digits = 0): string {
   return `${(fraction * 100).toFixed(digits)}%`;
 }
@@ -610,6 +615,22 @@ export function formatPct(fraction: number, digits = 0): string {
 export function formatSignedPct(fraction: number, digits = 0): string {
   const sign = fraction > 0 ? "+" : "";
   return `${sign}${(fraction * 100).toFixed(digits)}%`;
+}
+
+/**
+ * "April 2027" for a schedule date from the server.
+ *
+ * The server sends the first of the month at midnight UTC, so it is read in
+ * UTC too -- in any timezone west of Greenwich the local reading is the last
+ * day of the month before.
+ */
+export function formatMonthYear(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 /** "3 months" / "1 yr 2 mo" / "—" */

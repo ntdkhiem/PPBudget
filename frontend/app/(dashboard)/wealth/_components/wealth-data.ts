@@ -78,10 +78,10 @@ export interface WealthProfile {
    * The user telling us our arithmetic is wrong about them. Kept apart from the
    * derived figure rather than replacing it, so the app can still say which
    * numbers they corrected. Absent means no override, never an override of zero.
+   * Which accounts count as cash is each account's role, not an override.
    */
   override_monthly_income?: number;
   override_essential_expenses?: number;
-  override_liquid_account_ids?: string[];
 
   traditional_ira_balance?: number;
   taxable_brokerage_value?: number;
@@ -123,6 +123,7 @@ export type QuestStatus =
   | "not_applicable";
 
 export interface Quest {
+  /** The catalog key. Actions are worked out on each read, not stored rows. */
   id: string;
   catalog_key: string;
   phase: number;
@@ -130,6 +131,8 @@ export interface Quest {
   status: QuestStatus;
   title: string;
   detail?: string;
+  /** Which outcome this is, where one action can say different things. Branch on this, not the title. */
+  variant?: "over_limit";
   target_amount?: number;
   /** An action with a due date surfaces even while its phase is locked. */
   due_date?: string;
@@ -147,23 +150,58 @@ export interface Quest {
   generated_at: string;
 }
 
+/** One condition for finishing a phase, stated as what it checks. */
+export interface Milestone {
+  key: string;
+  label: string;
+  done: boolean;
+  /** False when there was nothing to do at all -- no card, no equity. */
+  applies: boolean;
+}
+
 export interface Phase {
   number: number;
   name: string;
+  /** Whether every earlier phase is finished. */
+  unlocked: boolean;
+  /** What finishes this phase, and so unlocks the next. */
+  milestones: Milestone[];
+}
+
+/** What goes into the workplace plan through payroll, and the match it earns. */
+export interface WorkplaceSaving {
+  rate: number;
+  annual_deferral: number;
+  match_earned: number;
+  match_available: number;
+}
+
+/** This tax year's contribution ceilings for the user, from the tax table. */
+export interface ContributionLimits {
+  tax_year: number;
+  workplace: number;
+  ira: number;
+  /** Absent until the HSA coverage tier is known. */
+  hsa?: number;
 }
 
 /**
  * One phase 1 action the monthly surplus pays for, in the order it is paid.
  * The last stage ends at `crossover_months`.
+ *
+ * Worked out month by month on the server, charging a card its interest for as
+ * long as it waits, so the months here are not remaining / surplus.
  */
 export interface FundingStage {
   quest_id: string;
   /** What the surplus still has to put in; 0 once done or when there is no figure. */
   remaining: number;
-  /** Null when there is no surplus to pay with, or nothing remains. */
+  /** Null when the surplus never finishes this stage, or nothing remains. */
   starts_in_months: number | null;
   /** Null means "never at this rate". */
   months_to_complete: number | null;
+  /** First day of the month it finishes, in UTC; null when it never does or nothing remains. */
+  completes_on: string | null;
 }
 
 /**
@@ -186,7 +224,17 @@ export interface PlanSummary {
   target_savings_rate: number;
   /** Months until phase 1 is funded. Null means "never at this rate". */
   crossover_months: number | null;
+  /** First day of that month, in UTC; null when never, or when there is nothing to fund. */
+  crossover_on: string | null;
   funding: FundingStage[];
+  /** The independence number, built on this much spending a year. 0 without spending. */
+  fi_target: number;
+  fi_annual_spend: number;
+  /** What counts toward it: accounts whose role is investment. */
+  invested_assets: number;
+  /** Null while the contribution rate or pay is unknown. */
+  workplace: WorkplaceSaving | null;
+  limits: ContributionLimits;
 }
 
 /** A user-authored savings target — the only content here nothing re-derives. */
@@ -198,6 +246,33 @@ export interface Goal {
   linked_account_id?: string;
   current_amount: number;
   priority: number;
+}
+
+/**
+ * One grant of employer equity. The next vest date and the ESPP purchase date
+ * are what put dated actions on the plan, ahead of the phase order.
+ */
+export interface EquityGrant {
+  id: string;
+  kind: "rsu" | "espp" | "iso" | "nso";
+  label?: string;
+  grant_date?: string;
+  total_shares?: number;
+  shares_vested?: number;
+  next_vest_date?: string;
+  vest_frequency?: "monthly" | "quarterly" | "semiannual" | "annual" | "cliff";
+  /** Fraction of the grant per tranche, e.g. 0.0625. */
+  vest_share?: number;
+  espp_discount_pct?: number;
+  espp_has_lookback?: boolean;
+  espp_contribution_pct?: number;
+  espp_plan_max_pct?: number;
+  espp_offering_start?: string;
+  espp_purchase_date?: string;
+  has_10b5_1?: boolean;
+  blackout_policy?: "none" | "quarterly" | "event_based" | "unknown";
+  /** Overrides the statutory supplemental rate; absent means the default. */
+  supplemental_withholding_pct?: number;
 }
 
 /** An account's tax treatment and monthly contribution. */
@@ -238,6 +313,7 @@ const DERIVED_KEY = ["wealth", "derived"] as const;
 const FIELDS_KEY = ["wealth", "fields"] as const;
 const GOALS_KEY = ["wealth", "goals"] as const;
 const RETIREMENT_ACCOUNTS_KEY = ["wealth", "retirement-accounts"] as const;
+const GRANTS_KEY = ["wealth", "equity-grants"] as const;
 
 export function useWealthProfile() {
   return useQuery<WealthProfile>({
@@ -253,27 +329,41 @@ export function useDerivedProfile() {
   });
 }
 
+/** How a profile question is asked. Money is cents; percent is a fraction. */
+export type FieldKind = "money" | "percent" | "integer" | "boolean" | "date" | "text" | "choice";
+
+/** One profile question, as the server specifies it. */
+export interface FieldInfo {
+  key: string;
+  label: string;
+  kind: FieldKind;
+  choices?: Array<{ value: string; label: string }>;
+  /** An override of a derived figure rather than a question. */
+  correction?: boolean;
+}
+
+export interface FieldRegistry {
+  fields: FieldInfo[];
+  /** Labels for every field and pseudo-field, keyed by key. */
+  labels: Record<string, string>;
+}
+
 /**
- * The canonical field registry and its human labels.
+ * Every profile question with its label, kind and choices.
  *
  * Served rather than duplicated here: the unlock prompt beside a blocked
  * action and the sentence the engine writes into its own detail text have to
- * name the same thing, and two copies would drift the first time a question
- * was reworded.
+ * name the same thing, and a question's input has to match what the server
+ * stores. Inferring a type from a key's name got that wrong.
  *
  * `labels` covers pseudo-keys too — `transaction_history`, `paystub_ytd` —
  * which name data the app lacks rather than a question for the user. They are
  * absent from `fields`, which is how the two are told apart.
  */
 export function useFieldRegistry() {
-  return useQuery<{ fields: string[]; labels: Record<string, string> }>({
+  return useQuery<FieldRegistry>({
     queryKey: FIELDS_KEY,
-    queryFn: () =>
-      apiFetch<{ fields: string[]; labels: Record<string, string> }>(
-        "/wealth/fields",
-        {},
-        getStoredToken(),
-      ),
+    queryFn: () => apiFetch<FieldRegistry>("/wealth/fields", {}, getStoredToken()),
     staleTime: Infinity, // the registry only changes when the app is redeployed
   });
 }
@@ -296,6 +386,20 @@ export function useGoals() {
     queryFn: async () => {
       const res = await apiFetch<{ goals: Goal[] | null }>("/wealth/goals", {}, getStoredToken());
       return res.goals ?? [];
+    },
+  });
+}
+
+export function useEquityGrants() {
+  return useQuery<EquityGrant[]>({
+    queryKey: GRANTS_KEY,
+    queryFn: async () => {
+      const res = await apiFetch<{ grants: EquityGrant[] | null }>(
+        "/wealth/equity-grants",
+        {},
+        getStoredToken(),
+      );
+      return res.grants ?? [];
     },
   });
 }
@@ -378,6 +482,40 @@ export function useDeleteGoal() {
   });
 }
 
+/**
+ * Creates or updates a grant. The action list is refetched too: a grant is
+ * what turns a vest or purchase date into a dated action.
+ */
+export function useSaveEquityGrant() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (grant: Partial<EquityGrant> & { kind: EquityGrant["kind"] }) =>
+      apiFetch<{ id: string }>(
+        grant.id ? `/wealth/equity-grants/${grant.id}` : "/wealth/equity-grants",
+        { method: grant.id ? "PUT" : "POST", body: JSON.stringify(grant) },
+        getStoredToken(),
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: GRANTS_KEY });
+      queryClient.invalidateQueries({ queryKey: QUESTS_KEY });
+    },
+  });
+}
+
+export function useDeleteEquityGrant() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/wealth/equity-grants/${id}`, { method: "DELETE" }, getStoredToken()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: GRANTS_KEY });
+      queryClient.invalidateQueries({ queryKey: QUESTS_KEY });
+    },
+  });
+}
+
 export function useSaveRetirementAccount() {
   const queryClient = useQueryClient();
 
@@ -412,9 +550,11 @@ export function useSetQuestStatus() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // An action's id is its catalog key, which carries a colon for per-account
+    // and per-grant instances.
     mutationFn: (args: { questId: string; status: QuestStatus; note?: string }) =>
-      apiFetch<Quest>(
-        `/wealth/quests/${args.questId}`,
+      apiFetch<{ status: string }>(
+        `/wealth/quests/${encodeURIComponent(args.questId)}`,
         { method: "PUT", body: JSON.stringify({ status: args.status, note: args.note ?? "" }) },
         getStoredToken(),
       ),
@@ -478,20 +618,27 @@ export function useGroupedQuests(quests: Quest[] | undefined, phases: Phase[] | 
 
     const byPhase = (phases ?? []).map((phase) => {
       const items = live.filter((q) => q.phase === phase.number);
-      // A phase counts as reached when anything in it is actionable.
       const actionable = items.filter((q) => q.status === "available" || q.status === "blocked");
-      const done = items.filter((q) => q.status === "complete" || q.status === "skipped");
+      // Progress is counted in milestones, which are what actually finish the
+      // phase, and only the ones with something to do.
+      const milestones = phase.milestones.filter((m) => m.applies);
       return {
         phase,
         items,
+        milestones,
         actionable: actionable.length,
-        done: done.length,
-        locked: items.length > 0 && items.every((q) => q.status === "locked"),
+        done: milestones.filter((m) => m.done).length,
+        locked: !phase.unlocked,
       };
     });
 
-    // The current phase is the earliest one still carrying work.
-    const current = byPhase.find((p) => p.phase.number > 0 && p.actionable > 0)?.phase.number ?? 0;
+    // The current phase is the first open one with a milestone still unmet,
+    // falling back to the first with anything to do.
+    const current =
+      byPhase.find((p) => p.phase.number > 0 && !p.locked && p.phase.milestones.some((m) => !m.done))
+        ?.phase.number ??
+      byPhase.find((p) => p.phase.number > 0 && p.actionable > 0)?.phase.number ??
+      0;
 
     return { dated, byPhase, current };
   }, [quests, phases]);

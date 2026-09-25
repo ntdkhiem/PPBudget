@@ -321,23 +321,23 @@ func questReachFINumber() questDef {
 		Priority:     60,
 		Verification: domain.QuestVerificationAuto,
 		Evaluate: func(c questContext) []questResult {
-			essentials := c.Baseline.EssentialMonthly
-			if essentials <= 0 {
+			// The same target and the same measure as the Retirement tab, so
+			// the two cannot tell the user different things about one number.
+			target, annual, ok := c.fiTarget()
+			if !ok {
 				return nil
 			}
-			rate := 0.04
-			if c.Profile.WithdrawalRate != nil && *c.Profile.WithdrawalRate > 0 {
-				rate = *c.Profile.WithdrawalRate
+			invested := c.investedAssets()
+
+			basis := "Essential spending"
+			if c.Profile.TargetAnnualSpend != nil && *c.Profile.TargetAnnualSpend > 0 {
+				basis = "Retirement spending"
 			}
-			annual := essentials * 12
-			target := money.Money(float64(annual) / rate)
-			netWorth := c.Baseline.NetWorth
-
 			detail := fmt.Sprintf(
-				"Essential spending of %s a year at a %s withdrawal rate implies %s. You are at %s.",
-				usd(annual), pct(rate, 0), usd(target), usd(netWorth))
+				"%s of %s a year at a %s withdrawal rate implies %s. Your investment accounts hold %s.",
+				basis, usd(annual), pct(c.withdrawalRate(), 0), usd(target), usd(invested))
 
-			if netWorth >= target {
+			if invested >= target {
 				return []questResult{{
 					Complete: true,
 					Title:    fmt.Sprintf("You have reached your %s independence number", usd(target)),
@@ -345,9 +345,13 @@ func questReachFINumber() questDef {
 					Target:   &target,
 				}}
 			}
+			if basis == "Essential spending" {
+				detail += " Built on essentials rather than total spending, it is the point at which work " +
+					"becomes optional rather than the point at which nothing changes."
+			}
 			return []questResult{{
 				Title:  fmt.Sprintf("Your financial independence number is %s", usd(target)),
-				Detail: detail + " This is measured against essentials rather than total spending, so it is the point at which work becomes optional rather than the point at which nothing changes.",
+				Detail: detail,
 				Target: &target,
 			}}
 		},

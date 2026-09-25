@@ -98,10 +98,10 @@ type WealthProfile struct {
 	// lumpy income, or "needs" spending that is really discretionary. Held
 	// apart from the derived figure rather than replacing it, so the engine can
 	// still say which numbers the user has corrected. nil means no override,
-	// which is not an override of zero.
+	// which is not an override of zero. Which accounts count as cash is not an
+	// override: it is each account's role.
 	OverrideMonthlyIncome     *money.Money `json:"override_monthly_income,omitempty"`
 	OverrideEssentialExpenses *money.Money `json:"override_essential_expenses,omitempty"`
-	OverrideLiquidAccountIDs  []string     `json:"override_liquid_account_ids,omitempty"`
 
 	// Holdings.
 	TraditionalIRABalance *money.Money `json:"traditional_ira_balance,omitempty"`
@@ -295,8 +295,15 @@ const (
 	QuestStatusNotApplicable = "not_applicable"
 )
 
-// Quest verification methods. Auto entries are declared by the catalog from the
-// first release but are not honoured until the auto-verification pass lands.
+// Quest variants.
+const (
+	// QuestVariantOverLimit: contributions already exceed the year's ceiling,
+	// and the action is to withdraw the excess.
+	QuestVariantOverLimit = "over_limit"
+)
+
+// Quest verification methods: whether the app can check an action against the
+// user's own data (auto), or only take their word for it (manual).
 const (
 	QuestVerificationAuto   = "auto"
 	QuestVerificationManual = "manual"
@@ -320,8 +327,12 @@ const (
 //
 // The catalog that produces these lives in Go, not the database -- a financial
 // rule has to be versioned, diffable and unit-testable, and a user-editable tax
-// rule is a liability. Only instances are persisted.
+// rule is a liability. Actions are worked out on every read and not stored;
+// only what the user said about them (QuestMark) and what the engine last saw
+// (QuestState) are.
 type Quest struct {
+	// ID is the catalog key: an action is identified by what it is, not by a
+	// row, since there is no row.
 	ID         string `json:"id"`
 	CatalogKey string `json:"catalog_key"`
 	Phase      int    `json:"phase"`
@@ -331,6 +342,10 @@ type Quest struct {
 	// Interpolated at generation, so rendering never re-runs the engine.
 	Title  string `json:"title"`
 	Detail string `json:"detail,omitempty"`
+	// Variant names which of an action's outcomes this is, where one action
+	// can say materially different things -- an HSA that still has room, or one
+	// that is over the limit. Pages branch on this, never on the prose.
+	Variant string `json:"variant,omitempty"`
 
 	TargetAmount *money.Money `json:"target_amount,omitempty"`
 	// An action carrying a due date surfaces even while its phase is locked.
@@ -349,25 +364,43 @@ type Quest struct {
 
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	// CompletedSource says whether the user claimed this or the engine
-	// concluded it. Only a manual claim survives regeneration: a computed
-	// completion has to track the data it came from.
+	// concluded it. A manual claim stands where the app cannot check it; a
+	// computed completion has to track the data it came from.
 	CompletedSource string    `json:"completed_source,omitempty"`
 	GeneratedAt     time.Time `json:"generated_at"`
 }
 
-// QuestEvent is one entry in the append-only history behind a quest.
+// QuestMark is what the user said about an action: done, or not for them.
+// Kept by catalog key, so it outlives any one reading of the list.
+type QuestMark struct {
+	Mark      string // QuestStatusComplete or QuestStatusSkipped
+	Note      string
+	CreatedAt time.Time
+}
+
+// QuestState is the last status the engine worked out for an action. It is
+// written only when that status changes, which is what lets a read of the
+// list write nothing on an ordinary page load.
+type QuestState struct {
+	Status string
+	// AchievedAt is the first time the action was complete, and is never
+	// cleared. Phase gating reads it: a finished phase stays finished.
+	AchievedAt *time.Time
+	ChangedAt  time.Time
+}
+
+// QuestEvent is one entry in the append-only history behind an action.
 //
 // Separate from Quest.Status because duration conditions are queries over
-// history rather than facts about the present, and because a mutable status
-// column cannot record what the user actually did once regeneration rewrites
-// the row.
+// history rather than facts about the present. Keyed by catalog key rather
+// than by a row, so an action the catalog stops producing keeps its history.
 type QuestEvent struct {
-	ID        string    `json:"id"`
-	QuestID   string    `json:"quest_id"`
-	Event     string    `json:"event"`
-	Source    string    `json:"source"`
-	Note      string    `json:"note,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         string    `json:"id"`
+	CatalogKey string    `json:"catalog_key"`
+	Event      string    `json:"event"`
+	Source     string    `json:"source"`
+	Note       string    `json:"note,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // TaxLimits is one tax year's statutory figures, resolved from the tax_limits

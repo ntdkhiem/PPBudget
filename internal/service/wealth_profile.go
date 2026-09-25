@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
@@ -38,52 +37,23 @@ const BaselineMonths = 6
 // up built on a number nobody checked.
 const bucketCoverageFloor = 0.80
 
-// staleAfter is how long each answer stays trustworthy.
-//
-// Cadence follows how fast the underlying fact actually moves, not a uniform
-// timeout: a date of birth never goes stale, a brokerage balance does so within
-// months, and salary and benefits move on an annual cycle. Fields absent from
-// this map never expire.
-var staleAfter = map[string]time.Duration{
-	// Annual: pay, benefits elections and last year's return.
-	"gross_annual_income":       365 * 24 * time.Hour,
-	"spouse_gross_annual":       365 * 24 * time.Hour,
-	"deferral_pct":              365 * 24 * time.Hour,
-	"deferral_roth_share":       365 * 24 * time.Hour,
-	"match_pct":                 365 * 24 * time.Hour,
-	"match_limit_pct":           365 * 24 * time.Hour,
-	"hsa_coverage_tier":         365 * 24 * time.Hour,
-	"hsa_employer_contribution": 365 * 24 * time.Hour,
-	"hdhp_enrolled":             365 * 24 * time.Hour,
-	"prior_year_tax_liability":  365 * 24 * time.Hour,
-	"prior_year_agi":            365 * 24 * time.Hour,
-	"annual_bonus":              365 * 24 * time.Hour,
-	"ltd_replacement_pct":       365 * 24 * time.Hour,
-	"ltd_monthly_cap":           365 * 24 * time.Hour,
-	"life_death_benefit":        365 * 24 * time.Hour,
-	"filing_status":             365 * 24 * time.Hour,
-
-	// Quarterly: balances that move on their own.
-	"traditional_ira_balance": 90 * 24 * time.Hour,
-	"taxable_brokerage_value": 90 * 24 * time.Hour,
-	"taxable_unrealized_gain": 90 * 24 * time.Hour,
-	"taxable_employer_stock":  90 * 24 * time.Hour,
-	"mortgage_balance":        90 * 24 * time.Hour,
-}
-
-// StaleFields returns the answered field keys that are past their cadence.
+// StaleFields returns the answered field keys that are past their cadence,
+// which each field's spec sets by how fast the fact moves (wealth_fields.go).
 //
 // Actions built on these still render -- flagged rather than hidden. A plan
 // quietly built on last year's salary is the failure to avoid, and silently
 // dropping the action would hide it just as effectively as trusting it.
 func StaleFields(p *domain.WealthProfile, now time.Time) []string {
 	var out []string
-	for key, maxAge := range staleAfter {
+	for key, spec := range profileFields {
+		if spec.StaleAfter == 0 {
+			continue // never goes stale
+		}
 		f, ok := p.Fields[key]
 		if !ok {
 			continue // unanswered is not stale; it is simply unasked
 		}
-		if now.Sub(f.AnsweredAt) > maxAge {
+		if now.Sub(f.AnsweredAt) > spec.StaleAfter {
 			out = append(out, key)
 		}
 	}
@@ -169,7 +139,7 @@ func (s *Service) DeriveProfileValues(ctx context.Context, userID string) (*Deri
 	if err != nil {
 		return nil, fmt.Errorf("planning baseline: %w", err)
 	}
-	baseline := ComputeBaseline(pb)
+	baseline := ComputeBaseline(pb, time.Now())
 
 	profile, err := s.repo.GetWealthProfile(ctx, userID)
 	if err != nil {
@@ -248,11 +218,10 @@ func (s *Service) DeriveProfileValues(ctx context.Context, userID string) (*Deri
 // rather than asking a question.
 //
 // Overrides are left out of the unanswered list: an absent correction is the
-// normal state, not a gap, and listing "override liquid account ids" among the
-// questions invited answering an account list with a dollar amount. They are
-// set from the figure they correct.
+// normal state, not a gap, and listing one among the questions reads as a
+// demand to supply it. They are set from the figure they correct.
 func isOverrideField(key string) bool {
-	return strings.HasPrefix(key, "override_")
+	return profileFields[key].Correction
 }
 
 // ProfileFieldKeys exposes the canonical field list to handlers, so the
@@ -339,6 +308,16 @@ func (s *Service) DeleteRetirementAccountTerms(ctx context.Context, userID, acco
 // ListEquityGrants returns the user's equity compensation.
 func (s *Service) ListEquityGrants(ctx context.Context, userID string) ([]domain.EquityGrant, error) {
 	return s.repo.ListEquityGrants(ctx, userID)
+}
+
+// UpsertEquityGrant records one grant: an ID updates it, none creates it.
+func (s *Service) UpsertEquityGrant(ctx context.Context, userID string, g domain.EquityGrant) (string, error) {
+	return s.repo.UpsertEquityGrant(ctx, userID, g)
+}
+
+// DeleteEquityGrant removes one grant.
+func (s *Service) DeleteEquityGrant(ctx context.Context, userID, id string) error {
+	return s.repo.DeleteEquityGrant(ctx, userID, id)
 }
 
 // GetLatestPaystub returns the most recent year-to-date payroll figures, or nil
@@ -450,9 +429,9 @@ func (s *Service) backfillFromLegacyBlobs(ctx context.Context, userID string) er
 				p.OverrideEssentialExpenses = &m
 				set("override_essential_expenses")
 			}
-			if len(fp.Overrides.LiquidAccountIDs) > 0 {
-				p.OverrideLiquidAccountIDs = fp.Overrides.LiquidAccountIDs
-				set("override_liquid_account_ids")
+			// A hand-picked cash list is each account's role now.
+			if err := s.repo.MarkAccountsAsCash(ctx, userID, fp.Overrides.LiquidAccountIDs); err != nil {
+				s.logger.Warn("could not carry over cash accounts", "user_id", userID, "error", err)
 			}
 
 			// Goals are the one thing in the blob nothing can re-derive, so a

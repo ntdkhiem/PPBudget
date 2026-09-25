@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"time"
 
 	"ntdkhiem/ppbudget-go/pkg/money"
@@ -15,10 +16,13 @@ type User struct {
 }
 
 type Account struct {
-	ID             string      `json:"id"`
-	UserID         string      `json:"user_id"`
-	Name           string      `json:"name"`
-	Type           string      `json:"type"`
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	// Role is what the account is -- checking, a card, a 401(k) -- where Type is
+	// only which side of the balance sheet it sits on. Nil is unclassified.
+	Role           *string     `json:"role,omitempty"`
 	Currency       string      `json:"currency"`
 	CurrentBalance money.Money `json:"current_balance"`
 	BalanceAsOf    *time.Time  `json:"balance_as_of,omitempty"`
@@ -28,6 +32,43 @@ type Account struct {
 	SimplefinID *string   `json:"simplefin_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Account roles. The planning engine reads these rather than Type: a 401(k)
+// and a checking account are both assets, and only one of them is cash.
+const (
+	RoleChecking   = "checking"
+	RoleSavings    = "savings"
+	RoleInvestment = "investment"
+	RoleProperty   = "property"
+	RoleCreditCard = "credit_card"
+	RoleLoan       = "loan"
+	RoleMortgage   = "mortgage"
+)
+
+// AccountTypeForRole returns the balance-sheet side a role belongs to, and
+// whether the role is recognised. The schema enforces the same pairing.
+func AccountTypeForRole(role string) (string, bool) {
+	switch role {
+	case RoleChecking, RoleSavings, RoleInvestment, RoleProperty:
+		return "asset", true
+	case RoleCreditCard, RoleLoan, RoleMortgage:
+		return "liability", true
+	}
+	return "", false
+}
+
+// AccountUpdate is an edit to an account's settings.
+type AccountUpdate struct {
+	Name     string
+	Type     string
+	Currency string
+	// OpeningBalance nil leaves the opening snapshot untouched.
+	OpeningBalance *int64
+	// RoleSet false leaves the role alone; true writes Role, where nil clears
+	// it back to unclassified.
+	RoleSet bool
+	Role    *string
 }
 
 // BalanceSnapshot anchors an account's balance at the end of AsOfDate (UTC).
@@ -209,7 +250,13 @@ type PlanningAccount struct {
 	ID      string      `json:"id"`
 	Name    string      `json:"name"`
 	Type    string      `json:"type"`
+	Role    *string     `json:"role,omitempty"`
 	Balance money.Money `json:"balance"`
+}
+
+// HasRole reports whether the account is classified as any of roles.
+func (a PlanningAccount) HasRole(roles ...string) bool {
+	return a.Role != nil && slices.Contains(roles, *a.Role)
 }
 
 type PlanningBaseline struct {

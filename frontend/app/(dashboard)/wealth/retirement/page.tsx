@@ -42,20 +42,20 @@ export default function RetirementPage() {
   const { data: questData } = useQuests();
 
   const accounts = useMemo(() => baselineData?.accounts ?? [], [baselineData]);
-  const essentialMonthly = questData?.summary?.essential_monthly ?? 0;
+  const summary = questData?.summary;
 
   const profile = useMemo(
-    () => toRetirementProfile(wealthProfile, retirementAccounts),
-    [wealthProfile, retirementAccounts],
+    () => toRetirementProfile(wealthProfile, retirementAccounts, accounts),
+    [wealthProfile, retirementAccounts, accounts],
   );
   const inputs = useMemo(
-    () => computeInputs(profile, accounts, essentialMonthly),
-    [profile, accounts, essentialMonthly],
+    () => computeInputs(profile, summary),
+    [profile, summary],
   );
   const projection = useMemo(() => project(profile, inputs), [profile, inputs]);
   const flags = useMemo(
-    () => toRetirementFlags(questData?.quests, retirementAccounts),
-    [questData, retirementAccounts],
+    () => toRetirementFlags(questData?.quests, profile.accounts),
+    [questData, profile.accounts],
   );
 
   const loading = isLoading || profileLoading;
@@ -131,6 +131,7 @@ export default function RetirementPage() {
             <AccountsTable
               profile={profile}
               accounts={accounts}
+              summary={summary}
               flags={flags}
               loading={false}
             />

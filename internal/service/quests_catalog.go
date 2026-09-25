@@ -65,9 +65,23 @@ type questContext struct {
 	// StaleFields marks answers past their confirmation cadence. Actions built
 	// on them still render, flagged.
 	StaleFields map[string]bool
-	// ExistingStatus is the stored status per catalog key, so phase gating can
-	// see what the user has already finished.
-	ExistingStatus map[string]string
+	// State is the last status seen per catalog key, including the first time
+	// each action was achieved. Phase gating reads the achievements; rules read
+	// it to tell an action they have produced before from a brand-new one.
+	State map[string]domain.QuestState
+	// Marks are what the user has said: done, or not for them.
+	Marks map[string]domain.QuestMark
+}
+
+// seen reports whether an action with this key has been produced before.
+func (c questContext) seen(key string) bool {
+	_, ok := c.State[key]
+	return ok
+}
+
+// achieved reports whether the action with this key was ever complete.
+func (c questContext) achieved(key string) bool {
+	return c.State[key].AchievedAt != nil
 }
 
 // questResult is one produced action.
@@ -83,10 +97,11 @@ type questResult struct {
 	// Complete means the condition is already satisfied by current data.
 	Complete bool
 
-	Title  string
-	Detail string
-	Target *money.Money
-	Due    *time.Time
+	Title   string
+	Detail  string
+	Variant string
+	Target  *money.Money
+	Due     *time.Time
 	// Missing names profile fields whose answers would unblock this action.
 	Missing []string
 	// SuppressWhenCashFlowNegative marks actions that assume spare money. When
@@ -305,6 +320,114 @@ func (c questContext) paychecksRemaining() (int, bool) {
 		return 0, true
 	}
 	return left, true
+}
+
+// WorkplaceSaving is what goes into the workplace plan through payroll, and
+// the employer match it earns.
+//
+// One formula for every screen: the match action, the Retirement tab and its
+// projection all read this, rather than the tab re-deriving the match from a
+// per-account monthly figure that could disagree with the contribution rate.
+type WorkplaceSaving struct {
+	// Rate is the current contribution rate, as a share of pay.
+	Rate float64 `json:"rate"`
+	// AnnualDeferral is the rate applied to pay, stopped at this year's
+	// elective deferral limit, where payroll stops too.
+	AnnualDeferral money.Money `json:"annual_deferral"`
+	MatchEarned    money.Money `json:"match_earned"`
+	// MatchAvailable is the match at the rate the employer matches up to.
+	MatchAvailable money.Money `json:"match_available"`
+}
+
+// workplaceSaving applies the contribution rate and match terms to pay.
+// False when the rate or pay is unknown: an unanswered rate is not 0%.
+func (c questContext) workplaceSaving() (WorkplaceSaving, bool) {
+	gross, ok := c.grossAnnual()
+	if !ok || c.Profile.DeferralPct == nil {
+		return WorkplaceSaving{}, false
+	}
+	rate := *c.Profile.DeferralPct
+	deferral := money.Money(rate * float64(gross))
+	if limit := ElectiveDeferralLimit(c.Limits, c.Profile.DateOfBirth, c.TaxYear); limit.Total > 0 {
+		deferral = min(deferral, limit.Total)
+	}
+
+	out := WorkplaceSaving{Rate: rate, AnnualDeferral: deferral}
+	matchPct, limitPct := derefF(c.Profile.MatchPct), derefF(c.Profile.MatchLimitPct)
+	if matchPct > 0 && limitPct > 0 {
+		out.MatchAvailable = money.Money(limitPct * matchPct * float64(gross))
+		out.MatchEarned = money.Money(min(rate, limitPct) * matchPct * float64(gross))
+	}
+	return out, true
+}
+
+// investedAssets totals the accounts whose role is investment.
+//
+// The independence number is measured against this, not net worth: net worth
+// counts the house, the car and the checking balance, none of which pays for a
+// retirement.
+func (c questContext) investedAssets() money.Money {
+	var total money.Money
+	for _, a := range c.Accounts {
+		if a.HasRole(domain.RoleInvestment) {
+			total += a.Balance
+		}
+	}
+	return total
+}
+
+// fiTarget is the independence number and the yearly spending it is built on:
+// a year of spending over the withdrawal rate. The spending is the user's own
+// retirement figure when they gave one, and a year of essentials otherwise.
+func (c questContext) fiTarget() (target, annualSpend money.Money, ok bool) {
+	annualSpend = c.Baseline.EssentialMonthly * 12
+	if c.Profile.TargetAnnualSpend != nil && *c.Profile.TargetAnnualSpend > 0 {
+		annualSpend = *c.Profile.TargetAnnualSpend
+	}
+	if annualSpend <= 0 {
+		return 0, 0, false
+	}
+	return money.Money(float64(annualSpend) / c.withdrawalRate()), annualSpend, true
+}
+
+func (c questContext) withdrawalRate() float64 {
+	if c.Profile.WithdrawalRate != nil && *c.Profile.WithdrawalRate > 0 {
+		return *c.Profile.WithdrawalRate
+	}
+	return 0.04
+}
+
+// ContributionLimits are this tax year's ceilings for the user, resolved from
+// the tax_limits table with whatever catch-up their age brings. Served so no
+// screen asks the user to type a limit in, which goes stale every January.
+type ContributionLimits struct {
+	TaxYear   int         `json:"tax_year"`
+	Workplace money.Money `json:"workplace"`
+	IRA       money.Money `json:"ira"`
+	// HSA is nil until the coverage tier is known: the self-only and family
+	// ceilings differ by thousands.
+	HSA *money.Money `json:"hsa,omitempty"`
+}
+
+func (c questContext) contributionLimits() ContributionLimits {
+	out := ContributionLimits{
+		TaxYear:   c.TaxYear,
+		Workplace: ElectiveDeferralLimit(c.Limits, c.Profile.DateOfBirth, c.TaxYear).Total,
+	}
+	if ira, ok := c.Limits.Amount(domain.LimitIRAContribution); ok {
+		out.IRA = ira
+		if c.Profile.DateOfBirth != nil && ageAtYearEnd(*c.Profile.DateOfBirth, c.TaxYear) >= 50 {
+			if catchup, ok := c.Limits.Amount(domain.LimitIRACatchup50Plus); ok {
+				out.IRA += catchup
+			}
+		}
+	}
+	room := HSAContributionRoom(c.Limits, c.Profile.HSACoverageTier, c.Profile.DateOfBirth, c.TaxYear, 0, 0)
+	if room.Computable {
+		total := room.Limit + room.Catchup
+		out.HSA = &total
+	}
+	return out
 }
 
 // needsGrossPay reports gross pay as missing only when NEITHER the profile

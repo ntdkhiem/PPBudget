@@ -6,6 +6,7 @@ import { DashboardCard } from "@/components/dashboard-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   formatMonths,
+  formatMonthYear,
   formatPct,
   STRATEGY_PROFILES,
   type FinancialPlan,
@@ -20,6 +21,14 @@ const STAGE_BAR: Record<StageKind, string> = {
   full_ef: "bg-amber-500",
   invest: "bg-emerald-500",
 };
+
+/**
+ * Lowercases a stage title to run on inside a sentence -- its first letter
+ * only, so "Chase Sapphire" keeps its capitals, and an acronym is left alone.
+ */
+function lowerFirst(s: string): string {
+  return /^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s;
+}
 
 const STAGE_DOT: Record<StageKind, string> = {
   starter_ef: "bg-indigo-500",
@@ -107,7 +116,8 @@ export function AllocationPlan({
         </h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
           One pool, competing claims. Each priority takes the whole surplus until it is
-          satisfied, so every stage below gets a real start date.
+          satisfied, so every stage below gets a real start date. A card keeps charging
+          interest while it waits its turn, and its date allows for that.
         </p>
       </div>
 
@@ -155,7 +165,11 @@ export function AllocationPlan({
                       key={stage.id}
                       className={STAGE_BAR[stage.kind]}
                       style={{ flexGrow: share }}
-                      title={`${stage.label}: ${formatMonths(stage.monthsToComplete)}`}
+                      title={
+                        stage.completesOn
+                          ? `${stage.label}: ${formatMonths(stage.monthsToComplete)}, done in ${formatMonthYear(stage.completesOn)}`
+                          : `${stage.label}: ${formatMonths(stage.monthsToComplete)}`
+                      }
                     />
                   );
                 })}
@@ -223,7 +237,13 @@ export function AllocationPlan({
                             <>
                               {formatCurrency(stage.monthlyCents)}/mo
                               {stage.startsInMonths != null && stage.startsInMonths > 0 && (
-                                <> · starts in {formatMonths(stage.startsInMonths)}</>
+                                <>
+                                  {" "}
+                                  · starts in{" "}
+                                  {waterfall.crossoverOn
+                                    ? formatMonthYear(waterfall.crossoverOn)
+                                    : formatMonths(stage.startsInMonths)}
+                                </>
                               )}
                             </>
                           ) : (
@@ -259,9 +279,15 @@ export function AllocationPlan({
                     </>
                   ) : (
                     <>
-                      <strong>Crossover in {formatMonths(waterfall.crossoverMonths)}.</strong> Until
-                      then {formatCurrency(waterfall.poolCents)} a month goes to{" "}
-                      {activeStage?.label.toLowerCase()}
+                      <strong>
+                        Crossover in{" "}
+                        {waterfall.crossoverOn
+                          ? `${formatMonthYear(waterfall.crossoverOn)} (${formatMonths(waterfall.crossoverMonths)})`
+                          : formatMonths(waterfall.crossoverMonths)}
+                        .
+                      </strong>{" "}
+                      Until then {formatCurrency(waterfall.poolCents)} a month goes to{" "}
+                      {activeStage && lowerFirst(activeStage.label)}
                       <ArrowRight className="inline w-3.5 h-3.5 mx-1 align-[-2px]" />
                       after that, the same amount starts being invested.
                     </>

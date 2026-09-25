@@ -197,7 +197,7 @@ func (r *Repository) planningNetWorth(ctx context.Context, userID string, months
 // liability rollups the emergency-fund math needs.
 func (r *Repository) planningAccounts(ctx context.Context, userID string, baseline *domain.PlanningBaseline) error {
 	query := `
-		SELECT a.id, a.name, a.type,
+		SELECT a.id, a.name, a.type, a.role,
 		       COALESCE(account_balance_at(a.id, 'infinity'::date), 0)::bigint AS balance
 		FROM accounts a
 		WHERE a.user_id = $1 AND a.type IN ('asset', 'liability')
@@ -213,7 +213,7 @@ func (r *Repository) planningAccounts(ctx context.Context, userID string, baseli
 	for rows.Next() {
 		var acct domain.PlanningAccount
 		var balance int64
-		if err := rows.Scan(&acct.ID, &acct.Name, &acct.Type, &balance); err != nil {
+		if err := rows.Scan(&acct.ID, &acct.Name, &acct.Type, &acct.Role, &balance); err != nil {
 			return err
 		}
 		acct.Balance = money.Money(balance)

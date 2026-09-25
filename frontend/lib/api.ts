@@ -36,11 +36,36 @@ export async function apiFetch<T>(
 }
 
 // Types matching the Go backend
+/**
+ * What an account is, as opposed to which side of the balance sheet it is on.
+ * The plan reads this: checking and savings are cash, investment is invested,
+ * the rest is property or debt. Absent means nobody has said yet.
+ */
+export type AccountRole =
+  | "checking"
+  | "savings"
+  | "investment"
+  | "property"
+  | "credit_card"
+  | "loan"
+  | "mortgage";
+
+export const ACCOUNT_ROLES: Array<{ value: AccountRole; label: string; type: "asset" | "liability" }> = [
+  { value: "checking", label: "Checking", type: "asset" },
+  { value: "savings", label: "Savings", type: "asset" },
+  { value: "investment", label: "Investment or retirement", type: "asset" },
+  { value: "property", label: "Property or vehicle", type: "asset" },
+  { value: "credit_card", label: "Credit card", type: "liability" },
+  { value: "loan", label: "Loan", type: "liability" },
+  { value: "mortgage", label: "Mortgage", type: "liability" },
+];
+
 export interface Account {
   id: string;
   user_id?: string;
   name: string;
   type: "asset" | "liability" | "income" | "expense" | "equity";
+  role?: AccountRole;
   currency?: string;
   current_balance: number; // cents, signed (liabilities negative)
   balance_as_of?: string; // "YYYY-MM-DDT00:00:00Z" — latest non-opening snapshot
@@ -219,6 +244,7 @@ export interface PlanningAccount {
   id: string;
   name: string;
   type: string;
+  role?: AccountRole;
   balance: number; // cents; liabilities are negative
 }
 

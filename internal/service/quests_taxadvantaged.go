@@ -186,7 +186,8 @@ func questMaxHSA() questDef {
 				excess := -room.Remaining
 				due := endOfYear(c.Now)
 				return []questResult{{
-					Title: fmt.Sprintf("Withdraw %s of excess HSA contributions", usd(excess)),
+					Variant: domain.QuestVariantOverLimit,
+					Title:   fmt.Sprintf("Withdraw %s of excess HSA contributions", usd(excess)),
 					Detail: fmt.Sprintf(
 						"Your contributions plus your employer's %s exceed this year's %s limit by %s. "+
 							"Excess contributions are taxed at 6%% for every year they remain, so this needs "+
@@ -354,10 +355,10 @@ func questMegaBackdoorRoth() questDef {
 			deferral := ElectiveDeferralLimit(c.Limits, c.Profile.DateOfBirth, c.TaxYear)
 
 			// The after-tax space is what the overall annual-additions ceiling
-			// leaves once elective deferrals and any match are counted.
+			// leaves once elective deferrals and the full match are counted.
 			var matchAnnual money.Money
-			if gross, ok := c.grossAnnual(); ok {
-				matchAnnual = money.Money(derefF(c.Profile.MatchPct) * derefF(c.Profile.MatchLimitPct) * float64(gross))
+			if saving, ok := c.workplaceSaving(); ok {
+				matchAnnual = saving.MatchAvailable
 			}
 			space := total - deferral.Base - matchAnnual
 			if space <= 0 {
@@ -388,14 +389,9 @@ func questFundIRAToLimit() questDef {
 		Priority:     50,
 		Verification: domain.QuestVerificationManual,
 		Evaluate: func(c questContext) []questResult {
-			limit, ok := c.Limits.Amount(domain.LimitIRAContribution)
-			if !ok {
+			limit := c.contributionLimits().IRA
+			if limit <= 0 {
 				return nil
-			}
-			if c.Profile.DateOfBirth != nil && ageAtYearEnd(*c.Profile.DateOfBirth, c.TaxYear) >= 50 {
-				if catchup, ok := c.Limits.Amount(domain.LimitIRACatchup50Plus); ok {
-					limit += catchup
-				}
 			}
 
 			// The IRA deadline is the filing date, not 31 December -- one of the

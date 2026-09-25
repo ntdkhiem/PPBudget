@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IntakeCore } from "../_components/intake-core";
 import { FocusedQuestions } from "../_components/focused-questions";
+import { EquityGrants } from "../_components/equity-grants";
 import {
   useDerivedProfile,
   useFieldRegistry,
@@ -19,6 +20,7 @@ import {
   useWealthProfile,
   usd,
   type DerivedValue,
+  type FieldInfo,
   type FieldSource,
 } from "../_components/wealth-data";
 
@@ -55,11 +57,26 @@ const SOURCE_STYLES: Record<FieldSource, string> = {
 };
 
 export default function WealthProfilePage() {
+  const { data: profile, isLoading } = useWealthProfile();
+
+  if (isLoading) {
+    return (
+      <PageContainer maxWidth="4xl">
+        <Skeleton className="h-96 w-full rounded-3xl" />
+      </PageContainer>
+    );
+  }
+  // Mounted only once the profile is in, so the view's first render already
+  // knows whether anything has been answered.
+  return <ProfileView firstRun={Object.keys(profile?.fields ?? {}).length === 0} />;
+}
+
+function ProfileView({ firstRun }: { firstRun: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { data: profile, isLoading } = useWealthProfile();
+  const { data: profile } = useWealthProfile();
   const { data: derived } = useDerivedProfile();
-  const { data: registry } = useFieldRegistry();
+  const { data: registry, isLoading: registryLoading } = useFieldRegistry();
   const save = useSaveProfile();
 
   /**
@@ -69,50 +86,45 @@ export default function WealthProfilePage() {
    * "has the user answered anything?" flips to the answers view the instant
    * step one is submitted and throws the user out of their own setup. The
    * decision belongs to the moment the page opened; only finishing or asking
-   * for it again may change it.
+   * for it again may change it. The state initializer is the latch: it reads
+   * firstRun once, on mount, and never again.
    */
-  const [showIntake, setShowIntake] = useState<boolean | null>(null);
+  const [showIntake, setShowIntake] = useState(firstRun);
 
   // ?ask=a,b arrives from an action card's "answer 2 questions to unlock".
   // Honouring it is what keeps that promise honest: the alternative is landing
   // someone on a page of forty fields after telling them there were two.
   const askParam = searchParams.get("ask");
   const askKeys = askParam ? askParam.split(",").filter(Boolean) : [];
-  // Action cards send people here from the overview, the profile's own rows
-  // from here, and the Cash page's account choice from there. Returning to the
-  // wrong one loses their place.
-  const from = searchParams.get("from");
-  const backTo =
-    from === "profile" ? "/wealth/profile" : from === "cash" ? "/wealth/cash" : "/wealth";
+  // Action cards send people here from the overview; the profile's own rows
+  // send them from here. Returning to the wrong one loses their place.
+  const backTo = searchParams.get("from") === "profile" ? "/wealth/profile" : "/wealth";
 
   const answered = profile?.fields ?? {};
   const answeredKeys = Object.keys(answered);
   const labels = registry?.labels ?? {};
+  const specs = new Map((registry?.fields ?? []).map((f) => [f.key, f]));
   const staleKeys = new Set(derived?.stale ?? []);
-
-  useEffect(() => {
-    if (isLoading || showIntake !== null) return;
-    setShowIntake(answeredKeys.length === 0);
-  }, [isLoading, showIntake, answeredKeys.length]);
-
-  // Rendered after the hooks above so their order never varies between renders.
-  if (isLoading || showIntake === null) {
-    return (
-      <PageContainer maxWidth="4xl">
-        <Skeleton className="h-96 w-full rounded-3xl" />
-      </PageContainer>
-    );
-  }
 
   // A focused ask outranks everything, including a first run: someone who
   // followed a specific prompt should get that prompt, not the whole wizard.
   if (askKeys.length > 0) {
+    // The questions fill in from the registry as they mount. Mounted before it
+    // arrives, every box started empty under "your current answer is filled
+    // in" -- on a direct link or a reload, where nothing is cached yet.
+    if (registryLoading) {
+      return (
+        <PageContainer maxWidth="4xl">
+          <Skeleton className="h-96 w-full rounded-3xl" />
+        </PageContainer>
+      );
+    }
     return (
       <PageContainer maxWidth="4xl">
         <FocusedQuestions
           fieldKeys={askKeys}
           labels={labels}
-          knownFields={registry?.fields ?? []}
+          fields={registry?.fields ?? []}
           profile={profile}
           backTo={backTo}
           onDone={() => router.push(backTo)}
@@ -248,7 +260,7 @@ export default function WealthProfilePage() {
                   </span>
 
                   <span className="text-sm font-medium text-slate-900 dark:text-white">
-                    {formatAnswer(key, raw)}
+                    {formatAnswer(specs.get(key), raw)}
                   </span>
 
                   <span
@@ -273,6 +285,8 @@ export default function WealthProfilePage() {
             })}
           </div>
         </section>
+
+        <EquityGrants />
 
         {/* What remains. Listed, not demanded: each one unlocks a specific
             action, and the overview shows which. */}
@@ -306,36 +320,35 @@ export default function WealthProfilePage() {
   );
 }
 
-/** Renders a stored answer in the shape its field actually has. */
-function formatAnswer(key: string, value: unknown): string {
+/**
+ * Renders a stored answer in the shape its field actually has, as the
+ * server's field registry describes it.
+ */
+function formatAnswer(spec: FieldInfo | undefined, value: unknown): string {
   if (value === undefined || value === null) return "—";
-  // The one list answer is a set of account ids, which mean nothing on screen.
-  if (Array.isArray(value)) return `${value.length} ${value.length === 1 ? "account" : "accounts"}`;
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (typeof value === "string") {
-    // ISO dates come back as timestamps, but they are calendar dates -- a date
-    // of birth is not an instant. Parsing the whole string and formatting it
-    // through the local zone moves it a day west of UTC, so someone born on the
-    // 15th sees the 14th. Build the date from its own parts instead, which
-    // keeps the locale's ordering without the shift.
-    const day = /^(\d{4})-(\d{2})-(\d{2})T/.exec(value);
-    if (day) {
-      return new Date(
-        Number(day[1]), Number(day[2]) - 1, Number(day[3]),
-      ).toLocaleDateString();
+  switch (spec?.kind) {
+    case "boolean":
+      return value ? "Yes" : "No";
+    case "choice":
+      return spec.choices?.find((c) => c.value === value)?.label ?? String(value);
+    case "date": {
+      // ISO dates come back as timestamps, but they are calendar dates -- a
+      // date of birth is not an instant. Parsing the whole string and
+      // formatting it through the local zone moves it a day west of UTC, so
+      // someone born on the 15th sees the 14th. Build the date from its own
+      // parts instead, which keeps the locale's ordering without the shift.
+      const day = typeof value === "string" ? /^(\d{4})-(\d{2})-(\d{2})/.exec(value) : null;
+      return day
+        ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])).toLocaleDateString()
+        : String(value);
     }
-    return value;
-  }
-  if (typeof value === "number") {
-    // Rates are stored as fractions, money as cents. The key tells them apart.
-    if (key.endsWith("_pct") || key.endsWith("_apr") || key.endsWith("_rate") ||
-        key.endsWith("_share")) {
-      return `${(value * 100).toFixed(2).replace(/\.?0+$/, "")}%`;
-    }
-    if (key.endsWith("_months") || key.endsWith("_age") || key.endsWith("_month")) {
+    case "percent":
+      return typeof value === "number"
+        ? `${(value * 100).toFixed(2).replace(/\.?0+$/, "")}%`
+        : String(value);
+    case "money":
+      return typeof value === "number" ? usd(value) : String(value);
+    default:
       return String(value);
-    }
-    return usd(value);
   }
-  return String(value);
 }

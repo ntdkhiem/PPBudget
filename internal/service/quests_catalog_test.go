@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -72,9 +73,10 @@ func baseContext(p *domain.WealthProfile) questContext {
 			BucketCoverage:   0.95,
 			MonthsOfData:     6,
 		},
-		Terms:          map[string]domain.AccountTerms{},
-		StaleFields:    map[string]bool{},
-		ExistingStatus: map[string]string{},
+		Terms:       map[string]domain.AccountTerms{},
+		StaleFields: map[string]bool{},
+		State:       map[string]domain.QuestState{},
+		Marks:       map[string]domain.QuestMark{},
 	}
 }
 
@@ -118,14 +120,18 @@ func mustFind(t *testing.T, quests []domain.Quest, key string) *domain.Quest {
 // are different questions, and conflating them makes a gating regression look
 // like a rule regression. The gating tests below deliberately do not use this.
 func unlockAllPhases(qc questContext) questContext {
-	status := map[string]string{}
+	qc.State = map[string]domain.QuestState{}
 	for _, phase := range phaseDefs {
 		for _, m := range phase.Milestones {
-			status[m] = domain.QuestStatusComplete
+			qc.State[m] = achievedState(qc.Now)
 		}
 	}
-	qc.ExistingStatus = status
 	return qc
+}
+
+// achievedState is a stored reading of an action that was completed once.
+func achievedState(at time.Time) domain.QuestState {
+	return domain.QuestState{Status: domain.QuestStatusComplete, AchievedAt: &at, ChangedAt: at}
 }
 
 // ------------------------------------------- rule 1 & 6: phase 1 ordering
@@ -942,9 +948,9 @@ func TestPhaseGatingOpensSequentially(t *testing.T) {
 	t.Run("phase 3 opens once phase 1 and 2 milestones are met", func(t *testing.T) {
 		qc := baseContext(p)
 		qc.Baseline.LiquidAssets = 50_000_000 // fully funded
-		qc.ExistingStatus = map[string]string{
-			"establish_sell_on_vest": domain.QuestStatusComplete,
-			"reserve_equity_tax_gap": domain.QuestStatusComplete,
+		qc.State = map[string]domain.QuestState{
+			"establish_sell_on_vest": achievedState(qc.Now),
+			"reserve_equity_tax_gap": achievedState(qc.Now),
 		}
 		quests := evaluateCatalog(qc)
 
@@ -1141,7 +1147,7 @@ func TestEveryMissingFieldKeyHasALabel(t *testing.T) {
 		t.Fatal("expected some blocked actions to name missing fields")
 	}
 	for key := range seen {
-		if _, ok := fieldLabels[key]; !ok {
+		if fieldLabel(key) == "" {
 			t.Errorf("missing field %q has no label; the unlock prompt would show a raw identifier", key)
 		}
 	}
@@ -1344,7 +1350,7 @@ func TestPaidOffBalanceCompletesRatherThanVanishing(t *testing.T) {
 		}
 		qc.Terms["card"] = domain.AccountTerms{AccountID: "card", APR: ptr(0.2249)}
 		if tracked != "" {
-			qc.ExistingStatus[tracked] = domain.QuestStatusAvailable
+			qc.State[tracked] = domain.QuestState{Status: domain.QuestStatusAvailable}
 		}
 		return qc
 	}
@@ -1421,6 +1427,88 @@ func TestSweepOnlyMovesCash(t *testing.T) {
 	}
 }
 
+// The working cash a sweep leaves behind is held back once, from checking
+// first. It used to come off every low-rate account, which kept a month of
+// essentials idle in each.
+func TestSweepHoldsTheReserveBackOnce(t *testing.T) {
+	role := func(r string) *string { return &r }
+	setup := func(checking money.Money) questContext {
+		qc := baseContext(nil) // essentials $4,400 a month
+		qc.Accounts = []domain.PlanningAccount{
+			// Savings listed first: the reserve still comes out of checking.
+			{ID: "savings", Name: "BofA Savings", Type: "asset", Role: role(domain.RoleSavings), Balance: 600_000},
+			{ID: "checking", Name: "BofA Checking", Type: "asset", Role: role(domain.RoleChecking), Balance: checking},
+			{ID: "hysa", Name: "Ally HYSA", Type: "asset", Role: role(domain.RoleSavings), Balance: 1_000_000},
+		}
+		qc.Terms["savings"] = domain.AccountTerms{AccountID: "savings", APY: ptr(0.0001)}
+		qc.Terms["hysa"] = domain.AccountTerms{AccountID: "hysa", APY: ptr(0.042)}
+		qc.Cash = map[string]bool{"savings": true, "checking": true, "hysa": true}
+		return qc
+	}
+
+	t.Run("checking covers it", func(t *testing.T) {
+		quests := evaluateCatalog(setup(800_000))
+
+		checking := mustFind(t, quests, "sweep_idle_cash:checking")
+		if *checking.TargetAmount != 360_000 {
+			t.Errorf("checking: move %d, want 360000 ($8,000 less the $4,400 month)", *checking.TargetAmount)
+		}
+		if !strings.HasSuffix(checking.Detail, "The rest stays here: a month of essentials as working cash.") {
+			t.Errorf("checking detail: %q", checking.Detail)
+		}
+
+		// The old rule kept another $4,400 here and moved only $1,600.
+		savings := mustFind(t, quests, "sweep_idle_cash:savings")
+		if *savings.TargetAmount != 600_000 {
+			t.Errorf("savings: move %d, want all 600000", *savings.TargetAmount)
+		}
+		if !strings.HasSuffix(savings.Detail, "BofA Checking keeps a month of essentials as working cash.") {
+			t.Errorf("savings detail: %q", savings.Detail)
+		}
+	})
+
+	t.Run("checking holds part and savings the rest", func(t *testing.T) {
+		qc := setup(300_000)
+		qc.Planned = []domain.PlannedExpense{{Amount: 50_000, TargetDate: qc.Now.AddDate(0, 3, 0)}}
+		quests := evaluateCatalog(qc)
+
+		// $3,000 in checking is all reserve, so there is nothing to move from it.
+		if q := findQuest(quests, "sweep_idle_cash:checking"); q != nil {
+			t.Errorf("checking holds less than the reserve; got %q", q.Title)
+		}
+		// $4,400 + $500 earmarked = $4,900 held back: $3,000 in checking, $1,900 here.
+		savings := mustFind(t, quests, "sweep_idle_cash:savings")
+		if *savings.TargetAmount != 410_000 {
+			t.Errorf("savings: move %d, want 410000", *savings.TargetAmount)
+		}
+		want := "The $1,900 left here, with what stays in BofA Checking, keeps a month of essentials as working cash, " +
+			"plus the $500 earmarked for near-term plans."
+		if !strings.HasSuffix(savings.Detail, want) {
+			t.Errorf("savings detail:\n got %q\nwant suffix %q", savings.Detail, want)
+		}
+	})
+
+	t.Run("the high-rate account is not swept or drawn on", func(t *testing.T) {
+		quests := evaluateCatalog(setup(800_000))
+		if q := findQuest(quests, "sweep_idle_cash:hysa"); q != nil {
+			t.Errorf("the best rate held is the destination; got %q", q.Title)
+		}
+	})
+
+	t.Run("with no essentials figure only the earmark is held back", func(t *testing.T) {
+		qc := setup(800_000)
+		qc.Baseline.EssentialMonthly = 0
+		qc.Planned = []domain.PlannedExpense{{Amount: 50_000, TargetDate: qc.Now.AddDate(0, 3, 0)}}
+		checking := mustFind(t, evaluateCatalog(qc), "sweep_idle_cash:checking")
+		if *checking.TargetAmount != 750_000 {
+			t.Errorf("checking: move %d, want 750000", *checking.TargetAmount)
+		}
+		if !strings.HasSuffix(checking.Detail, "The rest stays here: the $500 earmarked for near-term plans.") {
+			t.Errorf("checking detail: %q", checking.Detail)
+		}
+	})
+}
+
 // ------------------------------------------------------- the funding date
 
 // Only what the surplus actually pays for counts toward the crossover.
@@ -1443,9 +1531,10 @@ func TestFundingScheduleCountsOnlyWhatTheSurplusPays(t *testing.T) {
 		}
 	}
 	const surplus = money.Money(238_822)
+	now := time.Date(2026, time.September, 24, 15, 0, 0, 0, time.UTC)
 
 	t.Run("sequenced against one surplus", func(t *testing.T) {
-		stages, crossover := fundingSchedule(quests(open), surplus)
+		stages, crossover := fundingSchedule(quests(open), surplus, nil, now)
 
 		if len(stages) != 3 {
 			t.Fatalf("expected the starter, the card and the full fund; got %+v", stages)
@@ -1481,10 +1570,22 @@ func TestFundingScheduleCountsOnlyWhatTheSurplusPays(t *testing.T) {
 		if *last.StartsInMonths+*last.MonthsToComplete != *crossover {
 			t.Error("the last stage should end exactly at the crossover")
 		}
+
+		// Month 1 is next month's surplus: the starter finishes in October, the
+		// card in December, and the full fund in April.
+		for i, want := range []time.Time{
+			time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2027, time.April, 1, 0, 0, 0, 0, time.UTC),
+		} {
+			if got := stages[i].CompletesOn; got == nil || !got.Equal(want) {
+				t.Errorf("stage %s: completes %v, want %s", stages[i].QuestID, got, want.Format("January 2006"))
+			}
+		}
 	})
 
 	t.Run("a finished starter leaves the full fund's gap whole", func(t *testing.T) {
-		stages, _ := fundingSchedule(quests(domain.QuestStatusComplete), surplus)
+		stages, _ := fundingSchedule(quests(domain.QuestStatusComplete), surplus, nil, now)
 		if stages[0].Remaining != 0 || stages[0].MonthsToComplete == nil || *stages[0].MonthsToComplete != 0 {
 			t.Errorf("a complete stage owes nothing and takes no time; got %+v", stages[0])
 		}
@@ -1494,21 +1595,143 @@ func TestFundingScheduleCountsOnlyWhatTheSurplusPays(t *testing.T) {
 	})
 
 	t.Run("no surplus is never, not a large number", func(t *testing.T) {
-		stages, crossover := fundingSchedule(quests(open), 0)
+		stages, crossover := fundingSchedule(quests(open), 0, nil, now)
 		if crossover != nil {
 			t.Errorf("crossover: got %d want nil", *crossover)
 		}
-		if stages[1].MonthsToComplete != nil || stages[1].StartsInMonths != nil {
+		if stages[1].MonthsToComplete != nil || stages[1].StartsInMonths != nil || stages[1].CompletesOn != nil {
 			t.Errorf("an unfunded stage has no schedule; got %+v", stages[1])
 		}
 	})
 
 	t.Run("nothing owed is now", func(t *testing.T) {
-		_, crossover := fundingSchedule(nil, surplus)
+		_, crossover := fundingSchedule(nil, surplus, nil, now)
 		if crossover == nil || *crossover != 0 {
 			t.Errorf("crossover: got %v want 0", crossover)
 		}
 	})
+}
+
+// A card keeps charging interest while the cushion ahead of it is funded, so
+// it costs more by the time its turn comes. Dividing today's balance by the
+// surplus said four months for this card; it takes five.
+func TestFundingScheduleChargesInterestWhileACardWaits(t *testing.T) {
+	amount := func(v int64) *money.Money { m := money.Money(v); return &m }
+	open := domain.QuestStatusAvailable
+	quests := []domain.Quest{
+		{ID: "s", CatalogKey: "starter_emergency_fund", Phase: PhaseLiquidity, Status: open, TargetAmount: amount(250_000)},
+		{ID: "c", CatalogKey: "clear_high_apr_balance:card", Phase: PhaseLiquidity, Status: open, TargetAmount: amount(1_000_000)},
+	}
+	now := time.Date(2026, time.September, 24, 0, 0, 0, 0, time.UTC)
+	twoPercent := func(key string) float64 {
+		if key == "clear_high_apr_balance:card" {
+			return 0.02
+		}
+		return 0
+	}
+
+	// Without interest: the starter takes month 1 and the card months 2-5.
+	_, flat := fundingSchedule(quests, 250_000, nil, now)
+	if flat == nil || *flat != 5 {
+		t.Fatalf("without interest: got %v want 5", flat)
+	}
+
+	// At 2% a month the $10,000 is $10,404 by its first payment in month 2,
+	// and $736.79 is still owed after its fourth.
+	stages, crossover := fundingSchedule(quests, 250_000, twoPercent, now)
+	if crossover == nil || *crossover != 6 {
+		t.Fatalf("with interest: got %v want 6", crossover)
+	}
+	card := stages[1]
+	if card.StartsInMonths == nil || *card.StartsInMonths != 1 || card.MonthsToComplete == nil || *card.MonthsToComplete != 5 {
+		t.Errorf("card: starts %v for %v months, want 1 for 5", card.StartsInMonths, card.MonthsToComplete)
+	}
+	if want := time.Date(2027, time.March, 1, 0, 0, 0, 0, time.UTC); card.CompletesOn == nil || !card.CompletesOn.Equal(want) {
+		t.Errorf("card completes %v, want March 2027", card.CompletesOn)
+	}
+	if card.Remaining != 1_000_000 {
+		t.Errorf("remaining is today's balance; got %d", card.Remaining)
+	}
+
+	// Interest the surplus cannot outpace never finishes -- $400 a month on
+	// $20,000 against $300 of surplus -- and says so instead of looping.
+	quests[1].TargetAmount = amount(2_000_000)
+	stages, crossover = fundingSchedule(quests, 30_000, twoPercent, now)
+	if crossover != nil {
+		t.Errorf("crossover: got %d want nil", *crossover)
+	}
+	if stages[0].CompletesOn == nil {
+		t.Error("the starter ahead of the card still finishes")
+	}
+	if stages[1].CompletesOn != nil || stages[1].MonthsToComplete != nil {
+		t.Errorf("a card the surplus never clears has no schedule; got %+v", stages[1])
+	}
+}
+
+// Only a card's balance is charged, at its own APR; the cushions earn nothing
+// and a promotional balance is interest-free until its expiry action says
+// otherwise.
+func TestDebtMonthlyRate(t *testing.T) {
+	qc := baseContext(nil)
+	qc.Terms["card"] = domain.AccountTerms{AccountID: "card", APR: ptr(0.24)}
+	qc.Terms["unknown-rate"] = domain.AccountTerms{AccountID: "unknown-rate"}
+
+	for key, want := range map[string]float64{
+		"clear_high_apr_balance:card":            0.02,
+		"clear_high_apr_balance:unknown-rate":    0,
+		"clear_high_apr_balance:no-terms":        0,
+		"clear_promo_balance_before_expiry:card": 0,
+		"full_emergency_fund":                    0,
+		"starter_emergency_fund":                 0,
+	} {
+		if got := qc.debtMonthlyRate(key); math.Abs(got-want) > 1e-12 {
+			t.Errorf("%s: got %v want %v", key, got, want)
+		}
+	}
+}
+
+// The date goes on the open action it belongs to and nowhere else.
+func TestDatedFundingWritesTheMonthIntoTheDetail(t *testing.T) {
+	april := time.Date(2027, time.April, 1, 0, 0, 0, 0, time.UTC)
+	quests := []domain.Quest{
+		{ID: "f", Status: domain.QuestStatusAvailable, Detail: "6 months of essentials is $26,400."},
+		{ID: "s", Status: domain.QuestStatusComplete, Detail: "Done."},
+		{ID: "b", Status: domain.QuestStatusBlocked, Detail: "Answer one question."},
+	}
+	datedFunding(quests, []FundingStage{
+		{QuestID: "f", Remaining: 100, CompletesOn: &april},
+		{QuestID: "s", Remaining: 0},
+		{QuestID: "b", Remaining: 100, CompletesOn: &april},
+	})
+
+	if want := "6 months of essentials is $26,400. At your current surplus this is done in April 2027."; quests[0].Detail != want {
+		t.Errorf("open action:\n got %q\nwant %q", quests[0].Detail, want)
+	}
+	if quests[1].Detail != "Done." || quests[2].Detail != "Answer one question." {
+		t.Errorf("only open actions are dated; got %q and %q", quests[1].Detail, quests[2].Detail)
+	}
+}
+
+// The summary dates the crossover from the same schedule.
+func TestSummaryDatesTheCrossover(t *testing.T) {
+	qc := baseContext(nil) // Now is 22 September 2026
+	gap := money.Money(540_000)
+	quests := []domain.Quest{{
+		ID: "f", CatalogKey: "full_emergency_fund", Phase: PhaseLiquidity,
+		Status: domain.QuestStatusAvailable, TargetAmount: &gap,
+	}}
+
+	s := summarise(qc, quests) // $5,400 at $1,800 a month
+	if s.CrossoverMonths == nil || *s.CrossoverMonths != 3 {
+		t.Fatalf("crossover: got %v want 3", s.CrossoverMonths)
+	}
+	if want := time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC); s.CrossoverOn == nil || !s.CrossoverOn.Equal(want) {
+		t.Errorf("crossover date: got %v want December 2026", s.CrossoverOn)
+	}
+
+	if s := summarise(qc, nil); s.CrossoverOn != nil {
+		t.Errorf("nothing owed has no date to wait for; got %v", s.CrossoverOn)
+	}
 }
 
 // The Cash page's spending breakdown comes from the summary. Without these
@@ -1529,5 +1752,312 @@ func TestSummaryCarriesTheSpendingBreakdown(t *testing.T) {
 	}
 	if s.Funding == nil {
 		t.Error("an empty schedule should serialise as [], not null")
+	}
+}
+
+// ------------------------------------------------------------ account roles
+
+// An unclassified account is neither cash nor investment, so the plan says
+// which accounts it is working around rather than quietly leaving them out.
+func TestUnclassifiedAccountsAreNamed(t *testing.T) {
+	role := func(r string) *string { return &r }
+
+	t.Run("names the accounts without a role", func(t *testing.T) {
+		qc := baseContext(nil)
+		qc.Accounts = []domain.PlanningAccount{
+			{ID: "a", Name: "Ally HYSA", Type: "asset"},
+			{ID: "b", Name: "BofA Savings", Type: "asset"},
+			{ID: "c", Name: "BofA Checking", Type: "asset", Role: role(domain.RoleChecking)},
+		}
+		q := mustFind(t, evaluateCatalog(qc), "classify_accounts")
+		if q.Status != domain.QuestStatusBlocked {
+			t.Errorf("status: got %q want blocked", q.Status)
+		}
+		if !strings.Contains(q.Detail, "Ally HYSA and BofA Savings") || strings.Contains(q.Detail, "Checking") {
+			t.Errorf("should name exactly the unclassified accounts; got %q", q.Detail)
+		}
+		if len(q.MissingFields) != 1 || q.MissingFields[0] != "account_roles" {
+			t.Errorf("missing: got %v want [account_roles]", q.MissingFields)
+		}
+	})
+
+	t.Run("says nothing once every account has a role", func(t *testing.T) {
+		qc := baseContext(nil)
+		qc.Accounts = []domain.PlanningAccount{
+			{ID: "c", Name: "BofA Checking", Type: "asset", Role: role(domain.RoleChecking)},
+		}
+		if q := findQuest(evaluateCatalog(qc), "classify_accounts"); q != nil {
+			t.Errorf("nothing to classify, yet got %q", q.Title)
+		}
+	})
+}
+
+// ------------------------------------------------ marks and achievements
+
+// What the user marked is applied over what the engine worked out, by rules
+// that used to live in an UPDATE statement's CASE and now run on every read.
+func TestUserMarksOverComputedStatus(t *testing.T) {
+	marked := time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC)
+	withMark := func(qc questContext, key, mark string) questContext {
+		qc.Marks = map[string]domain.QuestMark{key: {Mark: mark, CreatedAt: marked}}
+		return qc
+	}
+	withCard := func() questContext {
+		qc := baseContext(nil)
+		qc.Accounts = []domain.PlanningAccount{
+			{ID: "card", Name: "Chase", Type: "liability", Balance: -500_000},
+		}
+		qc.Terms["card"] = domain.AccountTerms{AccountID: "card", APR: ptr(0.2249)}
+		return qc
+	}
+
+	t.Run("a claim the app cannot check stands", func(t *testing.T) {
+		qc := unlockAllPhases(baseContext(newProfile().
+			set("employer_is_public", func(p *domain.WealthProfile) { p.EmployerIsPublic = ptr(true) }).
+			build()))
+		qc.Grants = []domain.EquityGrant{{ID: "g1", Kind: domain.EquityKindRSU, HasRule10b51: ptr(false)}}
+		q := mustFind(t, evaluateCatalog(withMark(qc, "establish_sell_on_vest", domain.QuestStatusComplete)),
+			"establish_sell_on_vest")
+		if q.Status != domain.QuestStatusComplete || q.CompletedSource != domain.QuestSourceManual {
+			t.Errorf("a 10b5-1 is the user's word alone; got %q from %q", q.Status, q.CompletedSource)
+		}
+		if q.CompletedAt == nil || !q.CompletedAt.Equal(marked) {
+			t.Errorf("completed_at should be when they said so; got %v", q.CompletedAt)
+		}
+	})
+
+	t.Run("a claim the data contradicts does not", func(t *testing.T) {
+		q := mustFind(t, evaluateCatalog(withMark(withCard(), "clear_high_apr_balance:card", domain.QuestStatusComplete)),
+			"clear_high_apr_balance:card")
+		if q.Status != domain.QuestStatusAvailable {
+			t.Errorf("the balance is still there, so the card is not cleared; got %q", q.Status)
+		}
+	})
+
+	t.Run("not being able to work it out is no grounds to overrule", func(t *testing.T) {
+		// No rate on the card: the engine cannot say whether it is cleared.
+		qc := withCard()
+		qc.Terms = map[string]domain.AccountTerms{}
+		qc = withMark(qc, "clear_high_apr_balance", domain.QuestStatusComplete)
+		q := mustFind(t, evaluateCatalog(qc), "clear_high_apr_balance")
+		if q.Status != domain.QuestStatusComplete {
+			t.Errorf("a blocked recomputation must not overturn a claim; got %q", q.Status)
+		}
+	})
+
+	t.Run("a skip always stands", func(t *testing.T) {
+		q := mustFind(t, evaluateCatalog(withMark(withCard(), "clear_high_apr_balance:card", domain.QuestStatusSkipped)),
+			"clear_high_apr_balance:card")
+		if q.Status != domain.QuestStatusSkipped {
+			t.Errorf("status: got %q want skipped", q.Status)
+		}
+	})
+}
+
+// A phase once finished stays finished. Dipping below a milestone reopens the
+// action in place -- and says so -- but does not lock every phase after it.
+func TestAchievementsKeepLaterPhasesOpen(t *testing.T) {
+	p := newProfile().
+		set("deferral_pct", func(p *domain.WealthProfile) { p.DeferralPct = ptr(0.04) }).
+		set("emergency_fund_target_months", func(p *domain.WealthProfile) {
+			p.EmergencyFundTargetMonths = ptr(6)
+		}).
+		build()
+	qc := baseContext(p)
+	qc.Baseline.LiquidAssets = 100_000 // below one month of essentials: the cushion has dipped
+
+	t.Run("without an achievement, phase 3 waits", func(t *testing.T) {
+		q := mustFind(t, evaluateCatalog(qc), "auto_escalate_deferral")
+		if q.Status != domain.QuestStatusLocked {
+			t.Errorf("status: got %q want locked", q.Status)
+		}
+	})
+
+	t.Run("with one, it stays open and the dip is named", func(t *testing.T) {
+		achieved := qc
+		achieved.State = map[string]domain.QuestState{}
+		for _, m := range phaseDefs[PhaseLiquidity].Milestones {
+			achieved.State[m] = achievedState(qc.Now.AddDate(0, -2, 0))
+		}
+		for _, m := range phaseDefs[PhaseEquity].Milestones {
+			achieved.State[m] = achievedState(qc.Now.AddDate(0, -2, 0))
+		}
+		quests := evaluateCatalog(achieved)
+
+		if q := mustFind(t, quests, "auto_escalate_deferral"); q.Status == domain.QuestStatusLocked {
+			t.Error("a dipped cushion should not re-lock a phase already reached")
+		}
+		starter := mustFind(t, quests, "starter_emergency_fund")
+		if starter.Status != domain.QuestStatusAvailable {
+			t.Fatalf("the cushion itself should reopen; got %q", starter.Status)
+		}
+		if !strings.Contains(starter.Detail, "slipped since") {
+			t.Errorf("a reopened achievement should say it slipped; got %q", starter.Detail)
+		}
+	})
+}
+
+// An auto completion keeps the date it happened, not the date of the reading.
+func TestAutoCompletionKeepsItsDate(t *testing.T) {
+	qc := baseContext(nil) // $8,000 liquid against $4,400 essentials: cushion met
+	since := qc.Now.AddDate(0, -1, 0)
+	qc.State = map[string]domain.QuestState{
+		"starter_emergency_fund": {Status: domain.QuestStatusComplete, AchievedAt: &since, ChangedAt: since},
+	}
+	q := mustFind(t, evaluateCatalog(qc), "starter_emergency_fund")
+	if q.Status != domain.QuestStatusComplete || q.CompletedSource != domain.QuestSourceAuto {
+		t.Fatalf("got %q from %q, want complete from auto", q.Status, q.CompletedSource)
+	}
+	if q.CompletedAt == nil || !q.CompletedAt.Equal(since) {
+		t.Errorf("completed_at: got %v want %v", q.CompletedAt, since)
+	}
+	if q.ID != "starter_emergency_fund" {
+		t.Errorf("an action is identified by its key; id is %q", q.ID)
+	}
+}
+
+// ------------------------------------------------- one source per number
+
+// Every milestone reads as a condition on the Overview, so each needs a label.
+func TestEveryMilestoneHasALabel(t *testing.T) {
+	for _, p := range phaseDefs {
+		for _, m := range p.Milestones {
+			if milestoneLabels[m] == "" {
+				t.Errorf("milestone %q has no label", m)
+			}
+		}
+	}
+}
+
+// What the Overview says unlocks a phase has to be what the gating used.
+func TestPhaseProgressAgreesWithGating(t *testing.T) {
+	qc := baseContext(newProfile().
+		set("emergency_fund_target_months", func(p *domain.WealthProfile) { p.EmergencyFundTargetMonths = ptr(6) }).
+		build())
+	qc.Baseline.LiquidAssets = 50_000 // not even a month of essentials
+
+	quests := evaluateCatalog(qc)
+	phases := phaseProgress(quests, qc)
+
+	if !phases[PhaseLiquidity].Unlocked || phases[PhaseEquity].Unlocked {
+		t.Fatalf("phase 1 should be open and phase 2 shut; got %v and %v",
+			phases[PhaseLiquidity].Unlocked, phases[PhaseEquity].Unlocked)
+	}
+	byKey := map[string]Milestone{}
+	for _, m := range phases[PhaseLiquidity].Milestones {
+		byKey[m.Key] = m
+	}
+	if m := byKey["starter_emergency_fund"]; m.Done || !m.Applies {
+		t.Errorf("an unfunded cushion is an open milestone: %+v", m)
+	}
+	// No cards at all: nothing to clear, so done, but not worth showing off.
+	if m := byKey["clear_high_apr_balance"]; !m.Done || m.Applies {
+		t.Errorf("no balances means done and not applicable: %+v", m)
+	}
+}
+
+// The Retirement tab and the Overview measure the same independence number
+// against the same money: invested accounts, not net worth.
+func TestIndependenceNumberUsesInvestmentsAndOwnSpending(t *testing.T) {
+	role := func(r string) *string { return &r }
+	qc := unlockAllPhases(baseContext(nil)) // essentials 440,000/mo
+	qc.Accounts = []domain.PlanningAccount{
+		{ID: "401k", Name: "401(k)", Type: "asset", Role: role(domain.RoleInvestment), Balance: 20_000_000},
+		{ID: "chk", Name: "Checking", Type: "asset", Role: role(domain.RoleChecking), Balance: 900_000_000},
+	}
+
+	q := mustFind(t, evaluateCatalog(qc), "reach_fi_number")
+	want := money.Money(440_000 * 12 * 25)
+	if q.TargetAmount == nil || *q.TargetAmount != want {
+		t.Fatalf("target from essentials: got %v want %d", q.TargetAmount, want)
+	}
+	if q.Status == domain.QuestStatusComplete {
+		t.Error("a huge checking balance is not invested money and should not reach the number")
+	}
+	if !strings.Contains(q.Detail, "$200,000") {
+		t.Errorf("should state what the investment accounts hold; got %q", q.Detail)
+	}
+
+	s := summarise(qc, evaluateCatalog(qc))
+	if s.FITarget != want || s.InvestedAssets != 20_000_000 || s.FIAnnualSpend != 440_000*12 {
+		t.Errorf("summary: target %d, invested %d, spend %d", s.FITarget, s.InvestedAssets, s.FIAnnualSpend)
+	}
+
+	// The user's own retirement spending replaces essentials in both places.
+	qc.Profile.TargetAnnualSpend = ptr(money.Money(4_000_000))
+	q = mustFind(t, evaluateCatalog(qc), "reach_fi_number")
+	if q.TargetAmount == nil || *q.TargetAmount != 100_000_000 {
+		t.Errorf("target from the user's $40,000 a year: got %v", q.TargetAmount)
+	}
+	if s := summarise(qc, nil); s.FITarget != 100_000_000 {
+		t.Errorf("summary should follow the same figure; got %d", s.FITarget)
+	}
+}
+
+// One payroll figure: the match action and the summary the Retirement tab
+// reads cannot disagree, and payroll stops at the deferral limit.
+func TestWorkplaceSavingIsOneFigure(t *testing.T) {
+	p := newProfile().
+		set("gross_annual_income", func(p *domain.WealthProfile) { p.GrossAnnualIncome = ptr(money.Money(20_000_000)) }).
+		set("deferral_pct", func(p *domain.WealthProfile) { p.DeferralPct = ptr(0.02) }).
+		set("match_pct", func(p *domain.WealthProfile) { p.MatchPct = ptr(0.5) }).
+		set("match_limit_pct", func(p *domain.WealthProfile) { p.MatchLimitPct = ptr(0.06) }).
+		build()
+	qc := baseContext(p)
+
+	s := summarise(qc, nil)
+	if s.Workplace == nil {
+		t.Fatal("rate and pay are known, so payroll saving should be too")
+	}
+	if s.Workplace.AnnualDeferral != 400_000 || s.Workplace.MatchEarned != 200_000 || s.Workplace.MatchAvailable != 600_000 {
+		t.Errorf("workplace: %+v", *s.Workplace)
+	}
+	match := mustFind(t, evaluateCatalog(qc), "capture_employer_match")
+	if match.TargetAmount == nil || *match.TargetAmount != s.Workplace.MatchAvailable-s.Workplace.MatchEarned {
+		t.Errorf("the match action and the summary disagree: action %v, summary %+v", match.TargetAmount, *s.Workplace)
+	}
+
+	// 30% of $200,000 is $60,000; payroll stops at the $24,500 limit.
+	qc.Profile.DeferralPct = ptr(0.30)
+	if got := summarise(qc, nil).Workplace.AnnualDeferral; got != 2_450_000 {
+		t.Errorf("deferral should stop at the elective limit: got %d", got)
+	}
+
+	qc.Profile.DeferralPct = nil
+	if summarise(qc, nil).Workplace != nil {
+		t.Error("an unanswered rate is unknown, not 0%")
+	}
+}
+
+// Limits come from the year's table, with the catch-ups the user's age brings.
+func TestContributionLimitsFollowAgeAndCoverage(t *testing.T) {
+	qc := baseContext(nil)
+	l := qc.contributionLimits()
+	if l.Workplace != 2_450_000 || l.IRA != 750_000 || l.HSA != nil {
+		t.Errorf("no age, no tier: %+v", l)
+	}
+
+	qc.Profile.DateOfBirth = ptr(time.Date(1970, time.June, 1, 0, 0, 0, 0, time.UTC)) // 56 in 2026
+	qc.Profile.HSACoverageTier = ptr("family")
+	l = qc.contributionLimits()
+	if l.Workplace != 2_450_000+800_000 || l.IRA != 750_000+110_000 {
+		t.Errorf("50+ catch-ups: %+v", l)
+	}
+	if l.HSA == nil || *l.HSA != 875_000+100_000 {
+		t.Errorf("family HSA with the 55+ catch-up: %v", l.HSA)
+	}
+}
+
+// Pages branch on the variant, never the prose.
+func TestHSAOverContributionIsAVariant(t *testing.T) {
+	qc := unlockAllPhases(baseContext(newProfile().
+		set("hdhp_enrolled", func(p *domain.WealthProfile) { p.HDHPEnrolled = ptr(true) }).
+		set("hsa_coverage_tier", func(p *domain.WealthProfile) { p.HSACoverageTier = ptr("self_only") }).
+		build()))
+	qc.Paystub = &domain.PaystubYTD{HSAContribution: 500_000} // over the 440,000 ceiling
+
+	q := mustFind(t, evaluateCatalog(qc), "max_hsa")
+	if q.Variant != domain.QuestVariantOverLimit {
+		t.Errorf("variant: got %q want %q (title %q)", q.Variant, domain.QuestVariantOverLimit, q.Title)
 	}
 }

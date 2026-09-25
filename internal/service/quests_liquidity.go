@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
@@ -28,6 +29,7 @@ import (
 
 func liquidityQuests() []questDef {
 	return []questDef{
+		questClassifyAccounts(),
 		questCaptureEmployerMatch(),
 		questStarterEmergencyFund(),
 		questClearPromoBalance(),
@@ -36,6 +38,78 @@ func liquidityQuests() []questDef {
 		questDiscretionaryCap(),
 		questFullEmergencyFund(),
 	}
+}
+
+// questClassifyAccounts asks what each unclassified account is.
+//
+// Every rule in this phase reads roles. An unclassified account is neither
+// cash for the cushion nor a debt to order, so the plan quietly works around
+// it until someone says what it is -- which is why this sorts first, and why
+// it names the accounts rather than counting them.
+func questClassifyAccounts() questDef {
+	return questDef{
+		Key:          "classify_accounts",
+		Phase:        PhaseLiquidity,
+		Priority:     -10,
+		Verification: domain.QuestVerificationAuto,
+		Evaluate: func(c questContext) []questResult {
+			var names []string
+			for _, a := range c.Accounts {
+				if a.Role == nil {
+					names = append(names, a.Name)
+				}
+			}
+			if len(names) == 0 {
+				return []questResult{{NotApplicable: true}}
+			}
+
+			title := fmt.Sprintf("Say what %s is", names[0])
+			pronoun := "It is"
+			if len(names) > 1 {
+				title = fmt.Sprintf("Say what %d of your accounts are", len(names))
+				pronoun = "They are"
+			}
+			return []questResult{{
+				Title: title,
+				Detail: fmt.Sprintf(
+					"%s %s no role yet. %s left out of both your cash and your investments until it has "+
+						"one, so the cushion and the debt order are worked out without %s. Set a role for "+
+						"each on the Accounts page.",
+					listNames(names), pluralHas(len(names)), pronoun, pluralThem(len(names))),
+				Missing: []string{"account_roles"},
+			}}
+		},
+	}
+}
+
+// listNames joins account names for a sentence, eliding past three.
+func listNames(names []string) string {
+	shown := names
+	if len(names) > 3 {
+		shown = names[:3]
+	}
+	switch {
+	case len(names) > 3:
+		return fmt.Sprintf("%s and %d more", strings.Join(shown, ", "), len(names)-3)
+	case len(names) == 1:
+		return names[0]
+	default:
+		return strings.Join(shown[:len(shown)-1], ", ") + " and " + shown[len(shown)-1]
+	}
+}
+
+func pluralHas(n int) string {
+	if n == 1 {
+		return "has"
+	}
+	return "have"
+}
+
+func pluralThem(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
 }
 
 // questCaptureEmployerMatch is the highest-priority action in the catalog.
@@ -51,26 +125,20 @@ func questCaptureEmployerMatch() questDef {
 		Requires:    []string{"match_pct", "match_limit_pct", "deferral_pct"},
 		AlsoMissing: needsGrossPay,
 		Evaluate: func(c questContext) []questResult {
-			matchPct := derefF(c.Profile.MatchPct)
 			limitPct := derefF(c.Profile.MatchLimitPct)
 			deferral := derefF(c.Profile.DeferralPct)
 
 			// A plan with no match is an answer, not a gap.
-			if matchPct <= 0 || limitPct <= 0 {
+			if derefF(c.Profile.MatchPct) <= 0 || limitPct <= 0 {
 				return []questResult{{NotApplicable: true}}
 			}
-			gross, ok := c.grossAnnual()
+			saving, ok := c.workplaceSaving()
 			if !ok {
 				return []questResult{{Missing: []string{"gross_annual_income"}}}
 			}
 
-			maxMatch := money.Money(limitPct * matchPct * float64(gross))
-			earnedRate := deferral
-			if earnedRate > limitPct {
-				earnedRate = limitPct
-			}
-			earned := money.Money(earnedRate * matchPct * float64(gross))
-			forgone := maxMatch - earned
+			maxMatch := saving.MatchAvailable
+			forgone := maxMatch - saving.MatchEarned
 
 			if forgone <= 0 {
 				return []questResult{{
@@ -189,7 +257,7 @@ func questClearPromoBalance() questDef {
 				if balance <= 0 {
 					// See clear_high_apr_balance: a tracked balance that reaches
 					// zero completes rather than disappearing.
-					if _, tracked := c.ExistingStatus[key+":"+acct.ID]; tracked {
+					if c.seen(key + ":" + acct.ID) {
 						out = append(out, questResult{
 							KeySuffix: acct.ID,
 							Complete:  true,
@@ -251,7 +319,7 @@ func questClearHighAPRBalance() questDef {
 					// so: producing nothing would let regeneration prune the
 					// action, and its history with it, at the one moment in
 					// this phase most worth a record.
-					if _, tracked := c.ExistingStatus[key+":"+acct.ID]; tracked {
+					if c.seen(key + ":" + acct.ID) {
 						out = append(out, questResult{
 							KeySuffix: acct.ID,
 							Complete:  true,
@@ -334,14 +402,19 @@ func questSweepIdleCash() questDef {
 				return nil
 			}
 
-			// A month of essentials stays in checking regardless -- sweeping the
+			// A month of essentials stays behind as working cash -- sweeping the
 			// float is how you produce an overdraft in pursuit of a few dollars
-			// of interest.
-			float := c.Baseline.EssentialMonthly
-			earmarked := c.plannedWithin(12)
+			// of interest -- and so does anything earmarked for near-term plans.
+			// Both are held back ONCE, from checking first and then from the
+			// other low-rate accounts in turn. Holding them back from every
+			// account kept a month in each: two months idle for anyone with a
+			// low-rate checking account and a low-rate savings account.
+			float, earmarked := c.Baseline.EssentialMonthly, c.plannedWithin(12)
+			reserve := float + earmarked
+			var holders []string // the accounts the reserve stays in
 
 			var out []questResult
-			for _, acct := range c.Accounts {
+			for _, acct := range checkingFirst(c.Accounts) {
 				// Only cash is idle. A retirement or brokerage account with no
 				// rate recorded reads as 0% here, and "move it into savings"
 				// would be a withdrawal with tax and a penalty attached.
@@ -352,10 +425,23 @@ func questSweepIdleCash() questDef {
 				if t, ok := c.Terms[acct.ID]; ok && t.APY != nil {
 					apy = *t.APY
 				}
-				if apy >= bestAPY {
+				lowRate := apy < bestAPY
+				// Checking holds the reserve whatever it pays. A high-rate
+				// savings account is where the money is going, not where the
+				// float waits.
+				if !lowRate && !acct.HasRole(domain.RoleChecking) {
 					continue
 				}
-				movable := acct.Balance - float - earmarked
+				kept := min(reserve, acct.Balance)
+				reserve -= kept
+				if kept > 0 {
+					holders = append(holders, acct.Name)
+				}
+				if !lowRate {
+					continue
+				}
+
+				movable := acct.Balance - kept
 				if movable <= 0 {
 					continue
 				}
@@ -365,13 +451,9 @@ func questSweepIdleCash() questDef {
 				}
 
 				detail := fmt.Sprintf(
-					"%s earns %s while you hold an account paying %s. Moving %s earns about %s more a year. "+
-						"That leaves a month of essentials in place as working cash",
-					acct.Name, pct(apy, 2), pct(bestAPY, 2), usd(movable), usd(gain))
-				if earmarked > 0 {
-					detail += fmt.Sprintf(", and holds back the %s you have earmarked for near-term plans", usd(earmarked))
-				}
-				detail += "."
+					"%s earns %s while you hold an account paying %s. Moving %s earns about %s more a year.",
+					acct.Name, pct(apy, 2), pct(bestAPY, 2), usd(movable), usd(gain)) +
+					reserveNote(kept, holders, float, earmarked)
 
 				out = append(out, questResult{
 					KeySuffix: acct.ID,
@@ -383,6 +465,55 @@ func questSweepIdleCash() questDef {
 			return out
 		},
 	}
+}
+
+// checkingFirst orders the accounts with checking ahead of the rest, keeping
+// their order otherwise, so the sweep's reserve is held where bills are paid.
+func checkingFirst(accounts []domain.PlanningAccount) []domain.PlanningAccount {
+	out := make([]domain.PlanningAccount, 0, len(accounts))
+	for _, a := range accounts {
+		if a.HasRole(domain.RoleChecking) {
+			out = append(out, a)
+		}
+	}
+	for _, a := range accounts {
+		if !a.HasRole(domain.RoleChecking) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// reserveNote says where the cash a sweep leaves behind is kept: kept is what
+// stays in this account, and holders every account holding some of it so far,
+// this one last when kept is not zero.
+func reserveNote(kept money.Money, holders []string, float, earmarked money.Money) string {
+	var parts []string
+	if float > 0 {
+		parts = append(parts, "a month of essentials as working cash")
+	}
+	if earmarked > 0 {
+		parts = append(parts, fmt.Sprintf("the %s earmarked for near-term plans", usd(earmarked)))
+	}
+	what := strings.Join(parts, ", plus ")
+
+	switch {
+	case len(holders) == 0 || what == "":
+		return "" // nothing held back: no essentials figure and nothing earmarked
+	case kept == 0:
+		return fmt.Sprintf(" %s %s %s.", listNames(holders), pluralKeeps(len(holders)), what)
+	case len(holders) == 1:
+		return fmt.Sprintf(" The rest stays here: %s.", what)
+	}
+	others := holders[:len(holders)-1]
+	return fmt.Sprintf(" The %s left here, with what stays in %s, keeps %s.", usd(kept), listNames(others), what)
+}
+
+func pluralKeeps(n int) string {
+	if n == 1 {
+		return "keeps"
+	}
+	return "keep"
 }
 
 // discretionaryCapShare is the share of income above which discretionary
@@ -509,12 +640,10 @@ func questFullEmergencyFund() questDef {
 				}}
 			}
 
+			// When it is done comes from the funding schedule, which knows what
+			// is queued ahead of it; see datedFunding.
 			detail := fmt.Sprintf("%d months of essentials is %s and you have %s set aside.",
 				months, usd(target), usd(available))
-			if surplus := c.Baseline.MonthlySurplus; surplus > 0 {
-				detail += fmt.Sprintf(" At your current surplus of %s a month that takes about %d months.",
-					usd(surplus), monthsToFill(gap, surplus))
-			}
 
 			return []questResult{{
 				Title:                        fmt.Sprintf("Build your emergency fund to %s", usd(target)),
@@ -549,17 +678,6 @@ func absMoney(m money.Money) money.Money {
 		return -m
 	}
 	return m
-}
-
-func monthsToFill(gap, perMonth money.Money) int {
-	if perMonth <= 0 {
-		return 0
-	}
-	n := int(gap / perMonth)
-	if gap%perMonth != 0 {
-		n++
-	}
-	return n
 }
 
 func monthsBetween(from, to time.Time) int {

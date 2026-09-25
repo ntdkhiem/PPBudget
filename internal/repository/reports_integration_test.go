@@ -16,7 +16,7 @@ func TestSpendingByCategoryIntegration(t *testing.T) {
 	repo := New(pool)
 
 	userID := createTestUser(t, pool, "spending")
-	accID, err := repo.CreateAccount(ctx, userID, "Spending Test", "asset", "USD", 0)
+	accID, err := repo.CreateAccount(ctx, userID, "Spending Test", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}

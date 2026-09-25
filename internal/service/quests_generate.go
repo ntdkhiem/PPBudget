@@ -2,61 +2,83 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
 // Action generation.
 //
 // One pass over the catalog against a single snapshot of the user's data, then
-// three cross-cutting passes that no individual rule should have to think
-// about: the cash-flow guard, phase gating, and staleness.
+// the cross-cutting passes no individual rule should have to think about: the
+// cash-flow guard, phase gating, the user's own marks, and staleness.
 
-// GenerateQuests rebuilds the user's action list and persists it.
+// GenerateQuests works out the user's action list from their current data.
 //
-// Regeneration is safe to run whenever anything changes: ReplaceQuests
-// preserves completion and skips, refreshing only the interpolated text,
-// targets and due dates -- which are exactly what go out of date as balances
-// move.
+// The list itself is stored nowhere, so its figures are never stale and a page
+// load is not a database write. The only writes are for actions whose status
+// changed since it was last seen -- on an ordinary load, none.
 func (s *Service) GenerateQuests(ctx context.Context, userID string) ([]domain.Quest, PlanSummary, error) {
+	quests, _, summary, err := s.ListQuests(ctx, userID)
+	return quests, summary, err
+}
+
+// ListQuests returns the action list, the phases with what unlocks each, and
+// the summary, all from one reading.
+func (s *Service) ListQuests(ctx context.Context, userID string) ([]domain.Quest, []Phase, PlanSummary, error) {
 	qc, err := s.buildQuestContext(ctx, userID)
 	if err != nil {
-		return nil, PlanSummary{}, err
+		return nil, nil, PlanSummary{}, err
 	}
 
 	quests := evaluateCatalog(qc)
-
-	if err := s.repo.ReplaceQuests(ctx, userID, quests); err != nil {
-		return nil, PlanSummary{}, err
-	}
-	stored, err := s.repo.ListQuests(ctx, userID)
-	if err != nil {
-		return nil, PlanSummary{}, err
-	}
-
-	// Record what moved. Compared against the statuses read at the start of
-	// this same generation, so an action the engine closed on the user's behalf
-	// leaves a trace instead of looking identical to one they ticked.
-	s.recordTransitions(ctx, userID, qc.ExistingStatus, stored)
-	// Summarised from the STORED list rather than the freshly generated one, so
-	// completions the user has claimed are reflected in what is still owed.
-	return stored, summarise(qc, stored), nil
+	// Record what moved since the last reading, so an action the engine closed
+	// on the user's behalf leaves a trace instead of looking identical to one
+	// they ticked.
+	s.recordTransitions(ctx, userID, qc.State, quests)
+	summary := summarise(qc, quests)
+	datedFunding(quests, summary.Funding)
+	return quests, phaseProgress(quests, qc), summary, nil
 }
 
-// ListQuests returns the stored action list and its summary, regenerating first
-// so the figures reflect current balances.
-func (s *Service) ListQuests(ctx context.Context, userID string) ([]domain.Quest, PlanSummary, error) {
-	return s.GenerateQuests(ctx, userID)
+// SetQuestStatus records the user marking an action done or not for them, or
+// taking that back with "available".
+//
+// Only keys the catalog can produce are accepted. A fan-out key names one
+// instance -- one card, one grant -- and is accepted by its base.
+func (s *Service) SetQuestStatus(ctx context.Context, userID, key, status, note string) error {
+	base, _, _ := strings.Cut(key, ":")
+	if !isCatalogKey(base) {
+		return apperrors.ErrNotFound
+	}
+	switch status {
+	case domain.QuestStatusComplete, domain.QuestStatusSkipped:
+		return s.repo.SetQuestMark(ctx, userID, key, status, note)
+	case domain.QuestStatusAvailable:
+		// Reopening something never marked is already the case, not an error.
+		if err := s.repo.ClearQuestMark(ctx, userID, key); err != nil && !errors.Is(err, apperrors.ErrNotFound) {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("%w: cannot set an action to %q", apperrors.ErrInvalidInput, status)
 }
 
-// SetQuestStatus records a completion, skip, or reversal.
-func (s *Service) SetQuestStatus(ctx context.Context, userID, questID, status, source, note string) (*domain.Quest, error) {
-	return s.repo.SetQuestStatus(ctx, userID, questID, status, source, note)
+// isCatalogKey reports whether the catalog defines an action with this key.
+func isCatalogKey(key string) bool {
+	for _, def := range catalog() {
+		if def.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 // PlanSummary is the handful of figures every wealth surface needs in common.
@@ -86,13 +108,28 @@ type PlanSummary struct {
 
 	// CrossoverMonths is how long until every funding action in phase 1 is
 	// satisfied and the same money starts being invested instead. Null when
-	// there is no surplus to fund them with -- an honest "never at this rate"
-	// rather than a very large number.
+	// the surplus never gets there -- there is none, or a card's interest
+	// outruns it -- an honest "never at this rate" rather than a very large
+	// number.
 	CrossoverMonths *int `json:"crossover_months"`
+	// CrossoverOn is the month that happens, as a date on its first day.
+	CrossoverOn *time.Time `json:"crossover_on"`
 
 	// Funding is the schedule CrossoverMonths is the end of, served so the
 	// Cash page draws the same stages instead of re-deriving them.
 	Funding []FundingStage `json:"funding"`
+
+	// The independence number, the spending it is built on, and what counts
+	// toward it -- the figures reach_fi_number decides on, served so the
+	// Retirement tab shows the same ones. Zero when there is no spending yet.
+	FITarget       money.Money `json:"fi_target"`
+	FIAnnualSpend  money.Money `json:"fi_annual_spend"`
+	InvestedAssets money.Money `json:"invested_assets"`
+
+	// Workplace is what goes in through payroll; nil while the contribution
+	// rate or pay is unknown.
+	Workplace *WorkplaceSaving   `json:"workplace"`
+	Limits    ContributionLimits `json:"limits"`
 }
 
 // FundingStage is one phase 1 action the monthly surplus pays for.
@@ -101,11 +138,13 @@ type FundingStage struct {
 	// Remaining is what the surplus still has to put in: zero once the action
 	// is done, skipped, or has no figure yet.
 	Remaining money.Money `json:"remaining"`
-	// StartsInMonths and MonthsToComplete are null when there is no surplus to
-	// pay with, which is "never at this rate". A stage with nothing remaining
-	// takes zero months and has no start.
+	// StartsInMonths and MonthsToComplete are null when the surplus never
+	// finishes the stage, which is "never at this rate". A stage with nothing
+	// remaining takes zero months and has no start.
 	StartsInMonths   *int `json:"starts_in_months"`
 	MonthsToComplete *int `json:"months_to_complete"`
+	// CompletesOn is the month it finishes, as a date on its first day.
+	CompletesOn *time.Time `json:"completes_on"`
 }
 
 // fundedFromSurplus names the phase 1 actions paid for out of the monthly
@@ -153,26 +192,50 @@ func summarise(qc questContext, quests []domain.Quest) PlanSummary {
 		BucketCoverage:    qc.Baseline.BucketCoverage,
 		MonthsOfData:      qc.Baseline.MonthsOfData,
 		TargetSavingsRate: target,
+		InvestedAssets:    qc.investedAssets(),
+		Limits:            qc.contributionLimits(),
 	}
-	out.Funding, out.CrossoverMonths = fundingSchedule(quests, qc.Baseline.MonthlySurplus)
+	out.Funding, out.CrossoverMonths = fundingSchedule(quests, qc.Baseline.MonthlySurplus, qc.debtMonthlyRate, qc.Now)
+	if out.CrossoverMonths != nil && *out.CrossoverMonths > 0 {
+		on := monthStart(qc.Now, *out.CrossoverMonths)
+		out.CrossoverOn = &on
+	}
+	out.FITarget, out.FIAnnualSpend, _ = qc.fiTarget()
+	if saving, ok := qc.workplaceSaving(); ok {
+		out.Workplace = &saving
+	}
 	return out
 }
 
-// fundingSchedule lays phase 1's funding actions end to end against one
-// surplus, and returns the schedule with the month it finishes.
+// maxScheduleMonths bounds the simulation. Past fifty years "never at this
+// rate" is the honest answer, and a card whose interest outruns the surplus
+// would otherwise never finish.
+const maxScheduleMonths = 600
+
+// fundingSchedule pays phase 1's funding actions out of the surplus month by
+// month, in the engine's order, and dates each one.
 //
-// Each action takes the whole surplus until it is satisfied, in the engine's
-// order. Starts and ends are read off the running total rather than by adding
-// each stage's own rounded-up month count, so the last stage ends exactly at
-// the crossover instead of a month or two after it.
-func fundingSchedule(quests []domain.Quest, surplus money.Money) ([]FundingStage, *int) {
-	stages := []FundingStage{}
-	var owed money.Money
+// Each action takes the whole surplus until it is satisfied. A debt keeps
+// accruing interest at monthlyRate until it is cleared -- including while it
+// waits behind the cushion -- so a card is dearer by the time its turn comes;
+// dividing today's balance by the surplus ignored that. With no interest the
+// result is the plain running-total schedule, and the last stage always ends
+// on the crossover. A nil monthlyRate charges no interest.
+func fundingSchedule(
+	quests []domain.Quest, surplus money.Money, monthlyRate func(key string) float64, now time.Time,
+) ([]FundingStage, *int) {
+	type slot struct {
+		stage      FundingStage
+		balance    float64 // cents, fractional while interest accrues
+		rate       float64
+		start, end int // 1-based months from now; 0 = not yet
+	}
+
+	var slots []*slot
 	// The starter cushion and the full fund are measured against the same
 	// cash, so the full fund's gap already contains the starter's. Summing the
 	// two asked the surplus for the first month of essentials twice.
 	var starterQueued money.Money
-
 	for _, q := range quests {
 		base, _, _ := strings.Cut(q.CatalogKey, ":")
 		if q.Phase != PhaseLiquidity || !fundedFromSurplus[base] {
@@ -193,52 +256,174 @@ func fundingSchedule(quests []domain.Quest, surplus money.Money) ([]FundingStage
 			remaining = max(remaining-starterQueued, 0)
 		}
 
-		stage := FundingStage{QuestID: q.ID, Remaining: remaining}
-		switch {
-		case remaining == 0:
-			zero := 0
-			stage.MonthsToComplete = &zero
-		case surplus > 0:
-			start := int(owed / surplus)
-			months := monthsToFill(owed+remaining, surplus) - start
-			stage.StartsInMonths = &start
-			stage.MonthsToComplete = &months
+		s := &slot{stage: FundingStage{QuestID: q.ID, Remaining: remaining}, balance: float64(remaining)}
+		if monthlyRate != nil {
+			s.rate = monthlyRate(q.CatalogKey)
 		}
-		stages = append(stages, stage)
-		owed += remaining
+		slots = append(slots, s)
+	}
+
+	open := 0
+	for _, s := range slots {
+		if s.balance > 0 {
+			open++
+		}
+	}
+	crossover := 0
+	for m := 1; surplus > 0 && open > 0 && m <= maxScheduleMonths; m++ {
+		// Interest first: a balance waiting its turn still grows.
+		for _, s := range slots {
+			if s.balance > 0 && s.rate > 0 {
+				s.balance += s.balance * s.rate
+			}
+		}
+		budget := float64(surplus)
+		for _, s := range slots {
+			if s.balance <= 0 || budget <= 0 {
+				continue
+			}
+			if s.start == 0 {
+				s.start = m
+			}
+			pay := min(budget, s.balance)
+			s.balance -= pay
+			budget -= pay
+			if s.balance < 0.5 { // under half a cent is paid
+				s.balance, s.end = 0, m
+				open--
+			}
+		}
+		if open == 0 {
+			crossover = m
+		}
+	}
+
+	stages := make([]FundingStage, 0, len(slots))
+	for _, s := range slots {
+		st := s.stage
+		switch {
+		case st.Remaining == 0:
+			zero := 0
+			st.MonthsToComplete = &zero
+		case s.end > 0:
+			start, months, done := s.start-1, s.end-s.start+1, monthStart(now, s.end)
+			st.StartsInMonths, st.MonthsToComplete, st.CompletesOn = &start, &months, &done
+		}
+		stages = append(stages, st)
 	}
 
 	switch {
-	case owed <= 0:
-		zero := 0
+	case open > 0:
+		return stages, nil // never at this rate
+	case crossover == 0:
+		zero := 0 // nothing was owed
 		return stages, &zero
-	case surplus > 0:
-		months := monthsToFill(owed, surplus)
-		return stages, &months
 	}
-	return stages, nil
+	return stages, &crossover
 }
 
-// Phase describes a phase for display: the engine and the UI must agree on
-// what the stages are called and what order they come in.
+// monthStart is the first day of the month n months on from now's. Month n of
+// a schedule is paid from the surplus n months out, so a stage that ends in
+// month 1 finishes next month, not in what is left of this one.
+func monthStart(now time.Time, n int) time.Time {
+	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, n, 0)
+}
+
+// debtMonthlyRate is the monthly interest on a funding action's balance: a
+// card's APR over twelve. The cushions earn nothing here, and a promotional
+// balance is interest-free until its own dated action says otherwise.
+func (c questContext) debtMonthlyRate(key string) float64 {
+	base, account, ok := strings.Cut(key, ":")
+	if !ok || base != "clear_high_apr_balance" {
+		return 0
+	}
+	if t, ok := c.Terms[account]; ok && t.APR != nil {
+		return *t.APR / 12
+	}
+	return 0
+}
+
+// datedFunding writes each open funding action's finishing month into its
+// detail, so the action itself says when. The emergency fund used to say how
+// many months its own gap would take, as if nothing were queued ahead of it.
+func datedFunding(quests []domain.Quest, stages []FundingStage) {
+	for _, st := range stages {
+		if st.CompletesOn == nil || st.Remaining <= 0 {
+			continue
+		}
+		for i := range quests {
+			if quests[i].ID == st.QuestID && quests[i].Status == domain.QuestStatusAvailable {
+				quests[i].Detail = strings.TrimSpace(quests[i].Detail + fmt.Sprintf(
+					" At your current surplus this is done in %s.", st.CompletesOn.Format("January 2006")))
+			}
+		}
+	}
+}
+
+// Phase describes a phase for display, with what finishes it: the engine and
+// the UI must agree on what the stages are called, what order they come in and
+// what stands between the user and the next one.
 type Phase struct {
 	Number int    `json:"number"`
 	Name   string `json:"name"`
+	// Unlocked is whether every earlier phase is finished.
+	Unlocked bool `json:"unlocked"`
+	// Milestones are what finishes this phase and so unlocks the next.
+	Milestones []Milestone `json:"milestones"`
 }
 
-// Phases returns the phase definitions, so the client labels them from the same
-// source the generator gates on rather than hardcoding a parallel list.
-func (s *Service) Phases() []Phase {
+// Milestone is one condition for finishing a phase.
+type Milestone struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Done  bool   `json:"done"`
+	// Applies is false when the user has nothing to do for it at all -- no
+	// card to clear, no equity to sell -- which counts as done for gating
+	// but is not worth showing as an achievement.
+	Applies bool `json:"applies"`
+}
+
+// milestoneLabels state each milestone as the condition it checks, so the
+// list reads as what is left rather than as more actions.
+var milestoneLabels = map[string]string{
+	"capture_employer_match":        "No employer match left unclaimed",
+	"starter_emergency_fund":        "A month of essentials in cash",
+	"clear_high_apr_balance":        "No high-interest balances",
+	"full_emergency_fund":           "A full emergency fund",
+	"establish_sell_on_vest":        "Equity sold as it vests",
+	"reserve_equity_tax_gap":        "Tax on equity set aside",
+	"raise_401k_deferral":           "Your 401(k) allowance in use",
+	"max_hsa":                       "Your HSA funded for the year",
+	"resolve_roth_route":            "A way into a Roth IRA settled",
+	"reduce_employer_concentration": "Employer stock under 5% of net worth",
+	"automate_surplus_sweep":        "Surplus invested automatically",
+	"reach_fi_number":               "Your independence number reached",
+}
+
+// phaseProgress reports each phase with its milestones, from the same
+// statuses the gating used, so what the page says unlocks a phase is what
+// actually does.
+func phaseProgress(quests []domain.Quest, qc questContext) []Phase {
+	effective := effectiveStatuses(quests, qc)
+	unlocked := unlockedPhases(effective)
+
 	out := make([]Phase, 0, len(phaseDefs))
 	for _, p := range phaseDefs {
-		out = append(out, Phase{Number: p.Number, Name: p.Name})
+		phase := Phase{Number: p.Number, Name: p.Name, Unlocked: unlocked[p.Number], Milestones: []Milestone{}}
+		for _, key := range p.Milestones {
+			done, applies := milestoneDone(key, effective)
+			phase.Milestones = append(phase.Milestones, Milestone{
+				Key: key, Label: milestoneLabels[key], Done: done, Applies: applies,
+			})
+		}
+		out = append(out, phase)
 	}
 	return out
 }
 
 // ListQuestEvents returns one action's history.
-func (s *Service) ListQuestEvents(ctx context.Context, userID, questID string) ([]domain.QuestEvent, error) {
-	return s.repo.ListQuestEvents(ctx, userID, questID)
+func (s *Service) ListQuestEvents(ctx context.Context, userID, key string) ([]domain.QuestEvent, error) {
+	return s.repo.ListQuestEvents(ctx, userID, key)
 }
 
 // buildQuestContext loads every input once, so no rule issues its own queries
@@ -288,38 +473,52 @@ func (s *Service) buildQuestContext(ctx context.Context, userID string) (questCo
 	if err != nil {
 		return qc, fmt.Errorf("paystub: %w", err)
 	}
-	existing, err := s.repo.ListQuests(ctx, userID)
+	state, err := s.repo.ListQuestState(ctx, userID)
 	if err != nil {
-		return qc, fmt.Errorf("existing quests: %w", err)
+		return qc, fmt.Errorf("quest state: %w", err)
+	}
+	marks, err := s.repo.ListQuestMarks(ctx, userID)
+	if err != nil {
+		return qc, fmt.Errorf("quest marks: %w", err)
 	}
 
 	stale := map[string]bool{}
 	for _, key := range StaleFields(profile, now) {
 		stale[key] = true
 	}
-	existingStatus := map[string]string{}
-	for _, q := range existing {
-		existingStatus[q.CatalogKey] = q.Status
+	cash := cashAccountIDs(pb.Accounts)
+
+	// A tax treatment only describes invested money. Terms left on an account
+	// since reclassified as something else are ignored rather than deleted, so
+	// switching the role back restores them.
+	invested := make(map[string]bool)
+	for _, a := range pb.Accounts {
+		if a.HasRole(domain.RoleInvestment) {
+			invested[a.ID] = true
+		}
 	}
-	cash := cashAccountIDs(pb.Accounts, profile.OverrideLiquidAccountIDs, retirement)
+	retirement = slices.DeleteFunc(retirement, func(t domain.RetirementAccountTerms) bool {
+		return !invested[t.AccountID]
+	})
 
 	return questContext{
-		Now:            now,
-		TaxYear:        now.Year(),
-		Profile:        profile,
-		Baseline:       applyProfile(ComputeBaseline(pb), profile, pb.Accounts, cash),
-		Limits:         limits,
-		Accounts:       pb.Accounts,
-		Cash:           cash,
-		Months:         completeMonths(pb.Months),
-		Terms:          terms,
-		Retirement:     retirement,
-		Grants:         grants,
-		Planned:        planned,
-		Dependents:     dependents,
-		Paystub:        paystub,
-		StaleFields:    stale,
-		ExistingStatus: existingStatus,
+		Now:         now,
+		TaxYear:     now.Year(),
+		Profile:     profile,
+		Baseline:    applyProfile(ComputeBaseline(pb, now), profile, pb.Accounts, cash),
+		Limits:      limits,
+		Accounts:    pb.Accounts,
+		Cash:        cash,
+		Months:      completeMonths(pb.Months, now),
+		Terms:       terms,
+		Retirement:  retirement,
+		Grants:      grants,
+		Planned:     planned,
+		Dependents:  dependents,
+		Paystub:     paystub,
+		StaleFields: stale,
+		State:       state,
+		Marks:       marks,
 	}, nil
 }
 
@@ -363,6 +562,7 @@ func evaluateCatalog(qc questContext) []domain.Quest {
 	}
 
 	applyPhaseGating(quests, qc)
+	applyMarks(quests, qc)
 
 	sort.SliceStable(quests, func(i, j int) bool {
 		if quests[i].Phase != quests[j].Phase {
@@ -393,6 +593,7 @@ func missingFields(qc questContext, required []string) []string {
 
 func blockedQuest(def questDef, missing []string, qc questContext) domain.Quest {
 	return domain.Quest{
+		ID:            def.Key,
 		CatalogKey:    def.Key,
 		Phase:         def.Phase,
 		Priority:      def.Priority,
@@ -413,6 +614,7 @@ func toQuest(def questDef, res questResult, qc questContext) domain.Quest {
 
 	status := domain.QuestStatusAvailable
 	var completedAt *time.Time
+	var completedSource string
 	switch {
 	case len(res.Missing) > 0:
 		status = domain.QuestStatusBlocked
@@ -428,24 +630,32 @@ func toQuest(def questDef, res questResult, qc questContext) domain.Quest {
 		}
 	case res.Complete:
 		status = domain.QuestStatusComplete
+		// When it became complete, not when this reading happened.
 		at := qc.Now
+		if s, ok := qc.State[key]; ok && s.Status == domain.QuestStatusComplete {
+			at = s.ChangedAt
+		}
 		completedAt = &at
+		completedSource = domain.QuestSourceAuto
 	}
 
 	return domain.Quest{
-		CatalogKey:    key,
-		Phase:         def.Phase,
-		Priority:      def.Priority,
-		Status:        status,
-		Title:         res.Title,
-		Detail:        res.Detail,
-		TargetAmount:  res.Target,
-		DueDate:       res.Due,
-		Verification:  def.Verification,
-		Stale:         dependsOnStale(qc, def.Requires) || dependsOnStale(qc, res.Missing),
-		MissingFields: res.Missing,
-		CompletedAt:   completedAt,
-		GeneratedAt:   qc.Now,
+		ID:              key,
+		CatalogKey:      key,
+		Phase:           def.Phase,
+		Priority:        def.Priority,
+		Status:          status,
+		Title:           res.Title,
+		Detail:          res.Detail,
+		Variant:         res.Variant,
+		TargetAmount:    res.Target,
+		DueDate:         res.Due,
+		Verification:    def.Verification,
+		Stale:           dependsOnStale(qc, def.Requires) || dependsOnStale(qc, res.Missing),
+		MissingFields:   res.Missing,
+		CompletedAt:     completedAt,
+		CompletedSource: completedSource,
+		GeneratedAt:     qc.Now,
 	}
 }
 
@@ -466,32 +676,7 @@ func dependsOnStale(qc questContext, keys []string) bool {
 // says so. Gating those behind phase completion would produce a plan that
 // silently lets hard deadlines pass while the user works on something else.
 func applyPhaseGating(quests []domain.Quest, qc questContext) {
-	// Status as it will stand after this generation, so a phase completed by
-	// this very run unlocks the next one immediately rather than a cycle later.
-	effective := map[string]string{}
-	for _, q := range quests {
-		effective[q.CatalogKey] = q.Status
-	}
-	for key, status := range qc.ExistingStatus {
-		if status == domain.QuestStatusComplete || status == domain.QuestStatusSkipped {
-			effective[key] = status
-		}
-	}
-
-	// A phase opens once every earlier phase's milestones are met. Walking in
-	// order means the first incomplete phase closes everything after it, and
-	// phase 1 is always open because nothing precedes it.
-	unlocked := map[int]bool{PhaseCrossCutting: true}
-	open := true
-	for _, phase := range phaseDefs {
-		if phase.Number == PhaseCrossCutting {
-			continue
-		}
-		unlocked[phase.Number] = open
-		if !phaseComplete(phase, effective) {
-			open = false
-		}
-	}
+	unlocked := unlockedPhases(effectiveStatuses(quests, qc))
 
 	for i := range quests {
 		q := &quests[i]
@@ -517,27 +702,117 @@ func applyPhaseGating(quests []domain.Quest, qc questContext) {
 	}
 }
 
-func firstGatedPhase() int { return PhaseLiquidity }
+// markStands reports whether the user's mark decides an action's status.
+//
+// A skip always does. A completion does where the app cannot check it -- an
+// action verified by hand -- or could not work it out this time: "we do not
+// know" is no grounds to contradict someone. For an action it can check and
+// just did, the data wins, because a claim the plan can disprove is worse than
+// no claim.
+func markStands(q domain.Quest, m domain.QuestMark) bool {
+	if m.Mark == domain.QuestStatusSkipped {
+		return true
+	}
+	return q.Verification == domain.QuestVerificationManual ||
+		q.Status == domain.QuestStatusBlocked || q.Status == domain.QuestStatusLocked
+}
+
+// applyMarks lays the user's marks over the computed statuses, and says so on
+// an action the data shows was done once and has slipped since.
+func applyMarks(quests []domain.Quest, qc questContext) {
+	for i := range quests {
+		q := &quests[i]
+		if m, ok := qc.Marks[q.CatalogKey]; ok && markStands(*q, m) {
+			q.Status = m.Mark
+			q.CompletedAt, q.CompletedSource = nil, ""
+			if m.Mark == domain.QuestStatusComplete {
+				at := m.CreatedAt
+				q.CompletedAt, q.CompletedSource = &at, domain.QuestSourceManual
+			}
+			continue
+		}
+		if q.Status == domain.QuestStatusAvailable && q.Verification == domain.QuestVerificationAuto &&
+			qc.achieved(q.CatalogKey) {
+			q.Detail = strings.TrimSpace(q.Detail + " You had this done before, and it has slipped since.")
+		}
+	}
+}
+
+// effectiveStatuses is the status each action counts as for gating: what this
+// reading says, the user's marks wherever they stand, and every past
+// achievement. Reading the marks here means a phase finished by this very
+// reading opens the next one straight away.
+//
+// An achievement stays achieved. A phase once finished does not lock the ones
+// after it again because a balance dipped: the dipped action reopens in place,
+// which is the right amount of alarm.
+func effectiveStatuses(quests []domain.Quest, qc questContext) map[string]string {
+	effective := map[string]string{}
+	for _, q := range quests {
+		effective[q.CatalogKey] = q.Status
+		if m, ok := qc.Marks[q.CatalogKey]; ok && markStands(q, m) {
+			effective[q.CatalogKey] = m.Mark
+		}
+	}
+	for key, s := range qc.State {
+		if s.AchievedAt != nil {
+			effective[key] = domain.QuestStatusComplete
+		}
+	}
+	return effective
+}
+
+// unlockedPhases reports which phases are open. A phase opens once every
+// earlier phase's milestones are met: walking in order, the first unfinished
+// phase closes everything after it, and phase 1 is always open because nothing
+// precedes it.
+func unlockedPhases(effective map[string]string) map[int]bool {
+	unlocked := map[int]bool{PhaseCrossCutting: true}
+	open := true
+	for _, phase := range phaseDefs {
+		if phase.Number == PhaseCrossCutting {
+			continue
+		}
+		unlocked[phase.Number] = open
+		if !phaseComplete(phase, effective) {
+			open = false
+		}
+	}
+	return unlocked
+}
 
 // phaseComplete reports whether every milestone action is done.
-//
-// A milestone that produced no instances counts as satisfied: there was nothing
-// to do. Fan-out milestones match on the key prefix, so every card has to be
-// cleared before the debt milestone passes, not just one.
 func phaseComplete(phase phaseDef, effective map[string]string) bool {
 	for _, milestone := range phase.Milestones {
-		for key, status := range effective {
-			if key != milestone && !strings.HasPrefix(key, milestone+":") {
-				continue
-			}
-			switch status {
-			case domain.QuestStatusComplete, domain.QuestStatusSkipped, domain.QuestStatusNotApplicable:
-			default:
-				return false
-			}
+		if done, _ := milestoneDone(milestone, effective); !done {
+			return false
 		}
 	}
 	return true
+}
+
+// milestoneDone reports whether every instance of a milestone is done, and
+// whether it produced any instance at all.
+//
+// A milestone that produced no instances counts as done: there was nothing to
+// do. Fan-out milestones match on the key prefix, so every card has to be
+// cleared before the debt milestone passes, not just one.
+func milestoneDone(milestone string, effective map[string]string) (done, applies bool) {
+	done = true
+	for key, status := range effective {
+		if key != milestone && !strings.HasPrefix(key, milestone+":") {
+			continue
+		}
+		switch status {
+		case domain.QuestStatusNotApplicable:
+		case domain.QuestStatusComplete, domain.QuestStatusSkipped:
+			applies = true
+		default:
+			applies = true
+			done = false
+		}
+	}
+	return done, applies
 }
 
 // blockedTitle names a blocked action without pretending to know its figures.
@@ -552,6 +827,7 @@ func blockedTitle(key string) string {
 }
 
 var blockedTitles = map[string]string{
+	"classify_accounts":             "Say what each of your accounts is",
 	"capture_employer_match":        "Check whether you are leaving employer match behind",
 	"raise_401k_deferral":           "Work out your 401(k) contribution headroom",
 	"max_hsa":                       "Work out your HSA contribution headroom",
@@ -589,25 +865,12 @@ var blockedTitles = map[string]string{
 	"elect_dependent_care_fsa":          "Check whether a dependent care FSA applies",
 }
 
-// FieldLabels exposes the human descriptions of field keys.
-//
-// Served to the client rather than duplicated there: the unlock prompt beside
-// a blocked action and the sentence the engine writes into its detail text have
-// to name the same thing, and two copies of this map would drift the first time
-// a question was reworded.
-func (s *Service) FieldLabels() map[string]string {
-	out := make(map[string]string, len(fieldLabels))
-	for k, v := range fieldLabels {
-		out[k] = v
-	}
-	return out
-}
-
-// describeFields turns field keys into something readable in a sentence.
+// describeFields turns field keys into something readable in a sentence, with
+// the same labels the client shows beside a blocked action (wealth_fields.go).
 func describeFields(keys []string) string {
 	labels := make([]string, 0, len(keys))
 	for _, k := range keys {
-		if l, ok := fieldLabels[k]; ok {
+		if l := fieldLabel(k); l != "" {
 			labels = append(labels, l)
 		} else {
 			labels = append(labels, strings.ReplaceAll(k, "_", " "))
@@ -623,56 +886,4 @@ func describeFields(keys []string) string {
 	default:
 		return strings.Join(labels[:len(labels)-1], ", ") + " and " + labels[len(labels)-1]
 	}
-}
-
-var fieldLabels = map[string]string{
-	"date_of_birth":                "your date of birth",
-	"filing_status":                "your tax filing status",
-	"resident_state":               "the state you file in",
-	"marital_status":               "whether you are married",
-	"spouse_gross_annual":          "your spouse's income",
-	"gross_annual_income":          "your gross pay",
-	"deferral_pct":                 "your current 401(k) contribution rate",
-	"match_pct":                    "your employer's match rate",
-	"match_limit_pct":              "how much of your salary the match covers",
-	"hdhp_enrolled":                "whether you are on a high-deductible health plan",
-	"hsa_coverage_tier":            "whether your HSA covers you or your family",
-	"hsa_employer_contribution":    "what your employer puts into your HSA",
-	"prior_year_tax_liability":     "last year's total tax",
-	"prior_year_agi":               "last year's adjusted gross income",
-	"traditional_ira_balance":      "your traditional IRA balance",
-	"taxable_brokerage_value":      "your taxable brokerage balance",
-	"taxable_unrealized_gain":      "how much of that is unrealised gain",
-	"taxable_employer_stock":       "how much employer stock you hold",
-	"employer_is_public":           "whether your employer is publicly traded",
-	"plan_allows_after_tax":        "whether your plan takes after-tax contributions",
-	"plan_allows_in_service":       "whether your plan allows in-service withdrawals",
-	"plan_accepts_rollovers":       "whether your plan accepts incoming rollovers",
-	"ltd_replacement_pct":          "what share of income your disability cover replaces",
-	"ltd_monthly_cap":              "your disability benefit cap",
-	"life_death_benefit":           "your life insurance cover",
-	"housing_tenure":               "whether you rent or own",
-	"mortgage_apr":                 "your mortgage rate",
-	"mortgage_balance":             "your mortgage balance",
-	"pays_pmi":                     "whether you pay mortgage insurance",
-	"student_loan_kind":            "whether your student loans are federal or private",
-	"student_loan_idr":             "whether you are on an income-driven repayment plan",
-	"student_loan_pslf":            "whether you are pursuing loan forgiveness",
-	"target_independence_age":      "when you want work to become optional",
-	"emergency_fund_target_months": "how many months of cover you want",
-	"expected_return_apr":          "the return you expect on investments",
-
-	// Corrections rather than questions, labelled for the profile's list of
-	// answers; see isOverrideField.
-	"override_monthly_income":     "your corrected monthly income",
-	"override_essential_expenses": "your corrected monthly essentials",
-	"override_liquid_account_ids": "which accounts count as cash",
-
-	// Pseudo-keys. These do not appear in the profile field registry: they
-	// describe data the app is missing rather than an answer it wants, and the
-	// client distinguishes them by checking against GET /wealth/fields.
-	"transaction_history": "enough categorised spending to work from",
-	"account_apr":         "the interest rate on each balance",
-	"paystub_ytd":         "the year-to-date figures from a recent paystub",
-	"espp_terms":          "your ESPP discount, contribution rate and plan maximum",
 }

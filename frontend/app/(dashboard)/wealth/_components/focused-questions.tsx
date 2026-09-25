@@ -2,14 +2,13 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Check } from "lucide-react";
-import { apiFetch, getStoredToken, type Account } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useSaveProfile, type WealthProfile } from "./wealth-data";
+import { toInputValue } from "./form-bits";
+import { useSaveProfile, type FieldInfo, type FieldKind, type WealthProfile } from "./wealth-data";
 
 /**
  * The questions one blocked action is waiting on, and nothing else.
@@ -18,65 +17,16 @@ import { useSaveProfile, type WealthProfile } from "./wealth-data";
  * promise on a page of forty fields would make it a lie, so this renders
  * exactly the keys the action named and returns the user to where they were.
  *
- * Field types are inferred from the key rather than declared, because the
- * alternative is a second registry in the browser that has to be kept in step
- * with the Go one -- and a mis-typed field silently writes the wrong units,
- * which is worse than not asking at all. The inference is conservative: an
- * unrecognised key is treated as money, which is the commonest case, and the
- * server's CHECK constraints reject anything genuinely wrong.
+ * How each question is asked -- its input, its choices -- comes from the
+ * server's field registry. The page used to infer a type from the shape of a
+ * key and keep its own copies of the choices, and a mis-typed field silently
+ * writes the wrong units, which is worse than not asking at all.
  */
 
-type Kind = "money" | "percent" | "integer" | "boolean" | "date" | "text" | "choice" | "accounts";
-
-const CHOICES: Record<string, Array<{ value: string; label: string }>> = {
-  filing_status: [
-    { value: "single", label: "Single" },
-    { value: "mfj", label: "Married, jointly" },
-    { value: "mfs", label: "Married, separately" },
-    { value: "hoh", label: "Head of household" },
-    { value: "qss", label: "Surviving spouse" },
-  ],
-  marital_status: [
-    { value: "single", label: "Single" },
-    { value: "married", label: "Married" },
-    { value: "domestic_partner", label: "Domestic partner" },
-  ],
-  hsa_coverage_tier: [
-    { value: "self_only", label: "Just me" },
-    { value: "family", label: "Family" },
-  ],
-  housing_tenure: [
-    { value: "rent", label: "Rent" },
-    { value: "own", label: "Own" },
-  ],
-  student_loan_kind: [
-    { value: "none", label: "None" },
-    { value: "federal", label: "Federal" },
-    { value: "private", label: "Private" },
-    { value: "both", label: "Both" },
-  ],
-  strategy: [
-    { value: "aggressive", label: "Aggressive" },
-    { value: "balanced", label: "Balanced" },
-    { value: "flexible", label: "Flexible" },
-  ],
-};
-
-const BOOLEANS = new Set([
-  "hdhp_enrolled",
-  "has_stock_options",
-  "employer_is_public",
-  "pays_pmi",
-  "student_loan_idr",
-  "student_loan_pslf",
-  "plan_allows_after_tax",
-  "plan_allows_in_service",
-  "plan_accepts_rollovers",
-  "match_per_paycheck",
-  "match_has_true_up",
-  "ltd_premium_pretax",
-  "spouse_has_workplace_plan",
-]);
+const YES_NO = [
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No" },
+];
 
 /**
  * Where a pseudo-key sends the user.
@@ -102,97 +52,76 @@ const ELSEWHERE: Record<string, { text: string; href: string; cta: string }> = {
   },
   espp_terms: {
     text: "This needs your ESPP discount, contribution rate and plan maximum.",
-    href: "/wealth/profile",
-    cta: "Run setup again",
+    href: "/wealth/profile#equity",
+    cta: "Edit your grants",
+  },
+  account_roles: {
+    text: "This needs a role for each account: checking, savings, investment, card or loan.",
+    href: "/accounts",
+    cta: "Go to accounts",
   },
 };
 
-function kindOf(key: string): Kind {
-  // The one list-valued field. Falling through to money turned "which accounts
-  // count as cash" into a dollar box the server then rejected.
-  if (key === "override_liquid_account_ids") return "accounts";
-  if (CHOICES[key]) return "choice";
-  if (BOOLEANS.has(key)) return "boolean";
-  if (key === "date_of_birth") return "date";
-  if (key === "resident_state" || key === "employer_ticker") return "text";
-  if (/_(pct|apr|rate|share)$/.test(key)) return "percent";
-  if (/_(months|age|month)$/.test(key)) return "integer";
-  return "money";
+/**
+ * "your gross pay" -> "Your gross pay". The registry's labels are written to
+ * run on inside a sentence; CSS capitalize made every word a capital and
+ * "401(k)" into "401(K)".
+ */
+function sentence(label: string): string {
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-/**
- * Turns a stored value back into what its input expects.
- *
- * The reverse of the conversions in submit(): cents to dollars, fractions to
- * percent, timestamps to a date input's yyyy-mm-dd. Without this an edit starts
- * from an empty box, which reads as "this was never answered" and invites the
- * user to retype something that was already right.
- */
-function toInputValue(key: string, value: unknown): string {
-  if (value === undefined || value === null) return "";
-  switch (kindOf(key)) {
+/** The draft value for a field, in the units the server stores. */
+function fromInputValue(kind: FieldKind, raw: string): unknown {
+  switch (kind) {
     case "boolean":
-      return value ? "yes" : "no";
+      return raw === "yes";
     case "date":
-      return typeof value === "string" ? value.slice(0, 10) : "";
-    case "percent":
-      return typeof value === "number" ? String(Number((value * 100).toFixed(4))) : "";
-    case "integer":
-      return String(value);
-    case "money":
-      return typeof value === "number" ? String(value / 100) : "";
-    case "accounts":
-      return Array.isArray(value) ? value.join(",") : "";
+      return `${raw}T00:00:00Z`;
+    case "percent": {
+      const n = Number.parseFloat(raw);
+      return Number.isFinite(n) ? n / 100 : undefined;
+    }
+    case "integer": {
+      const n = Number.parseInt(raw, 10);
+      return Number.isFinite(n) ? n : undefined;
+    }
+    case "money": {
+      const n = Number.parseFloat(raw.replace(/[^0-9.\-]/g, ""));
+      return Number.isFinite(n) ? Math.round(n * 100) : undefined;
+    }
     default:
-      return String(value);
+      return raw;
   }
 }
 
-/**
- * Picks which accounts count as cash, held in the draft as comma-joined ids.
- *
- * Picking none clears the choice on save, which puts the default back rather
- * than claiming there is no cash at all.
- */
-function AccountPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const { data: accounts } = useQuery<Account[]>({
-    queryKey: ["accounts"],
-    queryFn: () => apiFetch<Account[]>("/accounts", {}, getStoredToken()),
-  });
-  const selected = new Set(value.split(",").filter(Boolean));
-  const assets = (accounts ?? []).filter((a) => a.type === "asset");
-
-  const toggle = (id: string) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    onChange([...next].join(","));
-  };
-
+function OptionButtons({
+  options,
+  value,
+  onChange,
+}: {
+  options: Array<{ value: string; label: string }>;
+  value: string | undefined;
+  onChange: (v: string) => void;
+}) {
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
-        {assets.map((a) => (
-          <button
-            key={a.id}
-            type="button"
-            onClick={() => toggle(a.id)}
-            aria-pressed={selected.has(a.id)}
-            className={cn(
-              "rounded-xl border px-4 py-2 text-sm font-medium transition-colors",
-              selected.has(a.id)
-                ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-500/15 dark:text-indigo-300"
-                : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300",
-            )}
-          >
-            {a.name}
-          </button>
-        ))}
-      </div>
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Only the accounts you pick count toward your emergency fund. Pick none to go back to the
-        default: every account except those linked on the Retirement tab.
-      </p>
+    <div className="flex flex-wrap gap-2">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          aria-pressed={value === opt.value}
+          className={cn(
+            "rounded-xl border px-4 py-2 text-sm font-medium transition-colors",
+            value === opt.value
+              ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-500/15 dark:text-indigo-300"
+              : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300",
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -200,15 +129,15 @@ function AccountPicker({ value, onChange }: { value: string; onChange: (v: strin
 export function FocusedQuestions({
   fieldKeys,
   labels,
-  knownFields,
+  fields,
   profile,
   backTo = "/wealth",
   onDone,
 }: {
   fieldKeys: string[];
   labels: Record<string, string>;
-  /** The canonical registry, used to tell real fields from pseudo-keys. */
-  knownFields: string[];
+  /** The server's field registry: how each question is asked. */
+  fields: FieldInfo[];
   /** Current answers, so editing starts from what is already there. */
   profile?: WealthProfile;
   /** Where the back link goes — wherever the user actually came from. */
@@ -216,19 +145,25 @@ export function FocusedQuestions({
   onDone: () => void;
 }) {
   const save = useSaveProfile();
-  const [draft, setDraft] = useState<Record<string, string>>(() => {
+  const specs = useMemo(() => new Map(fields.map((f) => [f.key, f])), [fields]);
+  const kindOf = (key: string): FieldKind => specs.get(key)?.kind ?? "text";
+
+  // What each box starts from, kept so submit can tell an edit from a box left
+  // alone. Needs the registry at mount; the profile page waits for it.
+  const [initial] = useState<Record<string, string>>(() => {
     const seed: Record<string, string> = {};
     if (!profile) return seed;
     for (const k of fieldKeys) {
       const v = (profile as unknown as Record<string, unknown>)[k];
-      if (v !== undefined && v !== null) seed[k] = toInputValue(k, v);
+      const spec = fields.find((f) => f.key === k);
+      if (spec && v !== undefined && v !== null) seed[k] = toInputValue(spec.kind, v);
     }
     return seed;
   });
+  const [draft, setDraft] = useState(initial);
 
-  const known = useMemo(() => new Set(knownFields), [knownFields]);
-  const answerable = fieldKeys.filter((k) => known.has(k));
-  const elsewhere = fieldKeys.filter((k) => !known.has(k));
+  const answerable = fieldKeys.filter((k) => specs.has(k));
+  const elsewhere = fieldKeys.filter((k) => !specs.has(k));
 
   // Every requested field already has a value, so this is a correction rather
   // than a first pass. Worth saying, because the two read differently.
@@ -239,52 +174,29 @@ export function FocusedQuestions({
   const set = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
 
   const submit = () => {
-    const fields: Record<string, unknown> = {};
+    const out: Record<string, unknown> = {};
     const answeredAlready = profile?.fields ?? {};
     for (const key of answerable) {
       const raw = draft[key];
-      if (raw === undefined || raw === "") {
+      // A box left as it was is not an answer. Sending it again would
+      // relabel a figure we worked out as one the user typed, and a box that
+      // failed to fill in would read as emptied -- and erase the answer.
+      if (raw === undefined || raw === initial[key]) continue;
+      if (raw === "") {
         // Emptying a field that had a value is a request to REMOVE the answer,
         // and the API treats an explicit null as exactly that. Skipping it
         // would make an answer impossible to take back once given.
-        if (answeredAlready[key] !== undefined) fields[key] = null;
+        if (answeredAlready[key] !== undefined) out[key] = null;
         continue;
       }
-
-      switch (kindOf(key)) {
-        case "boolean":
-          fields[key] = raw === "yes";
-          break;
-        case "date":
-          fields[key] = `${raw}T00:00:00Z`;
-          break;
-        case "percent": {
-          const n = Number.parseFloat(raw);
-          if (Number.isFinite(n)) fields[key] = n / 100;
-          break;
-        }
-        case "integer": {
-          const n = Number.parseInt(raw, 10);
-          if (Number.isFinite(n)) fields[key] = n;
-          break;
-        }
-        case "money": {
-          const n = Number.parseFloat(raw.replace(/[^0-9.\-]/g, ""));
-          if (Number.isFinite(n)) fields[key] = Math.round(n * 100);
-          break;
-        }
-        case "accounts":
-          fields[key] = raw.split(",").filter(Boolean);
-          break;
-        default:
-          fields[key] = raw;
-      }
+      const value = fromInputValue(kindOf(key), raw);
+      if (value !== undefined) out[key] = value;
     }
-    if (Object.keys(fields).length === 0) {
+    if (Object.keys(out).length === 0) {
       onDone();
       return;
     }
-    save.mutate({ fields, source: "entered" }, { onSuccess: onDone });
+    save.mutate({ fields: out, source: "entered" }, { onSuccess: onDone });
   };
 
   return (
@@ -300,7 +212,7 @@ export function FocusedQuestions({
       <h2 className="text-2xl font-bold font-heading tracking-tight text-slate-900 dark:text-white">
         {editing
           ? answerable.length === 1
-            ? labels[answerable[0]] ?? "Change this answer"
+            ? sentence(labels[answerable[0]] ?? "Change this answer")
             : "Change these answers"
           : answerable.length === 1
             ? "One question"
@@ -314,57 +226,26 @@ export function FocusedQuestions({
 
       <div className="mt-8 space-y-6">
         {answerable.map((key) => {
-          const kind = kindOf(key);
-          const label = labels[key] ?? key.replace(/_/g, " ");
+          const spec = specs.get(key)!;
+          const label = labels[key] ?? spec.label;
 
           return (
             <div key={key} className="space-y-2">
-              <Label className="capitalize">{label}</Label>
+              <Label>{sentence(label)}</Label>
 
-              {kind === "choice" && (
-                <div className="flex flex-wrap gap-2">
-                  {CHOICES[key].map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => set(key, opt.value)}
-                      className={cn(
-                        "rounded-xl border px-4 py-2 text-sm font-medium transition-colors",
-                        draft[key] === opt.value
-                          ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-500/15 dark:text-indigo-300"
-                          : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300",
-                      )}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
+              {spec.kind === "choice" && (
+                <OptionButtons
+                  options={spec.choices ?? []}
+                  value={draft[key]}
+                  onChange={(v) => set(key, v)}
+                />
               )}
 
-              {kind === "boolean" && (
-                <div className="flex gap-2">
-                  {[
-                    { value: "yes", label: "Yes" },
-                    { value: "no", label: "No" },
-                  ].map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => set(key, opt.value)}
-                      className={cn(
-                        "rounded-xl border px-4 py-2 text-sm font-medium transition-colors",
-                        draft[key] === opt.value
-                          ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-500/15 dark:text-indigo-300"
-                          : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300",
-                      )}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
+              {spec.kind === "boolean" && (
+                <OptionButtons options={YES_NO} value={draft[key]} onChange={(v) => set(key, v)} />
               )}
 
-              {kind === "date" && (
+              {spec.kind === "date" && (
                 <Input
                   type="date"
                   value={draft[key] ?? ""}
@@ -372,31 +253,29 @@ export function FocusedQuestions({
                 />
               )}
 
-              {(kind === "money" || kind === "percent" || kind === "integer") && (
+              {(spec.kind === "money" || spec.kind === "percent" || spec.kind === "integer") && (
                 <div className="flex items-center gap-2">
+                  {spec.kind === "money" && (
+                    <span className="text-sm text-slate-500 dark:text-slate-400">$</span>
+                  )}
                   <Input
                     inputMode="decimal"
                     className="w-40"
                     value={draft[key] ?? ""}
                     onChange={(e) => set(key, e.target.value)}
                   />
-                  {kind === "percent" && <span className="text-sm text-slate-500 dark:text-slate-400">%</span>}
-                  {kind === "integer" && key.endsWith("_months") && (
-                    <span className="text-sm text-slate-500 dark:text-slate-400">months</span>
+                  {spec.kind === "percent" && (
+                    <span className="text-sm text-slate-500 dark:text-slate-400">%</span>
                   )}
                 </div>
               )}
 
-              {kind === "text" && (
+              {spec.kind === "text" && (
                 <Input
                   className="w-40 uppercase"
                   value={draft[key] ?? ""}
                   onChange={(e) => set(key, e.target.value.toUpperCase())}
                 />
-              )}
-
-              {kind === "accounts" && (
-                <AccountPicker value={draft[key] ?? ""} onChange={(v) => set(key, v)} />
               )}
             </div>
           );

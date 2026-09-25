@@ -3,7 +3,16 @@
 import { useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowRight, CalendarClock, ChevronDown, ChevronRight, Compass, Lock } from "lucide-react";
+import {
+  ArrowRight,
+  CalendarClock,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  Compass,
+  Lock,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageContainer } from "@/components/page-container";
 import { PageHeader } from "@/components/page-header";
@@ -19,6 +28,9 @@ import {
   useWealthProfile,
   type Quest,
 } from "./_components/wealth-data";
+
+/** Phase 2 in the Go catalog: equity. Empty until a grant is entered. */
+const PHASE_EQUITY = 2;
 
 /**
  * The Wealth Strategy overview.
@@ -163,10 +175,38 @@ export default function WealthOverviewPage() {
               <h2 className="text-lg font-bold font-heading text-slate-900 dark:text-white">
                 Phase {currentPhase.phase.number} · {currentPhase.phase.name}
               </h2>
-              <span className="shrink-0 text-sm text-slate-500 dark:text-slate-400">
-                {currentPhase.done} of {currentPhase.items.length} done
-              </span>
+              {currentPhase.milestones.length > 0 && (
+                <span className="shrink-0 text-sm text-slate-500 dark:text-slate-400">
+                  {currentPhase.done} of {currentPhase.milestones.length} met
+                </span>
+              )}
             </div>
+
+            {/* What finishes this phase, straight from the gating that decides
+                it -- the conditions the next phase is waiting on. */}
+            {currentPhase.milestones.length > 0 && (
+              <div className="mb-5">
+                <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  To finish this phase and unlock the next:
+                </p>
+                <ul className="flex flex-wrap gap-2">
+                  {currentPhase.milestones.map((m) => (
+                    <li
+                      key={m.key}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
+                        m.done
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300"
+                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+                      )}
+                    >
+                      {m.done ? <Check className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+                      {m.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="space-y-3">
               {currentPhase.items
                 .filter((q) => !q.due_date)
@@ -187,7 +227,7 @@ export default function WealthOverviewPage() {
               .filter((p) => p.phase.number > 0 && p.phase.number !== current)
               .map((p) => {
                 const isOpen = expanded === p.phase.number;
-                const allDone = p.items.length > 0 && p.done === p.items.length;
+                const allDone = p.milestones.length > 0 && p.done === p.milestones.length;
 
                 return (
                   <div
@@ -239,7 +279,20 @@ export default function WealthOverviewPage() {
                       <div className="space-y-3 border-t border-slate-200 p-4 dark:border-slate-800">
                         {p.items.length === 0 ? (
                           <p className="px-1 py-2 text-sm text-slate-500 dark:text-slate-400">
-                            Nothing here applies to you.
+                            {p.phase.number === PHASE_EQUITY ? (
+                              <>
+                                Nothing here yet. If you get RSUs or an ESPP,{" "}
+                                <Link
+                                  href="/wealth/profile#equity"
+                                  className="font-medium underline underline-offset-2"
+                                >
+                                  add your grants
+                                </Link>{" "}
+                                to put their dates on the plan.
+                              </>
+                            ) : (
+                              "Nothing here applies to you."
+                            )}
                           </p>
                         ) : (
                           p.items.map((q) => (

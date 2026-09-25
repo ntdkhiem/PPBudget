@@ -211,7 +211,13 @@ func TestDeriveProfileValuesMatchesBaselineIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPlanningBaseline: %v", err)
 	}
-	baseline := ComputeBaseline(pb)
+	baseline := ComputeBaseline(pb, time.Now())
+	// Nothing has posted this month, so all three prior months are complete.
+	// Dropping the last month with activity instead of the current one
+	// counted two.
+	if baseline.MonthsOfData != 3 {
+		t.Errorf("months of data: got %d want 3", baseline.MonthsOfData)
+	}
 
 	derived, err := svc.DeriveProfileValues(ctx, userID)
 	if err != nil {
@@ -351,8 +357,15 @@ func TestBackfillCarriesGoalsStrategyAndOverridesIntegration(t *testing.T) {
 	if profile.OverrideEssentialExpenses == nil || *profile.OverrideEssentialExpenses != 443_538 {
 		t.Errorf("essentials override: got %v want 443538", profile.OverrideEssentialExpenses)
 	}
-	if len(profile.OverrideLiquidAccountIDs) != 1 || profile.OverrideLiquidAccountIDs[0] != savings {
-		t.Errorf("liquid account override: got %v want [%s]", profile.OverrideLiquidAccountIDs, savings)
+	// The hand-picked cash list arrives as a role on the account itself.
+	accounts, err := svc.ListAccounts(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListAccounts: %v", err)
+	}
+	for _, a := range accounts {
+		if a.ID == savings && (a.Role == nil || *a.Role != domain.RoleSavings) {
+			t.Errorf("the picked cash account should now be savings; role is %v", a.Role)
+		}
 	}
 
 	goals, err := svc.ListGoals(ctx, userID)

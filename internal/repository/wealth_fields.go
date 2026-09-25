@@ -143,10 +143,6 @@ var profileFieldDefs = []profileFieldDef{
 	{"override_essential_expenses", "override_essential_expenses",
 		func(p *domain.WealthProfile) any { return &p.OverrideEssentialExpenses },
 		func(p *domain.WealthProfile) any { return ptrValue(p.OverrideEssentialExpenses) }},
-	{"override_liquid_account_ids", "override_liquid_account_ids",
-		func(p *domain.WealthProfile) any { return &p.OverrideLiquidAccountIDs },
-		// A slice, not a pointer: nil writes NULL on its own.
-		func(p *domain.WealthProfile) any { return p.OverrideLiquidAccountIDs }},
 
 	// Holdings.
 	{"traditional_ira_balance", "traditional_ira_balance",

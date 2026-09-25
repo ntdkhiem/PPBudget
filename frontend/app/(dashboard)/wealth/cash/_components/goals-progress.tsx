@@ -13,6 +13,7 @@ import {
   computeGoalProgress,
   emergencyFundGoal,
   formatMonths,
+  formatMonthYear,
   type Baseline,
   type FinancialPlan,
   type Goal,
@@ -114,6 +115,14 @@ function GoalRow({
               Starts:{" "}
               <span className="font-semibold text-slate-700 dark:text-slate-200">
                 in {formatMonths(progress.startsInMonths)}
+              </span>
+            </span>
+          )}
+          {progress.completesOn && (
+            <span className="text-slate-500 dark:text-slate-400">
+              Done:{" "}
+              <span className="font-semibold text-slate-700 dark:text-slate-200">
+                {formatMonthYear(progress.completesOn)}
               </span>
             </span>
           )}
@@ -235,10 +244,21 @@ export function GoalsProgress({
   const now = useMemo(() => new Date(), []);
 
   const efGoal = useMemo(() => emergencyFundGoal(baseline, plan), [baseline, plan]);
-  const efProgress = useMemo(
-    () => computeGoalProgress(efGoal, accounts, waterfall.poolCents, now),
-    [efGoal, accounts, waterfall.poolCents, now],
-  );
+  // The cushion's timing is the funding schedule's, which knows what is queued
+  // ahead of it. Its own gap over the surplus ignored the card paid down
+  // first, and told the user the fund was two months off when the waterfall
+  // above it said four.
+  const efStage = waterfall.stages.find((s) => s.id === "full_emergency_fund");
+  const efProgress = useMemo(() => {
+    const progress = computeGoalProgress(efGoal, accounts, waterfall.poolCents, now);
+    if (!efStage || efStage.complete || efStage.blockedReason) return progress;
+    return {
+      ...progress,
+      startsInMonths: efStage.startsInMonths,
+      monthsAtCurrent: efStage.monthsToComplete,
+      completesOn: efStage.completesOn,
+    };
+  }, [efGoal, efStage, accounts, waterfall.poolCents, now]);
 
   // Custom goals queue behind the cushion, then take the surplus one at a time
   // in priority order -- the same rule the waterfall above uses.

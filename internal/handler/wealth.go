@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"sort"
 
 	"github.com/go-chi/chi/v5"
@@ -146,17 +147,19 @@ func (h *Handler) GetDerivedProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, derived)
 }
 
-// GetWealthFields returns every recognised profile field key.
+// GetWealthFields returns every profile question: its label, its input kind
+// and its choices.
 //
-// The intake UI uses this to build its question list from the same registry the
-// engine validates against, so the two cannot drift.
+// The client builds its questions from this rather than inferring a type from
+// a key's name, so a question cannot be a dollar box on one page and a
+// percentage on another.
 func (h *Handler) GetWealthFields(w http.ResponseWriter, r *http.Request) {
 	if _, ok := middleware.GetUserID(r.Context()); !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"fields": h.svc.ProfileFieldKeys(),
+		"fields": h.svc.ProfileFields(),
 		// Labels cover the pseudo-keys too (transaction_history, paystub_ytd),
 		// which name data the app lacks rather than questions for the user --
 		// the client tells them apart by checking membership in "fields".
@@ -166,12 +169,13 @@ func (h *Handler) GetWealthFields(w http.ResponseWriter, r *http.Request) {
 
 // ------------------------------------------------------------------ quests
 
-// ListQuests returns the user's generated action list.
+// ListQuests returns the user's action list.
 //
-// Regenerates on read. The interpolated figures -- "clear the $3,824 balance" --
-// go stale as balances move, and an action list quoting last week's numbers is
-// worse than one that recomputes, because the user has no way to tell which.
-// Completion survives regeneration; see ReplaceQuests.
+// Worked out on every read and stored nowhere. The interpolated figures --
+// "clear the $3,824 balance" -- go stale as balances move, and an action list
+// quoting last week's numbers is worse than one that recomputes, because the
+// user has no way to tell which. What the user marked survives; see
+// SetQuestMark.
 func (h *Handler) ListQuests(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok || userID == "" {
@@ -179,32 +183,46 @@ func (h *Handler) ListQuests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quests, summary, err := h.svc.ListQuests(r.Context(), userID)
+	quests, phases, summary, err := h.svc.ListQuests(r.Context(), userID)
 	if err != nil {
 		h.logger.Error("failed to list quests", "user_id", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to build your action list")
 		return
 	}
+	if quests == nil {
+		quests = []domain.Quest{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"quests":  quests,
-		"phases":  h.svc.Phases(),
+		"phases":  phases,
 		"summary": summary,
 	})
 }
 
-// UpdateQuestStatus records a completion, a skip, or a reversal.
+// questKey reads an action's key from the route. Keys carry a colon for
+// fan-out instances ("clear_high_apr_balance:<account id>"), which a client
+// may percent-encode; the router hands the segment over as sent.
+func questKey(r *http.Request) (string, bool) {
+	key, err := url.PathUnescape(chi.URLParam(r, "id"))
+	return key, err == nil && key != ""
+}
+
+// UpdateQuestStatus records the user marking an action done or not for them,
+// or taking that back.
 //
-// Until auto-verification lands, every completion arrives here as a manual
-// claim. The source is recorded rather than assumed so that when the evaluator
-// does start closing actions on its own, the two remain distinguishable in the
-// history -- an auto-completion that later proves wrong needs to be traceable.
+// Every completion arriving here is the user's claim, recorded as such, so it
+// stays distinguishable in the history from one the engine verified.
 func (h *Handler) UpdateQuestStatus(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok || userID == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	questID := chi.URLParam(r, "id")
+	key, ok := questKey(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid action id")
+		return
+	}
 
 	var body struct {
 		Status string `json:"status"`
@@ -215,21 +233,19 @@ func (h *Handler) UpdateQuestStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quest, err := h.svc.SetQuestStatus(r.Context(), userID, questID,
-		body.Status, domain.QuestSourceManual, body.Note)
-	if err != nil {
+	if err := h.svc.SetQuestStatus(r.Context(), userID, key, body.Status, body.Note); err != nil {
 		switch {
 		case errors.Is(err, apperrors.ErrNotFound):
 			writeError(w, http.StatusNotFound, "action not found")
 		case errors.Is(err, apperrors.ErrInvalidInput):
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
-			h.logger.Error("failed to set quest status", "user_id", userID, "quest_id", questID, "error", err)
+			h.logger.Error("failed to set quest status", "user_id", userID, "catalog_key", key, "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to update the action")
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, quest)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // ListQuestEvents returns one action's history.
@@ -239,8 +255,13 @@ func (h *Handler) ListQuestEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	key, ok := questKey(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid action id")
+		return
+	}
 
-	events, err := h.svc.ListQuestEvents(r.Context(), userID, chi.URLParam(r, "id"))
+	events, err := h.svc.ListQuestEvents(r.Context(), userID, key)
 	if err != nil {
 		h.logger.Error("failed to list quest events", "user_id", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load the action history")
@@ -435,6 +456,107 @@ func (h *Handler) DeleteGoal(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.Error("failed to delete goal", "user_id", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete goal")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ----------------------------------------------------------- equity grants
+
+// equityKinds are the grant kinds the schema accepts, checked here so a typo
+// comes back naming the problem rather than a constraint.
+var equityKinds = map[string]bool{
+	domain.EquityKindRSU:  true,
+	domain.EquityKindESPP: true,
+	domain.EquityKindISO:  true,
+	domain.EquityKindNSO:  true,
+}
+
+// ListEquityGrants returns the user's RSU, ESPP and option grants.
+func (h *Handler) ListEquityGrants(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	grants, err := h.svc.ListEquityGrants(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("failed to list equity grants", "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list equity grants")
+		return
+	}
+	if grants == nil {
+		grants = []domain.EquityGrant{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"grants": grants})
+}
+
+// UpsertEquityGrant creates a grant (POST) or replaces one (PUT /{id}).
+//
+// Grants are what put vest and purchase dates on the plan. Until one exists
+// the equity phase has nothing to schedule, however public the employer is.
+func (h *Handler) UpsertEquityGrant(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var g domain.EquityGrant
+	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+	// The route decides between create and update, never the body: a POST
+	// carrying an id must not quietly rewrite an existing grant.
+	g.ID = ""
+	if id := chi.URLParam(r, "id"); id != "" {
+		if !validID(w, id, "grant id") {
+			return
+		}
+		g.ID = id
+	}
+	if !equityKinds[g.Kind] {
+		writeError(w, http.StatusBadRequest, "kind must be one of rsu, espp, iso or nso")
+		return
+	}
+
+	id, err := h.svc.UpsertEquityGrant(r.Context(), userID, g)
+	if err != nil {
+		switch {
+		case errors.Is(err, apperrors.ErrNotFound):
+			writeError(w, http.StatusNotFound, "grant not found")
+		case errors.Is(err, apperrors.ErrInvalidInput):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			h.logger.Error("failed to save equity grant", "user_id", userID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to save equity grant")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+}
+
+// DeleteEquityGrant removes one grant.
+func (h *Handler) DeleteEquityGrant(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !validID(w, id, "grant id") {
+		return
+	}
+
+	if err := h.svc.DeleteEquityGrant(r.Context(), userID, id); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "grant not found")
+			return
+		}
+		h.logger.Error("failed to delete equity grant", "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete equity grant")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})

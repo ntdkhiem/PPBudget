@@ -431,7 +431,7 @@ func (r *Repository) MarkReviewed(ctx context.Context, userID, txnID string, cat
 // the latest non-opening snapshot (NULL when the account only has an opening snapshot).
 // Callers append WHERE (which must filter on a.user_id) and ORDER BY clauses.
 const accountSelectFrom = `
-	SELECT a.id, a.user_id, a.name, a.type, a.currency, a.simplefin_id, a.created_at, a.updated_at,
+	SELECT a.id, a.user_id, a.name, a.type, a.role, a.currency, a.simplefin_id, a.created_at, a.updated_at,
 	       a.balance_only,
 	       account_balance_at(a.id, 'infinity'::date) AS current_balance,
 	       ls.as_of_date AS balance_as_of,
@@ -451,7 +451,7 @@ const accountSelectFrom = `
 func scanAccount(row pgx.Row) (domain.Account, error) {
 	var a domain.Account
 	var currentBalance int64
-	err := row.Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Currency, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt,
+	err := row.Scan(&a.ID, &a.UserID, &a.Name, &a.Type, &a.Role, &a.Currency, &a.SimplefinID, &a.CreatedAt, &a.UpdatedAt,
 		&a.BalanceOnly, &currentBalance, &a.BalanceAsOf, &a.BalanceSource)
 	if err != nil {
 		return a, err
@@ -543,7 +543,8 @@ func (r *Repository) ListCategories(ctx context.Context, userID string) ([]domai
 // Accounts
 
 // CreateAccount inserts the account and its opening balance snapshot in one transaction.
-func (r *Repository) CreateAccount(ctx context.Context, userID, name, accType, currency string, openingBalance int64) (string, error) {
+// A nil role leaves the account unclassified.
+func (r *Repository) CreateAccount(ctx context.Context, userID, name, accType, currency string, openingBalance int64, role *string) (string, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
@@ -551,9 +552,9 @@ func (r *Repository) CreateAccount(ctx context.Context, userID, name, accType, c
 	defer tx.Rollback(ctx)
 
 	var id string
-	query := `INSERT INTO accounts (name, type, currency, user_id) VALUES ($1, $2, $3, $4) RETURNING id`
-	if err := tx.QueryRow(ctx, query, name, accType, currency, userID).Scan(&id); err != nil {
-		return "", fmt.Errorf("failed to create account: %w", err)
+	query := `INSERT INTO accounts (name, type, role, currency, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`
+	if err := tx.QueryRow(ctx, query, name, accType, role, currency, userID).Scan(&id); err != nil {
+		return "", constraintError(err, "account")
 	}
 
 	if err := r.SetOpeningBalance(ctx, tx, userID, id, money.Money(openingBalance)); err != nil {
@@ -580,8 +581,9 @@ func (r *Repository) GetAccount(ctx context.Context, userID, id string) (*domain
 	return &a, nil
 }
 
-// UpdateAccount leaves the opening snapshot untouched when openingBalance is nil.
-func (r *Repository) UpdateAccount(ctx context.Context, userID, id, name, accType, currency string, openingBalance *int64) error {
+// UpdateAccount leaves the opening snapshot untouched when u.OpeningBalance is
+// nil, and the role untouched unless u.RoleSet.
+func (r *Repository) UpdateAccount(ctx context.Context, userID, id string, u domain.AccountUpdate) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -589,17 +591,22 @@ func (r *Repository) UpdateAccount(ctx context.Context, userID, id, name, accTyp
 	defer tx.Rollback(ctx)
 
 	// An empty currency keeps the existing one; the edit form doesn't send it.
-	query := `UPDATE accounts SET name = $1, type = $2, currency = COALESCE(NULLIF($3, ''), currency), updated_at = NOW() WHERE id = $4 AND user_id = $5`
-	tag, err := tx.Exec(ctx, query, name, accType, currency, id, userID)
+	query := `
+		UPDATE accounts SET
+			name = $1, type = $2, currency = COALESCE(NULLIF($3, ''), currency),
+			role = CASE WHEN $6 THEN $7 ELSE role END,
+			updated_at = NOW()
+		WHERE id = $4 AND user_id = $5`
+	tag, err := tx.Exec(ctx, query, u.Name, u.Type, u.Currency, id, userID, u.RoleSet, u.Role)
 	if err != nil {
-		return fmt.Errorf("failed to update account: %w", err)
+		return constraintError(err, "account")
 	}
 	if tag.RowsAffected() == 0 {
 		return apperrors.ErrNotFound
 	}
 
-	if openingBalance != nil {
-		if err := r.SetOpeningBalance(ctx, tx, userID, id, money.Money(*openingBalance)); err != nil {
+	if u.OpeningBalance != nil {
+		if err := r.SetOpeningBalance(ctx, tx, userID, id, money.Money(*u.OpeningBalance)); err != nil {
 			return err
 		}
 	}

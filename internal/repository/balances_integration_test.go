@@ -144,7 +144,7 @@ func TestAccountBalanceAtIntegration(t *testing.T) {
 	userID := createTestUser(t, pool, "balance-at")
 
 	// Account X: opening $1000.00 (100000 cents).
-	accX, err := repo.CreateAccount(ctx, userID, "Account X", "asset", "USD", 100000)
+	accX, err := repo.CreateAccount(ctx, userID, "Account X", "asset", "USD", 100000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestAccountBalanceAtIntegration(t *testing.T) {
 
 	t.Run("case3_no_opening_only_future_snapshot", func(t *testing.T) {
 		sfID := uniqueEmail("sf-acct-y")
-		accY, err := repo.UpsertSimplefinAccount(ctx, userID, sfID, "Account Y", "USD")
+		accY, err := repo.UpsertSimplefinAccount(ctx, userID, sfID, "Account Y", "USD", "asset", nil)
 		if err != nil {
 			t.Fatalf("UpsertSimplefinAccount: %v", err)
 		}
@@ -265,7 +265,7 @@ func TestOpeningOnlyAccountBalanceFieldsIntegration(t *testing.T) {
 
 	userID := createTestUser(t, pool, "opening-only")
 
-	accID, err := repo.CreateAccount(ctx, userID, "Opening Only", "asset", "USD", 50000)
+	accID, err := repo.CreateAccount(ctx, userID, "Opening Only", "asset", "USD", 50000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -311,11 +311,11 @@ func TestBalanceSnapshotTenancyIntegration(t *testing.T) {
 	userA := createTestUser(t, pool, "tenancy-a")
 	userB := createTestUser(t, pool, "tenancy-b")
 
-	accB, err := repo.CreateAccount(ctx, userB, "B's Account", "asset", "USD", 10000)
+	accB, err := repo.CreateAccount(ctx, userB, "B's Account", "asset", "USD", 10000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount(B): %v", err)
 	}
-	accA, err := repo.CreateAccount(ctx, userA, "A's Account", "asset", "USD", 20000)
+	accA, err := repo.CreateAccount(ctx, userA, "A's Account", "asset", "USD", 20000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount(A): %v", err)
 	}
@@ -384,7 +384,7 @@ func TestListBalanceSnapshotsOrderIntegration(t *testing.T) {
 
 	userID := createTestUser(t, pool, "list-order")
 
-	accID, err := repo.CreateAccount(ctx, userID, "Order Test", "asset", "USD", 10000)
+	accID, err := repo.CreateAccount(ctx, userID, "Order Test", "asset", "USD", 10000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -433,7 +433,7 @@ func TestDeleteBalanceSnapshotIntegration(t *testing.T) {
 
 	userID := createTestUser(t, pool, "delete-snapshot")
 
-	accID, err := repo.CreateAccount(ctx, userID, "Delete Test", "asset", "USD", 10000)
+	accID, err := repo.CreateAccount(ctx, userID, "Delete Test", "asset", "USD", 10000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestCreateUpdateAccountOpeningBalanceIntegration(t *testing.T) {
 
 	userID := createTestUser(t, pool, "create-update")
 
-	accID, err := repo.CreateAccount(ctx, userID, "CU Test", "asset", "USD", 100000)
+	accID, err := repo.CreateAccount(ctx, userID, "CU Test", "asset", "USD", 100000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestCreateUpdateAccountOpeningBalanceIntegration(t *testing.T) {
 	}
 
 	// UpdateAccount with openingBalance = nil (unchanged) and currency = "" (keeps existing).
-	if err := repo.UpdateAccount(ctx, userID, accID, "CU Test Renamed", "asset", "", nil); err != nil {
+	if err := repo.UpdateAccount(ctx, userID, accID, domain.AccountUpdate{Name: "CU Test Renamed", Type: "asset"}); err != nil {
 		t.Fatalf("UpdateAccount (nil opening balance): %v", err)
 	}
 	acc2, err := repo.GetAccount(ctx, userID, accID)
@@ -503,7 +503,7 @@ func TestCreateUpdateAccountOpeningBalanceIntegration(t *testing.T) {
 
 	// UpdateAccount with openingBalance = non-nil (changed).
 	newBalance := int64(250000)
-	if err := repo.UpdateAccount(ctx, userID, accID, "CU Test Renamed", "asset", "", &newBalance); err != nil {
+	if err := repo.UpdateAccount(ctx, userID, accID, domain.AccountUpdate{Name: "CU Test Renamed", Type: "asset", OpeningBalance: &newBalance}); err != nil {
 		t.Fatalf("UpdateAccount (non-nil opening balance): %v", err)
 	}
 	acc3, err := repo.GetAccount(ctx, userID, accID)
@@ -525,11 +525,11 @@ func TestNetWorthTrendAndSummaryIntegration(t *testing.T) {
 
 	userID := createTestUser(t, pool, "networth")
 
-	assetID, err := repo.CreateAccount(ctx, userID, "Asset Acct", "asset", "USD", 150000) // $1500.00
+	assetID, err := repo.CreateAccount(ctx, userID, "Asset Acct", "asset", "USD", 150000, nil) // $1500.00
 	if err != nil {
 		t.Fatalf("CreateAccount(asset): %v", err)
 	}
-	liabilityID, err := repo.CreateAccount(ctx, userID, "Liability Acct", "liability", "USD", -50000) // -$500.00
+	liabilityID, err := repo.CreateAccount(ctx, userID, "Liability Acct", "liability", "USD", -50000, nil) // -$500.00
 	if err != nil {
 		t.Fatalf("CreateAccount(liability): %v", err)
 	}
@@ -601,7 +601,7 @@ func TestListTransactionsRunningBalanceIntegration(t *testing.T) {
 
 	userID := createTestUser(t, pool, "running-balance")
 
-	accID, err := repo.CreateAccount(ctx, userID, "Running Balance Test", "asset", "USD", 100000) // opening $1000.00
+	accID, err := repo.CreateAccount(ctx, userID, "Running Balance Test", "asset", "USD", 100000, nil) // opening $1000.00
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -720,7 +720,7 @@ func TestNetWorthTrendAcrossSnapshotIntegration(t *testing.T) {
 
 	userID := createTestUser(t, pool, "trend-across-snapshot")
 
-	accID, err := repo.CreateAccount(ctx, userID, "Trend Snapshot Test", "asset", "USD", 100000) // opening $1000
+	accID, err := repo.CreateAccount(ctx, userID, "Trend Snapshot Test", "asset", "USD", 100000, nil) // opening $1000
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -774,7 +774,7 @@ func TestNetWorthTrendOnlyFutureSnapshotIntegration(t *testing.T) {
 	userID := createTestUser(t, pool, "trend-future-only")
 
 	sfID := uniqueEmail("sf-trend-future-only")
-	accID, err := repo.UpsertSimplefinAccount(ctx, userID, sfID, "Future Snapshot Only", "USD")
+	accID, err := repo.UpsertSimplefinAccount(ctx, userID, sfID, "Future Snapshot Only", "USD", "asset", nil)
 	if err != nil {
 		t.Fatalf("UpsertSimplefinAccount: %v", err)
 	}
@@ -824,7 +824,7 @@ func TestAccountBalanceAtNullDateIntegration(t *testing.T) {
 
 	userID := createTestUser(t, pool, "null-date")
 
-	accID, err := repo.CreateAccount(ctx, userID, "Null Date Test", "asset", "USD", 10000)
+	accID, err := repo.CreateAccount(ctx, userID, "Null Date Test", "asset", "USD", 10000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -862,11 +862,11 @@ func TestSetAccountBalanceOnlyEnableIntegration(t *testing.T) {
 
 	userID := createTestUser(t, pool, "balance-only-enable")
 
-	accID, err := repo.CreateAccount(ctx, userID, "Roth IRA", "asset", "USD", 100000)
+	accID, err := repo.CreateAccount(ctx, userID, "Roth IRA", "asset", "USD", 100000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
-	otherID, err := repo.CreateAccount(ctx, userID, "Checking", "asset", "USD", 0)
+	otherID, err := repo.CreateAccount(ctx, userID, "Checking", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount(other): %v", err)
 	}
@@ -954,7 +954,7 @@ func TestSetAccountBalanceOnlyIdempotentAndDisableIntegration(t *testing.T) {
 	repo := New(pool)
 
 	userID := createTestUser(t, pool, "balance-only-toggle")
-	accID, err := repo.CreateAccount(ctx, userID, "Brokerage", "asset", "USD", 0)
+	accID, err := repo.CreateAccount(ctx, userID, "Brokerage", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -991,7 +991,7 @@ func TestSetAccountBalanceOnlyTenancyIntegration(t *testing.T) {
 	userA := createTestUser(t, pool, "balance-only-tenancy-a")
 	userB := createTestUser(t, pool, "balance-only-tenancy-b")
 
-	accA, err := repo.CreateAccount(ctx, userA, "A 401k", "asset", "USD", 0)
+	accA, err := repo.CreateAccount(ctx, userA, "A 401k", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -1020,11 +1020,11 @@ func TestBalanceOnlyTransactionGuardIntegration(t *testing.T) {
 	repo := New(pool)
 
 	userID := createTestUser(t, pool, "balance-only-guard")
-	boID, err := repo.CreateAccount(ctx, userID, "IRA", "asset", "USD", 0)
+	boID, err := repo.CreateAccount(ctx, userID, "IRA", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount(bo): %v", err)
 	}
-	normalID, err := repo.CreateAccount(ctx, userID, "Checking", "asset", "USD", 0)
+	normalID, err := repo.CreateAccount(ctx, userID, "Checking", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount(normal): %v", err)
 	}
@@ -1073,14 +1073,14 @@ func TestBalanceOnlyAccountIDsIntegration(t *testing.T) {
 	userA := createTestUser(t, pool, "balance-only-ids-a")
 	userB := createTestUser(t, pool, "balance-only-ids-b")
 
-	flagged, err := repo.CreateAccount(ctx, userA, "Flagged", "asset", "USD", 0)
+	flagged, err := repo.CreateAccount(ctx, userA, "Flagged", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
-	if _, err := repo.CreateAccount(ctx, userA, "Plain", "asset", "USD", 0); err != nil {
+	if _, err := repo.CreateAccount(ctx, userA, "Plain", "asset", "USD", 0, nil); err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
-	flaggedB, err := repo.CreateAccount(ctx, userB, "B Flagged", "asset", "USD", 0)
+	flaggedB, err := repo.CreateAccount(ctx, userB, "B Flagged", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount(B): %v", err)
 	}
@@ -1122,7 +1122,7 @@ func TestSetAccountBalanceOnlyWaitsForConcurrentImportIntegration(t *testing.T) 
 	repo := New(pool)
 
 	userID := createTestUser(t, pool, "balance-only-race-import")
-	accID, err := repo.CreateAccount(ctx, userID, "Race Import", "asset", "USD", 0)
+	accID, err := repo.CreateAccount(ctx, userID, "Race Import", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -1194,7 +1194,7 @@ func TestAccountBalanceOnlyForShareWaitsForEnableIntegration(t *testing.T) {
 	repo := New(pool)
 
 	userID := createTestUser(t, pool, "balance-only-race-enable")
-	accID, err := repo.CreateAccount(ctx, userID, "Race Enable", "asset", "USD", 0)
+	accID, err := repo.CreateAccount(ctx, userID, "Race Enable", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -1258,7 +1258,7 @@ func TestSetAccountBalanceOnlySameAccountLinkIntegration(t *testing.T) {
 	repo := New(pool)
 
 	userID := createTestUser(t, pool, "balance-only-same-account-link")
-	accID, err := repo.CreateAccount(ctx, userID, "Self-Linked", "asset", "USD", 0)
+	accID, err := repo.CreateAccount(ctx, userID, "Self-Linked", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}

@@ -119,7 +119,7 @@ func TestSimpleFinExecuteBalanceSnapshotsIntegration(t *testing.T) {
 
 	userID := sfCreateTestUser(t, pool)
 
-	existingAccountID, err := repo.CreateAccount(ctx, userID, "Existing PP Account", "asset", "USD", 0)
+	existingAccountID, err := repo.CreateAccount(ctx, userID, "Existing PP Account", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestSimpleFinExecuteBalanceOnlyIntegration(t *testing.T) {
 
 	// (a) An existing PP account already flagged balance_only, mapped to an
 	// SF account that reports 3 transactions.
-	flaggedAccountID, err := repo.CreateAccount(ctx, userID, "Roth IRA", "asset", "USD", 0)
+	flaggedAccountID, err := repo.CreateAccount(ctx, userID, "Roth IRA", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount(flagged): %v", err)
 	}
@@ -451,7 +451,7 @@ func TestRecordManualBalanceDateBoundsIntegration(t *testing.T) {
 
 	userID := sfCreateTestUser(t, pool)
 
-	accID, err := repo.CreateAccount(ctx, userID, "Manual Balance Bounds", "asset", "USD", 10000)
+	accID, err := repo.CreateAccount(ctx, userID, "Manual Balance Bounds", "asset", "USD", 10000, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestSimpleFinExecuteBalanceOnlyExistingAccountDeletesTransactionsIntegratio
 
 	userID := sfCreateTestUser(t, pool)
 
-	existingAccountID, err := repo.CreateAccount(ctx, userID, "Existing Not Yet Flagged", "asset", "USD", 0)
+	existingAccountID, err := repo.CreateAccount(ctx, userID, "Existing Not Yet Flagged", "asset", "USD", 0, nil)
 	if err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
@@ -819,5 +819,79 @@ func TestSimpleFinReimportAfterDisableIntegration(t *testing.T) {
 	}
 	if snap.Balance.ToInt64() != 14000 {
 		t.Errorf("snapshot balance = %d, want 14000 (updated by reimport)", snap.Balance.ToInt64())
+	}
+}
+
+// A sync used to create every account as an asset, which hid cards from every
+// debt rule. New accounts are now classified from their name and balance, and
+// a correction the user makes afterwards is not undone by the next sync.
+func TestSimpleFinImportClassifiesNewAccountsIntegration(t *testing.T) {
+	pool := sfSetupTestDB(t)
+	ctx := context.Background()
+	repo := repository.New(pool)
+	svc := New(repo, slog.New(slog.NewTextHandler(io.Discard, nil)), &config.Config{FrontendURL: "http://localhost:3000"})
+	userID := sfCreateTestUser(t, pool)
+
+	cardSF, savingsSF, mysterySF := sfUniqueID("sf-card"), sfUniqueID("sf-savings"), sfUniqueID("sf-mystery")
+	today := time.Now().UTC().Unix()
+	accounts := []SFAccount{
+		{ID: cardSF, Name: "Chase Sapphire Preferred", Currency: "USD", Balance: "-3824.35", BalanceDate: today},
+		{ID: savingsSF, Name: "Ally Online Savings", Currency: "USD", Balance: "6236.14", BalanceDate: today},
+		{ID: mysterySF, Name: "Homestead Credit Union", Currency: "USD", Balance: "100.00", BalanceDate: today},
+	}
+	mapping := map[string]string{cardSF: "new", savingsSF: "new", mysterySF: "new"}
+
+	sync := func() {
+		t.Helper()
+		if err := svc.SimpleFinExecute(ctx, userID, SimplefinExecuteRequest{
+			AccessURL: newSimplefinServer(t, accounts).URL, AccountMapping: mapping,
+		}); err != nil {
+			t.Fatalf("SimpleFinExecute: %v", err)
+		}
+		if final := waitForImportDone(t, userID); final.Status != "completed" {
+			t.Fatalf("import finished with status %q (error: %s)", final.Status, final.Error)
+		}
+	}
+	account := func(sfID string) *domain.Account {
+		t.Helper()
+		id, err := repo.GetAccountBySimplefinID(ctx, nil, userID, sfID)
+		if err != nil {
+			t.Fatalf("GetAccountBySimplefinID: %v", err)
+		}
+		a, err := repo.GetAccount(ctx, userID, id)
+		if err != nil {
+			t.Fatalf("GetAccount: %v", err)
+		}
+		return a
+	}
+	roleName := func(a *domain.Account) string {
+		if a.Role == nil {
+			return "unclassified"
+		}
+		return *a.Role
+	}
+
+	sync()
+	for _, tc := range []struct{ sfID, wantType, wantRole string }{
+		{cardSF, "liability", domain.RoleCreditCard},
+		{savingsSF, "asset", domain.RoleSavings},
+		{mysterySF, "asset", "unclassified"},
+	} {
+		a := account(tc.sfID)
+		if a.Type != tc.wantType || roleName(a) != tc.wantRole {
+			t.Errorf("%s: got %s/%s, want %s/%s", a.Name, a.Type, roleName(a), tc.wantType, tc.wantRole)
+		}
+	}
+
+	// The user says the "card" is really a loan; the next sync leaves it be.
+	card := account(cardSF)
+	if err := repo.UpdateAccount(ctx, userID, card.ID, domain.AccountUpdate{
+		Name: card.Name, Type: "liability", RoleSet: true, Role: ptr(domain.RoleLoan),
+	}); err != nil {
+		t.Fatalf("UpdateAccount: %v", err)
+	}
+	sync()
+	if got := roleName(account(cardSF)); got != domain.RoleLoan {
+		t.Errorf("a sync overwrote the user's correction: role is %s, want loan", got)
 	}
 }

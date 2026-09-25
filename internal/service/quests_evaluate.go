@@ -28,27 +28,25 @@ import (
 // every read, so the data is never staler than the page; a cron would add a
 // second path to the same conclusion and a new way for the two to disagree.
 
-// recordTransitions writes an event for every action whose status changed.
+// recordTransitions stores the new status of every action that changed since
+// the last reading, with an event for the changes worth one.
 //
-// Called after the new list is persisted, comparing against the statuses read
-// at the start of the same generation. Failures are logged rather than
-// returned: an action list the user can see beats a 500 over an audit row, and
-// the row is recoverable on the next pass while the page is not.
+// On an ordinary page load nothing has changed and nothing is written. Failures
+// are logged rather than returned: an action list the user can see beats a 500
+// over an audit row, and a missed write is retried by the next reading, which
+// will see the same difference.
 func (s *Service) recordTransitions(
-	ctx context.Context, userID string, before map[string]string, after []domain.Quest,
+	ctx context.Context, userID string, before map[string]domain.QuestState, after []domain.Quest,
 ) {
 	for _, q := range after {
 		prior, existed := before[q.CatalogKey]
-		if existed && prior == q.Status {
+		if existed && prior.Status == q.Status {
 			continue
 		}
 
-		event, note := transitionEvent(prior, existed, q)
-		if event == "" {
-			continue
-		}
-		if err := s.repo.AppendQuestEvent(
-			ctx, userID, q.ID, event, domain.QuestSourceAuto, note,
+		event, note := transitionEvent(prior.Status, existed, q)
+		if _, err := s.repo.RecordQuestTransition(
+			ctx, userID, q.CatalogKey, q.Status, event, domain.QuestSourceAuto, note,
 		); err != nil {
 			s.logger.Warn("could not record quest transition",
 				"user_id", userID, "catalog_key", q.CatalogKey, "error", err)
