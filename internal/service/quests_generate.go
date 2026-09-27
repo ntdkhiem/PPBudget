@@ -118,6 +118,12 @@ type PlanSummary struct {
 	// Funding is the schedule CrossoverMonths is the end of, served so the
 	// Cash page draws the same stages instead of re-deriving them.
 	Funding []FundingStage `json:"funding"`
+	// Goals continue the same schedule past the crossover, in the user's order.
+	Goals []GoalStage `json:"goals"`
+	// Earmarked is the cash held back for planned expenses due in the next
+	// twelve months: the emergency fund does not count it, and no sweep moves
+	// it.
+	Earmarked money.Money `json:"earmarked"`
 
 	// The independence number, the spending it is built on, and what counts
 	// toward it -- the figures reach_fi_number decides on, served so the
@@ -195,7 +201,9 @@ func summarise(qc questContext, quests []domain.Quest) PlanSummary {
 		InvestedAssets:    qc.investedAssets(),
 		Limits:            qc.contributionLimits(),
 	}
-	out.Funding, out.CrossoverMonths = fundingSchedule(quests, qc.Baseline.MonthlySurplus, qc.debtMonthlyRate, qc.Now)
+	out.Funding, out.CrossoverMonths, out.Goals = planSchedule(
+		quests, qc.goalNeeds(), qc.Baseline.MonthlySurplus, qc.debtMonthlyRate, qc.Now)
+	out.Earmarked = qc.plannedWithin(12)
 	if out.CrossoverMonths != nil && *out.CrossoverMonths > 0 {
 		on := monthStart(qc.Now, *out.CrossoverMonths)
 		out.CrossoverOn = &on
@@ -212,25 +220,83 @@ func summarise(qc questContext, quests []domain.Quest) PlanSummary {
 // would otherwise never finish.
 const maxScheduleMonths = 600
 
-// fundingSchedule pays phase 1's funding actions out of the surplus month by
-// month, in the engine's order, and dates each one.
+// GoalStage is one of the user's goals on the same schedule as phase 1,
+// funded from the surplus once phase 1 is paid for, in the user's order.
 //
-// Each action takes the whole surplus until it is satisfied. A debt keeps
+// The browser used to queue goals itself, behind a crossover it read off this
+// schedule, and the two drifted: the goals list said a fund was two months off
+// while the waterfall above it said four. One simulation now dates both.
+type GoalStage struct {
+	GoalID string      `json:"goal_id"`
+	Name   string      `json:"name"`
+	Target money.Money `json:"target"`
+	// Current is what already backs the goal: the linked account's balance,
+	// or the amount the user keeps up by hand when no account is linked.
+	Current    money.Money `json:"current"`
+	Remaining  money.Money `json:"remaining"`
+	TargetDate *time.Time  `json:"target_date"`
+	// StartsInMonths, MonthsToComplete and CompletesOn follow FundingStage:
+	// null when the surplus never finishes the goal, zero months once funded.
+	StartsInMonths   *int       `json:"starts_in_months"`
+	MonthsToComplete *int       `json:"months_to_complete"`
+	CompletesOn      *time.Time `json:"completes_on"`
+	// OnTrack is set for a dated goal only: whether the schedule funds it by
+	// the month of its date. RequiredMonthly is what it would take each month
+	// from now to hit that date if it were first in line.
+	OnTrack         *bool        `json:"on_track"`
+	RequiredMonthly *money.Money `json:"required_monthly"`
+}
+
+// goalNeed is a goal as the schedule sees it: what still has to be saved.
+type goalNeed struct {
+	goal      domain.Goal
+	current   money.Money
+	remaining money.Money
+}
+
+// goalNeeds sizes each goal against what already backs it. A linked
+// account's balance counts in place of the hand-kept figure, and an account
+// that has since gone falls back to it.
+func (c questContext) goalNeeds() []goalNeed {
+	balances := make(map[string]money.Money, len(c.Accounts))
+	for _, a := range c.Accounts {
+		balances[a.ID] = a.Balance
+	}
+	out := make([]goalNeed, 0, len(c.Goals))
+	for _, g := range c.Goals {
+		current := g.CurrentAmount
+		if g.LinkedAccountID != nil {
+			if b, ok := balances[*g.LinkedAccountID]; ok {
+				current = b
+			}
+		}
+		current = max(current, 0) // a goal cannot be less than empty
+		out = append(out, goalNeed{goal: g, current: current, remaining: max(g.TargetAmount-current, 0)})
+	}
+	return out
+}
+
+// planSchedule pays phase 1's funding actions and then the user's goals out
+// of the surplus month by month, and dates each one.
+//
+// Each stage takes the whole surplus until it is satisfied. A debt keeps
 // accruing interest at monthlyRate until it is cleared -- including while it
 // waits behind the cushion -- so a card is dearer by the time its turn comes;
 // dividing today's balance by the surplus ignored that. With no interest the
-// result is the plain running-total schedule, and the last stage always ends
-// on the crossover. A nil monthlyRate charges no interest.
-func fundingSchedule(
-	quests []domain.Quest, surplus money.Money, monthlyRate func(key string) float64, now time.Time,
-) ([]FundingStage, *int) {
+// result is the plain running-total schedule, and the last phase 1 stage
+// always ends on the crossover. In that month whatever the surplus has left
+// starts the first goal. A nil monthlyRate charges no interest.
+func planSchedule(
+	quests []domain.Quest, goals []goalNeed, surplus money.Money,
+	monthlyRate func(key string) float64, now time.Time,
+) ([]FundingStage, *int, []GoalStage) {
 	type slot struct {
-		stage      FundingStage
 		balance    float64 // cents, fractional while interest accrues
 		rate       float64
 		start, end int // 1-based months from now; 0 = not yet
 	}
 
+	var funding []FundingStage
 	var slots []*slot
 	// The starter cushion and the full fund are measured against the same
 	// cash, so the full fund's gap already contains the starter's. Summing the
@@ -256,20 +322,28 @@ func fundingSchedule(
 			remaining = max(remaining-starterQueued, 0)
 		}
 
-		s := &slot{stage: FundingStage{QuestID: q.ID, Remaining: remaining}, balance: float64(remaining)}
+		s := &slot{balance: float64(remaining)}
 		if monthlyRate != nil {
 			s.rate = monthlyRate(q.CatalogKey)
 		}
+		funding = append(funding, FundingStage{QuestID: q.ID, Remaining: remaining})
 		slots = append(slots, s)
 	}
+	phaseOne := len(slots)
+	for _, g := range goals {
+		slots = append(slots, &slot{balance: float64(g.remaining)})
+	}
 
-	open := 0
-	for _, s := range slots {
+	openPhaseOne, open := 0, 0
+	for i, s := range slots {
 		if s.balance > 0 {
 			open++
+			if i < phaseOne {
+				openPhaseOne++
+			}
 		}
 	}
-	crossover := 0
+	crossover, crossed := 0, openPhaseOne == 0
 	for m := 1; surplus > 0 && open > 0 && m <= maxScheduleMonths; m++ {
 		// Interest first: a balance waiting its turn still grows.
 		for _, s := range slots {
@@ -278,7 +352,7 @@ func fundingSchedule(
 			}
 		}
 		budget := float64(surplus)
-		for _, s := range slots {
+		for i, s := range slots {
 			if s.balance <= 0 || budget <= 0 {
 				continue
 			}
@@ -291,35 +365,68 @@ func fundingSchedule(
 			if s.balance < 0.5 { // under half a cent is paid
 				s.balance, s.end = 0, m
 				open--
+				if i < phaseOne {
+					openPhaseOne--
+				}
 			}
 		}
-		if open == 0 {
-			crossover = m
+		if !crossed && openPhaseOne == 0 {
+			crossover, crossed = m, true
 		}
 	}
 
-	stages := make([]FundingStage, 0, len(slots))
-	for _, s := range slots {
-		st := s.stage
+	// schedule reads when a stage starts and ends: nothing when the surplus
+	// never finishes it, zero months when nothing was owed.
+	schedule := func(s *slot, remaining money.Money) (start, months *int, done *time.Time) {
 		switch {
-		case st.Remaining == 0:
+		case remaining == 0:
 			zero := 0
-			st.MonthsToComplete = &zero
+			return nil, &zero, nil
 		case s.end > 0:
-			start, months, done := s.start-1, s.end-s.start+1, monthStart(now, s.end)
-			st.StartsInMonths, st.MonthsToComplete, st.CompletesOn = &start, &months, &done
+			st, mo, on := s.start-1, s.end-s.start+1, monthStart(now, s.end)
+			return &st, &mo, &on
 		}
+		return nil, nil, nil
+	}
+
+	stages := make([]FundingStage, 0, phaseOne)
+	for i, st := range funding {
+		st.StartsInMonths, st.MonthsToComplete, st.CompletesOn = schedule(slots[i], st.Remaining)
 		stages = append(stages, st)
 	}
 
-	switch {
-	case open > 0:
-		return stages, nil // never at this rate
-	case crossover == 0:
-		zero := 0 // nothing was owed
-		return stages, &zero
+	goalStages := make([]GoalStage, 0, len(goals))
+	for i, g := range goals {
+		s := slots[phaseOne+i]
+		st := GoalStage{
+			GoalID: g.goal.ID, Name: g.goal.Name, Target: g.goal.TargetAmount,
+			Current: g.current, Remaining: g.remaining, TargetDate: g.goal.TargetDate,
+		}
+		st.StartsInMonths, st.MonthsToComplete, st.CompletesOn = schedule(s, g.remaining)
+		if g.goal.TargetDate != nil {
+			left := calendarMonthsUntil(now, *g.goal.TargetDate)
+			// Funded within the month of its date counts as on time, the same
+			// month granularity every other date here has.
+			onTrack := g.remaining == 0 || (s.end > 0 && s.end <= left)
+			st.OnTrack = &onTrack
+			if g.remaining > 0 && left > 0 {
+				need := (g.remaining + money.Money(left) - 1) / money.Money(left)
+				st.RequiredMonthly = &need
+			}
+		}
+		goalStages = append(goalStages, st)
 	}
-	return stages, &crossover
+
+	if !crossed {
+		return stages, nil, goalStages // never at this rate
+	}
+	return stages, &crossover, goalStages
+}
+
+// calendarMonthsUntil counts calendar months from now's month to date's:
+// zero within the same month, negative once it has passed.
+func calendarMonthsUntil(now, date time.Time) int {
+	return (date.Year()-now.Year())*12 + int(date.Month()) - int(now.Month())
 }
 
 // monthStart is the first day of the month n months on from now's. Month n of
@@ -465,6 +572,10 @@ func (s *Service) buildQuestContext(ctx context.Context, userID string) (questCo
 	if err != nil {
 		return qc, fmt.Errorf("planned expenses: %w", err)
 	}
+	goals, err := s.repo.ListGoals(ctx, userID)
+	if err != nil {
+		return qc, fmt.Errorf("goals: %w", err)
+	}
 	dependents, err := s.repo.ListDependents(ctx, userID)
 	if err != nil {
 		return qc, fmt.Errorf("dependents: %w", err)
@@ -514,6 +625,7 @@ func (s *Service) buildQuestContext(ctx context.Context, userID string) (questCo
 		Retirement:  retirement,
 		Grants:      grants,
 		Planned:     planned,
+		Goals:       goals,
 		Dependents:  dependents,
 		Paystub:     paystub,
 		StaleFields: stale,

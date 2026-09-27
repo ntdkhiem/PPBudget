@@ -99,6 +99,11 @@ export interface Baseline {
   /** monthlyIncome - monthlyOutflow. May be negative. */
   monthlySurplus: number;
   liquidAssets: number;
+  /**
+   * Of that, what is held back for planned expenses due in the next year. The
+   * emergency fund counts only what is left, the same as the engine does.
+   */
+  earmarkedCents: number;
   totalLiabilities: number; // negative
   netWorth: number;
   /** Share of outflow attributed to a bucket, 0..1. 1 means fully bucketed. */
@@ -156,10 +161,18 @@ export interface Metric {
   note: string;
 }
 
-/** Months of essential spending covered by liquid assets. */
+/**
+ * Cash the emergency fund can count: what is liquid less what is earmarked for
+ * planned expenses in the next year, the same as the engine's figure.
+ */
+export function cushionCents(b: Baseline): number {
+  return Math.max(0, b.liquidAssets - b.earmarkedCents);
+}
+
+/** Months of essential spending covered by the cash the cushion can count. */
 export function emergencyFundMonths(b: Baseline): number | null {
   if (b.essentialMonthly <= 0) return null;
-  return b.liquidAssets / b.essentialMonthly;
+  return cushionCents(b) / b.essentialMonthly;
 }
 
 export function emergencyFundMetric(b: Baseline, targetMonths: number): Metric {
@@ -314,57 +327,14 @@ export function emergencyFundGoal(b: Baseline, plan: FinancialPlan): Goal {
     id: "__emergency_fund__",
     name: `Emergency fund (${plan.emergency_fund.target_months} months)`,
     target_cents: b.essentialMonthly * plan.emergency_fund.target_months,
-    current_cents: b.liquidAssets,
+    current_cents: cushionCents(b),
     priority: 0,
   };
 }
 
-/**
- * Funds goals the same way the waterfall funds priorities: in order, each one
- * taking the whole pool once the goal above it completes.
- *
- * Splitting the pool evenly across goals — the obvious alternative — finishes
- * nothing for a long time and implies a schedule you would not actually
- * follow. Sequencing gives each goal a real start month.
- */
-export function computeGoalPlan(
-  goals: Goal[],
-  accounts: PlanningAccount[],
-  monthlyPool: number,
-  /** Months before the pool is free, i.e. the waterfall's crossover. */
-  availableInMonths: number | null,
-  now: Date,
-): GoalProgress[] {
-  const ordered = [...goals].sort((a, c) => a.priority - c.priority);
-  let elapsed: number | null = availableInMonths;
-
-  return ordered.map((goal) => {
-    const progress = computeGoalProgress(goal, accounts, monthlyPool, now);
-    const startsInMonths = elapsed;
-
-    // A goal that cannot finish stalls everything behind it, which is the
-    // honest answer rather than quietly funding the next one anyway.
-    if (progress.monthsAtCurrent === null) {
-      elapsed = null;
-    } else if (elapsed !== null) {
-      elapsed = elapsed + progress.monthsAtCurrent;
-    }
-
-    return {
-      ...progress,
-      startsInMonths,
-      // Reaching a dated goal depends on when funding actually starts.
-      offTrack:
-        progress.requiredMonthly !== null &&
-        progress.targetCents > progress.currentCents &&
-        (monthlyPool <= 0 ||
-          startsInMonths === null ||
-          progress.monthsAtCurrent === null ||
-          startsInMonths + progress.monthsAtCurrent >
-            (goal.target_date ? (monthsUntil(goal.target_date, now) ?? 0) : Infinity)),
-    };
-  });
-}
+// computeGoalPlan() lived here. It queued goals behind the crossover in the
+// browser, and drifted from the schedule it was queued behind; the server's
+// simulator now dates goals on the same run as phase 1 (PlanSummary.goals).
 
 // ------------------------------------------------------------------ trends
 
@@ -526,8 +496,8 @@ export function computeVariance(
     worstEssentials: worst,
     typicalEssentials: typical,
     stressedTargetCents,
-    stressedMonths: worst > 0 ? b.liquidAssets / worst : null,
-    shortfallVsStressed: Math.max(0, stressedTargetCents - b.liquidAssets),
+    stressedMonths: worst > 0 ? cushionCents(b) / worst : null,
+    shortfallVsStressed: Math.max(0, stressedTargetCents - cushionCents(b)),
     unknown: essentials.length < 2,
   };
 }

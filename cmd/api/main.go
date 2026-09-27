@@ -49,6 +49,28 @@ func main() {
 	}
 	defer pool.Close()
 
+	// 1.5 Bring the schema up to date before anything reads it.
+	// MIGRATE_ON_START=false leaves it to `make migrate-up`.
+	if on, err := db.MigrateOnStart(); err != nil {
+		logger.Error("refusing to start: invalid configuration", "error", err)
+		os.Exit(1)
+	} else if on {
+		res, err := db.Migrate(cfg.DatabaseURL)
+		switch {
+		case err != nil:
+			logger.Error("refusing to start: database migration failed",
+				"error", err, "from_version", res.From, "stopped_at_version", res.To)
+			os.Exit(1)
+		case res.Ahead():
+			logger.Warn("database schema is newer than this build; running without migrating",
+				"schema_version", res.From, "build_latest_version", res.Latest)
+		case res.From == res.To:
+			logger.Info("database schema is current", "version", res.To)
+		default:
+			logger.Info("applied database migrations", "from_version", res.From, "to_version", res.To)
+		}
+	}
+
 	// 2. Init layers
 	repo := repository.New(pool)
 	svc := service.New(repo, logger, cfg)
@@ -56,6 +78,21 @@ func main() {
 
 	// 2.5 Init Cron Scheduler
 	c := cron.New()
+
+	// Deadline reminders, once a day: an email a week ahead of each dated
+	// action. Recorded per action and due date, so the HTTP trigger below can
+	// run the same job without anyone hearing twice.
+	if _, err := c.AddFunc("CRON_TZ=UTC 0 15 * * *", func() {
+		sent, err := svc.SendDeadlineReminders(context.Background())
+		if err != nil {
+			logger.Error("deadline reminders job failed", "error", err, "sent", sent)
+			return
+		}
+		logger.Info("deadline reminders job finished", "sent", sent)
+	}); err != nil {
+		logger.Error("failed to schedule deadline reminders", "error", err)
+	}
+
 	_, err = c.AddFunc("@every 12h", func() {
 		logger.Info("running auto-sync background job")
 		bgCtx := context.Background()
@@ -101,6 +138,7 @@ func main() {
 
 		// Cron webhook (Protected by X-API-Key natively in handler)
 		r.Post("/import/simplefin/cron", h.SimpleFinCronTrigger)
+		r.Post("/wealth/reminders/cron", h.DeadlineRemindersCronTrigger)
 
 		// Importer endpoints
 		r.Group(func(r chi.Router) {
@@ -195,6 +233,7 @@ func main() {
 			r.Get("/wealth/quests", h.ListQuests)
 			r.Put("/wealth/quests/{id}", h.UpdateQuestStatus)
 			r.Get("/wealth/quests/{id}/events", h.ListQuestEvents)
+			r.Get("/wealth/progress", h.GetWealthProgress)
 			r.Get("/wealth/paystub", h.GetPaystub)
 			r.Put("/wealth/paystub", h.UpsertPaystub)
 			r.Get("/wealth/account-terms", h.ListAccountTerms)
@@ -203,6 +242,10 @@ func main() {
 			r.Post("/wealth/goals", h.UpsertGoal)
 			r.Put("/wealth/goals/{id}", h.UpsertGoal)
 			r.Delete("/wealth/goals/{id}", h.DeleteGoal)
+			r.Get("/wealth/planned-expenses", h.ListPlannedExpenses)
+			r.Post("/wealth/planned-expenses", h.UpsertPlannedExpense)
+			r.Put("/wealth/planned-expenses/{id}", h.UpsertPlannedExpense)
+			r.Delete("/wealth/planned-expenses/{id}", h.DeletePlannedExpense)
 			r.Get("/wealth/equity-grants", h.ListEquityGrants)
 			r.Post("/wealth/equity-grants", h.UpsertEquityGrant)
 			r.Put("/wealth/equity-grants/{id}", h.UpsertEquityGrant)

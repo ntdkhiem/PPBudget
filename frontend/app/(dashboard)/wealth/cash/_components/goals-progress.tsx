@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { GoalStage } from "../../_components/wealth-data";
 import {
-  computeGoalPlan,
   computeGoalProgress,
   emergencyFundGoal,
   formatMonths,
@@ -21,6 +21,23 @@ import {
   type Waterfall,
 } from "./planning-math";
 import type { PlanningAccount } from "@/lib/api";
+
+/** A goal's row, read from its place on the server's schedule. */
+function goalProgressFrom(g: GoalStage): GoalProgress {
+  return {
+    id: g.goal_id,
+    name: g.name,
+    currentCents: g.current,
+    targetCents: g.target,
+    fundedShare: g.target > 0 ? Math.min(1, g.current / g.target) : 0,
+    requiredMonthly: g.required_monthly,
+    monthsAtCurrent: g.months_to_complete,
+    offTrack: g.on_track === false,
+    startsInMonths: g.starts_in_months,
+    completesOn: g.completes_on,
+    targetDate: g.target_date?.slice(0, 10),
+  };
+}
 
 function GoalRow({
   progress,
@@ -230,6 +247,7 @@ export function GoalsProgress({
   plan,
   accounts,
   waterfall,
+  goalStages,
   loading,
   onPlanChange,
 }: {
@@ -238,6 +256,8 @@ export function GoalsProgress({
   accounts: PlanningAccount[];
   /** Shared with the allocation section so both timelines agree. */
   waterfall: Waterfall;
+  /** The server's schedule for the user's goals, in priority order. */
+  goalStages: GoalStage[];
   loading: boolean;
   onPlanChange: (plan: FinancialPlan) => void;
 }) {
@@ -261,14 +281,12 @@ export function GoalsProgress({
   }, [efGoal, efStage, accounts, waterfall.poolCents, now]);
 
   // Custom goals queue behind the cushion, then take the surplus one at a time
-  // in priority order -- the same rule the waterfall above uses.
+  // in priority order. The server dates them on the same run as the waterfall
+  // above, so the two cannot disagree about when the queue reaches a goal.
   const investStage = waterfall.stages.find((s) => s.kind === "invest");
   const goalPool = investStage?.monthlyCents ?? 0;
 
-  const goalProgress = useMemo(
-    () => computeGoalPlan(plan.goals, accounts, goalPool, waterfall.crossoverMonths, now),
-    [plan.goals, accounts, goalPool, waterfall.crossoverMonths, now],
-  );
+  const goalProgress = useMemo(() => goalStages.map(goalProgressFrom), [goalStages]);
 
   const addGoal = (goal: Goal) => onPlanChange({ ...plan, goals: [...plan.goals, goal] });
   const deleteGoal = (id: string) =>

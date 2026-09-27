@@ -87,6 +87,7 @@ export function toBaseline(
     monthlyUnbucketed: s?.monthly_unbucketed ?? 0,
     monthlySurplus: s?.monthly_surplus ?? 0,
     liquidAssets: s?.liquid_assets ?? 0,
+    earmarkedCents: s?.earmarked ?? 0,
     totalLiabilities: s?.total_liabilities ?? 0,
     netWorth: s?.net_worth ?? 0,
     bucketCoverage: s?.bucket_coverage ?? 1,

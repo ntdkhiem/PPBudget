@@ -1534,7 +1534,7 @@ func TestFundingScheduleCountsOnlyWhatTheSurplusPays(t *testing.T) {
 	now := time.Date(2026, time.September, 24, 15, 0, 0, 0, time.UTC)
 
 	t.Run("sequenced against one surplus", func(t *testing.T) {
-		stages, crossover := fundingSchedule(quests(open), surplus, nil, now)
+		stages, crossover, _ := planSchedule(quests(open), nil, surplus, nil, now)
 
 		if len(stages) != 3 {
 			t.Fatalf("expected the starter, the card and the full fund; got %+v", stages)
@@ -1585,7 +1585,7 @@ func TestFundingScheduleCountsOnlyWhatTheSurplusPays(t *testing.T) {
 	})
 
 	t.Run("a finished starter leaves the full fund's gap whole", func(t *testing.T) {
-		stages, _ := fundingSchedule(quests(domain.QuestStatusComplete), surplus, nil, now)
+		stages, _, _ := planSchedule(quests(domain.QuestStatusComplete), nil, surplus, nil, now)
 		if stages[0].Remaining != 0 || stages[0].MonthsToComplete == nil || *stages[0].MonthsToComplete != 0 {
 			t.Errorf("a complete stage owes nothing and takes no time; got %+v", stages[0])
 		}
@@ -1595,7 +1595,7 @@ func TestFundingScheduleCountsOnlyWhatTheSurplusPays(t *testing.T) {
 	})
 
 	t.Run("no surplus is never, not a large number", func(t *testing.T) {
-		stages, crossover := fundingSchedule(quests(open), 0, nil, now)
+		stages, crossover, _ := planSchedule(quests(open), nil, 0, nil, now)
 		if crossover != nil {
 			t.Errorf("crossover: got %d want nil", *crossover)
 		}
@@ -1605,7 +1605,7 @@ func TestFundingScheduleCountsOnlyWhatTheSurplusPays(t *testing.T) {
 	})
 
 	t.Run("nothing owed is now", func(t *testing.T) {
-		_, crossover := fundingSchedule(nil, surplus, nil, now)
+		_, crossover, _ := planSchedule(nil, nil, surplus, nil, now)
 		if crossover == nil || *crossover != 0 {
 			t.Errorf("crossover: got %v want 0", crossover)
 		}
@@ -1631,14 +1631,14 @@ func TestFundingScheduleChargesInterestWhileACardWaits(t *testing.T) {
 	}
 
 	// Without interest: the starter takes month 1 and the card months 2-5.
-	_, flat := fundingSchedule(quests, 250_000, nil, now)
+	_, flat, _ := planSchedule(quests, nil, 250_000, nil, now)
 	if flat == nil || *flat != 5 {
 		t.Fatalf("without interest: got %v want 5", flat)
 	}
 
 	// At 2% a month the $10,000 is $10,404 by its first payment in month 2,
 	// and $736.79 is still owed after its fourth.
-	stages, crossover := fundingSchedule(quests, 250_000, twoPercent, now)
+	stages, crossover, _ := planSchedule(quests, nil, 250_000, twoPercent, now)
 	if crossover == nil || *crossover != 6 {
 		t.Fatalf("with interest: got %v want 6", crossover)
 	}
@@ -1656,7 +1656,7 @@ func TestFundingScheduleChargesInterestWhileACardWaits(t *testing.T) {
 	// Interest the surplus cannot outpace never finishes -- $400 a month on
 	// $20,000 against $300 of surplus -- and says so instead of looping.
 	quests[1].TargetAmount = amount(2_000_000)
-	stages, crossover = fundingSchedule(quests, 30_000, twoPercent, now)
+	stages, crossover, _ = planSchedule(quests, nil, 30_000, twoPercent, now)
 	if crossover != nil {
 		t.Errorf("crossover: got %d want nil", *crossover)
 	}
@@ -1731,6 +1731,149 @@ func TestSummaryDatesTheCrossover(t *testing.T) {
 
 	if s := summarise(qc, nil); s.CrossoverOn != nil {
 		t.Errorf("nothing owed has no date to wait for; got %v", s.CrossoverOn)
+	}
+}
+
+// ------------------------------------------------------------------ goals
+
+// Goals queue behind phase 1 on the same schedule, and in the month phase 1
+// finishes its leftover starts the first goal. The browser used to start
+// goals the month after the crossover and ignore that leftover.
+func TestGoalsQueueBehindPhaseOne(t *testing.T) {
+	now := time.Date(2026, time.September, 24, 0, 0, 0, 0, time.UTC)
+	gap := money.Money(500_000)
+	quests := []domain.Quest{{
+		ID: "f", CatalogKey: "full_emergency_fund", Phase: PhaseLiquidity,
+		Status: domain.QuestStatusAvailable, TargetAmount: &gap,
+	}}
+	goals := []goalNeed{
+		{goal: domain.Goal{ID: "trip", Name: "Trip", TargetAmount: 300_000}, remaining: 300_000},
+		{goal: domain.Goal{ID: "car", Name: "Car", TargetAmount: 250_000}, current: 50_000, remaining: 200_000},
+	}
+
+	// $5,000 at $2,000 a month: months 1-3, with $1,000 over in month 3.
+	_, crossover, stages := planSchedule(quests, goals, 200_000, nil, now)
+	if crossover == nil || *crossover != 3 {
+		t.Fatalf("crossover: got %v want 3", crossover)
+	}
+	for i, want := range []struct {
+		start, months int
+		done          time.Time
+	}{
+		{2, 2, time.Date(2027, time.January, 1, 0, 0, 0, 0, time.UTC)},  // months 3-4
+		{4, 1, time.Date(2027, time.February, 1, 0, 0, 0, 0, time.UTC)}, // month 5
+	} {
+		got := stages[i]
+		if got.StartsInMonths == nil || *got.StartsInMonths != want.start ||
+			got.MonthsToComplete == nil || *got.MonthsToComplete != want.months ||
+			got.CompletesOn == nil || !got.CompletesOn.Equal(want.done) {
+			t.Errorf("%s: starts %v for %v months, done %v; want %d for %d, %s",
+				got.GoalID, got.StartsInMonths, got.MonthsToComplete, got.CompletesOn,
+				want.start, want.months, want.done.Format("January 2006"))
+		}
+	}
+	if stages[1].Current != 50_000 || stages[1].Remaining != 200_000 {
+		t.Errorf("car: current %d remaining %d", stages[1].Current, stages[1].Remaining)
+	}
+
+	// Phase 1 never finishing leaves every goal unscheduled rather than
+	// quietly funding it anyway.
+	_, _, stages = planSchedule(quests, goals, 0, nil, now)
+	if stages[0].StartsInMonths != nil || stages[0].MonthsToComplete != nil || stages[0].CompletesOn != nil {
+		t.Errorf("no surplus should schedule nothing; got %+v", stages[0])
+	}
+}
+
+// A dated goal says whether the queue gets it there in time, and what a month
+// would take on its own.
+func TestDatedGoalsAreJudgedAgainstTheQueue(t *testing.T) {
+	now := time.Date(2026, time.September, 24, 0, 0, 0, 0, time.UTC)
+	date := func(y int, m time.Month) *time.Time { d := time.Date(y, m, 1, 0, 0, 0, 0, time.UTC); return &d }
+	goals := []goalNeed{
+		// Six calendar months away; $5,000 at $1,000 a month lands in month 5.
+		{goal: domain.Goal{ID: "a", TargetAmount: 500_000, TargetDate: date(2027, time.March)}, remaining: 500_000},
+		// Four months away, but queued behind the first until month 6.
+		{goal: domain.Goal{ID: "b", TargetAmount: 300_000, TargetDate: date(2027, time.January)}, remaining: 300_000},
+		// Already funded.
+		{goal: domain.Goal{ID: "c", TargetAmount: 100_000, TargetDate: date(2026, time.December)}, current: 100_000},
+	}
+
+	_, _, stages := planSchedule(nil, goals, 100_000, nil, now)
+
+	a, b, c := stages[0], stages[1], stages[2]
+	if a.OnTrack == nil || !*a.OnTrack {
+		t.Errorf("a finishes in month 5 of 6; got on_track %v", a.OnTrack)
+	}
+	if a.RequiredMonthly == nil || *a.RequiredMonthly != 83_334 {
+		t.Errorf("a: $5,000 over 6 months is $833.34 a month; got %v", a.RequiredMonthly)
+	}
+	if b.OnTrack == nil || *b.OnTrack {
+		t.Errorf("b finishes in month 8, after its month 4; got on_track %v", b.OnTrack)
+	}
+	if b.CompletesOn == nil || !b.CompletesOn.Equal(time.Date(2027, time.May, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("b completes %v, want May 2027", b.CompletesOn)
+	}
+	if c.OnTrack == nil || !*c.OnTrack || c.RequiredMonthly != nil || *c.MonthsToComplete != 0 {
+		t.Errorf("a funded goal is on track with nothing to do; got %+v", c)
+	}
+
+	_, _, stages = planSchedule(nil, goals[:1], 0, nil, now)
+	if stages[0].OnTrack == nil || *stages[0].OnTrack {
+		t.Error("with no surplus a dated goal is off track")
+	}
+}
+
+// A linked account's balance backs its goal in place of the hand-kept
+// figure; an account that has gone falls back to it.
+func TestGoalNeedsReadLinkedBalances(t *testing.T) {
+	qc := baseContext(nil)
+	linked, gone := "hysa", "closed"
+	qc.Accounts = []domain.PlanningAccount{{ID: "hysa", Type: "asset", Balance: 400_000}}
+	qc.Goals = []domain.Goal{
+		{ID: "house", TargetAmount: 1_000_000, LinkedAccountID: &linked, CurrentAmount: 5},
+		{ID: "old", TargetAmount: 200_000, LinkedAccountID: &gone, CurrentAmount: 50_000},
+		{ID: "plain", TargetAmount: 100_000, CurrentAmount: 150_000},
+	}
+
+	needs := qc.goalNeeds()
+	for i, want := range []struct{ current, remaining money.Money }{
+		{400_000, 600_000},
+		{50_000, 150_000},
+		{150_000, 0},
+	} {
+		if needs[i].current != want.current || needs[i].remaining != want.remaining {
+			t.Errorf("%s: current %d remaining %d, want %d and %d",
+				needs[i].goal.ID, needs[i].current, needs[i].remaining, want.current, want.remaining)
+		}
+	}
+
+	s := summarise(qc, nil)
+	if len(s.Goals) != 3 || s.Goals[0].GoalID != "house" {
+		t.Errorf("summary should carry the goals in order; got %+v", s.Goals)
+	}
+	if s := summarise(baseContext(nil), nil); s.Goals == nil {
+		t.Error("no goals should serialise as [], not null")
+	}
+}
+
+// Only expenses still to come are held back. One whose day has passed was
+// most likely paid already, and counting it again kept the emergency fund
+// short until someone deleted the row.
+func TestPlannedExpensesHoldBackOnlyWhatIsAhead(t *testing.T) {
+	qc := baseContext(nil) // Now is 22 September 2026
+	day := func(m time.Month, d int) time.Time { return time.Date(2026, m, d, 0, 0, 0, 0, time.UTC) }
+	qc.Planned = []domain.PlannedExpense{
+		{Label: "passed", Amount: 50_000, TargetDate: day(time.September, 1)},
+		{Label: "today", Amount: 20_000, TargetDate: day(time.September, 22)},
+		{Label: "soon", Amount: 30_000, TargetDate: day(time.December, 15)},
+		{Label: "next year and a bit", Amount: 99_000, TargetDate: time.Date(2027, time.October, 1, 0, 0, 0, 0, time.UTC)},
+	}
+
+	if got := qc.plannedWithin(12); got != 50_000 {
+		t.Errorf("held back %d, want 50000 (today's and December's)", got)
+	}
+	if s := summarise(qc, nil); s.Earmarked != 50_000 {
+		t.Errorf("summary earmarked %d, want 50000", s.Earmarked)
 	}
 }
 

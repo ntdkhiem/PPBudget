@@ -25,6 +25,8 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { UpdateBalanceDialog } from "@/components/update-balance-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useAccountTerms, useSaveAccountTerms } from "../wealth/_components/inputs-data";
+import { RateFields, rateKindFor, rateLabel, ratesFromForm } from "../wealth/_components/account-rates";
 
 const STALE_DAYS = 3;
 
@@ -47,9 +49,17 @@ const ROLE_LABEL: Record<string, string> = Object.fromEntries(
  * "not sure yet" options keep an account unclassified, and the plan asks
  * about those rather than guessing.
  */
-function KindSelect({ id, defaultValue }: { id: string; defaultValue: string }) {
+function KindSelect({
+  id,
+  defaultValue,
+  onValueChange,
+}: {
+  id: string;
+  defaultValue: string;
+  onValueChange?: (value: string) => void;
+}) {
   return (
-    <Select name="kind" required defaultValue={defaultValue}>
+    <Select name="kind" required defaultValue={defaultValue} onValueChange={onValueChange}>
       <SelectTrigger id={id} className="rounded-xl border-slate-200 dark:border-slate-700">
         <SelectValue placeholder="Select what it is" />
       </SelectTrigger>
@@ -94,7 +104,17 @@ export default function AccountsPage() {
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [balanceAccount, setBalanceAccount] = useState<Account | null>(null);
   const [pendingBalanceOnlyEdit, setPendingBalanceOnlyEdit] = useState<PendingBalanceOnlyEdit | null>(null);
+  // What the account being edited is picked as, so the rate asked for follows
+  // the picker before it is saved: a card has an APR, savings an APY.
+  const [editKind, setEditKind] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const { data: terms, isLoading: termsLoading } = useAccountTerms();
+  const saveTerms = useSaveAccountTerms();
+
+  const openEdit = (account: Account) => {
+    setEditKind(null);
+    setSelectedAccount(account);
+  };
   const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
 
   const { data: accounts, isLoading } = useQuery<Account[]>({
@@ -197,6 +217,20 @@ export default function AccountsPage() {
     const { type, role } = parseKind(formData.get("kind") as string);
     const balanceOnly = formData.get("balance_only") === "on";
 
+    // Rates are their own record, saved alongside rather than after: they do
+    // not depend on the name or role going through first.
+    const rates = ratesFromForm(formData, terms?.[selectedAccount.id]);
+    if (rates.error) {
+      toast.error(rates.error);
+      return;
+    }
+    if (Object.keys(rates.patch).length > 0) {
+      saveTerms.mutate(
+        { accountId: selectedAccount.id, patch: rates.patch },
+        { onError: (error: Error) => toast.error(error.message || "Failed to save the rate") },
+      );
+    }
+
     if (balanceOnly && !selectedAccount.balance_only) {
       // Turning balance-only on deletes transactions — confirm first.
       setPendingBalanceOnlyEdit({ id: selectedAccount.id, name, type, role });
@@ -236,6 +270,11 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
   const showStale = account.balance_source === "simplefin" && !!account.balance_as_of && isStale(account.balance_as_of);
   // Only assets and debts need a role; the plan leaves an unclassified one out.
   const needsRole = !account.role && (account.type === "asset" || account.type === "liability");
+  const rateKind = rateKindFor(account.type, account.role);
+  const rate = rateLabel(rateKind, terms?.[account.id]);
+  // A debt with no rate cannot be ordered against investing; savings without
+  // one simply is not compared, so only debts are flagged.
+  const needsRate = rateKind === "apr" && !rate && !termsLoading;
 
   return (
     <motion.div
@@ -258,8 +297,17 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
         <p className={`text-3xl font-bold font-heading tracking-tight text-slate-900 dark:text-white`}>
           {formatCurrency(account.current_balance)}
         </p>
-        {(account.balance_as_of || account.balance_only || needsRole) && (
+        {rate && <p className="mt-1 text-sm font-medium text-slate-600 dark:text-slate-300">{rate}</p>}
+        {(account.balance_as_of || account.balance_only || needsRole || needsRate) && (
           <div className="mt-1 flex items-center gap-2 flex-wrap">
+            {needsRate && (
+              <Badge
+                className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 border-0"
+                title="Edit the account to add its interest rate. Until then the Wealth Strategy plan cannot say whether to pay it down before investing."
+              >
+                No rate yet
+              </Badge>
+            )}
             {needsRole && (
               <Badge
                 className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 border-0"
@@ -357,8 +405,15 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-kind" className="text-slate-700 dark:text-slate-300">What is it?</Label>
-                  <KindSelect id="edit-kind" defaultValue={kindOf(selectedAccount)} />
+                  <KindSelect id="edit-kind" defaultValue={kindOf(selectedAccount)} onValueChange={setEditKind} />
                 </div>
+                {(() => {
+                  const { type, role } = parseKind(editKind ?? kindOf(selectedAccount));
+                  const kind = rateKindFor(type, role);
+                  return termsLoading ? null : (
+                    <RateFields key={`${selectedAccount.id}-${kind}`} kind={kind} terms={terms?.[selectedAccount.id]} />
+                  );
+                })()}
                 <label
                   htmlFor="edit-balance-only"
                   className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3 cursor-pointer hover:border-indigo-200 dark:hover:border-indigo-800/60 transition-colors"
@@ -432,7 +487,7 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {assets.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} onUpdateBalance={() => setBalanceAccount(account)} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => openEdit(account)} onUpdateBalance={() => setBalanceAccount(account)} />
               ))}
             </div>
           )}
@@ -457,7 +512,7 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {liabilities.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} onUpdateBalance={() => setBalanceAccount(account)} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => openEdit(account)} onUpdateBalance={() => setBalanceAccount(account)} />
               ))}
             </div>
           )}
@@ -482,7 +537,7 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {incomes.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} onUpdateBalance={() => setBalanceAccount(account)} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => openEdit(account)} onUpdateBalance={() => setBalanceAccount(account)} />
               ))}
             </div>
           )}
@@ -507,7 +562,7 @@ const AccountCard = ({ account, idx, onClick, onUpdateBalance }: { account: Acco
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {expenses.map((account, idx) => (
-                <AccountCard key={account.id} account={account} idx={idx} onClick={() => setSelectedAccount(account)} onUpdateBalance={() => setBalanceAccount(account)} />
+                <AccountCard key={account.id} account={account} idx={idx} onClick={() => openEdit(account)} onUpdateBalance={() => setBalanceAccount(account)} />
               ))}
             </div>
           )}

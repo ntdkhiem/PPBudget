@@ -20,6 +20,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ActionCard } from "./_components/action-card";
+import { ProgressTimeline } from "./_components/progress-timeline";
 import {
   useFieldRegistry,
   useGroupedQuests,
@@ -306,6 +307,9 @@ export default function WealthOverviewPage() {
               })}
           </div>
         </section>
+
+        {/* 4. What has been done, below what is left to do. */}
+        <ProgressTimeline />
       </motion.div>
     </PageContainer>
   );

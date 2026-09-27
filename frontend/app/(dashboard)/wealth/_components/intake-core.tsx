@@ -9,6 +9,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Choice, Field, toCents, toFraction, toInputValue } from "./form-bits";
+import {
+  PAY_FREQUENCIES,
+  PAYSTUB_FIELDS,
+  paystubDraft,
+  paystubFrom,
+  pctIn,
+  rateChange,
+  todayInput,
+  useAccountTerms,
+  usePaystub,
+  useSaveAccountTerms,
+  useSavePaystub,
+} from "./inputs-data";
 import { useFieldRegistry, useSaveProfile, usd, type WealthProfile } from "./wealth-data";
 
 /**
@@ -101,6 +114,18 @@ export function IntakeCore({
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [aprs, setAprs] = useState<Record<string, string>>({});
+  const [stub, setStub] = useState<Record<string, string>>({});
+
+  // Rates and the paystub are shown as recorded, like the answers below, and
+  // written back only where changed: a rate box left alone is not re-sent,
+  // and an untouched paystub is not re-dated to today.
+  const { data: terms } = useAccountTerms();
+  const saveTerms = useSaveAccountTerms();
+  const { data: storedStub } = usePaystub();
+  const saveStub = useSavePaystub();
+  const stubOnFile = useMemo(() => paystubDraft(storedStub), [storedStub]);
+  const stubVal = (key: string) => stub[key] ?? stubOnFile[key] ?? "";
+  const aprVal = (accountId: string) => aprs[accountId] ?? pctIn(terms?.[accountId]?.apr);
 
   // Liability accounts, so the rate screen lists real cards rather than asking
   // the user to describe them.
@@ -192,43 +217,19 @@ export function IntakeCore({
     // The paystub and the card rates are separate resources, not profile
     // fields, so they post to their own endpoints.
     if (current.id === "paystub") {
-      const money = (k: string) => toCents(draft[k] ?? "") ?? 0;
-      const int = (k: string) => {
-        const n = Number.parseInt(draft[k] ?? "", 10);
-        return Number.isFinite(n) ? n : undefined;
-      };
-      if (draft.ps_gross) {
-        await apiFetch(
-          "/wealth/paystub",
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              as_of_date: new Date().toISOString(),
-              gross: money("ps_gross"),
-              federal_withheld: money("ps_federal"),
-              state_withheld: money("ps_state"),
-              pretax_401k: money("ps_pretax401k"),
-              roth_401k: money("ps_roth401k"),
-              hsa_contribution: money("ps_hsa"),
-              espp_contribution: money("ps_espp"),
-              pretax_benefits: money("ps_benefits"),
-              supplemental_wages: money("ps_supplemental"),
-              paychecks_ytd: int("ps_ytd_count"),
-              paychecks_per_year: int("ps_per_year"),
-            }),
-          },
-          getStoredToken(),
-        );
+      // A paystub is one dated reading, so it is saved whole -- but only when
+      // something here changed, dated today because that is when it was read.
+      const merged = { ...stubOnFile, ...stub };
+      if (Object.keys(stub).length > 0 && merged.gross) {
+        await saveStub.mutateAsync(paystubFrom(merged, storedStub, todayInput()));
       }
     } else if (current.id === "debts") {
+      // Only the APR is named, so a promotional rate recorded on the Accounts
+      // page survives; an emptied box clears the rate.
       for (const [accountId, raw] of Object.entries(aprs)) {
-        const apr = toFraction(raw);
-        if (apr === null) continue;
-        await apiFetch(
-          `/wealth/account-terms/${accountId}`,
-          { method: "PUT", body: JSON.stringify({ apr }) },
-          getStoredToken(),
-        );
+        const apr = rateChange(raw, terms?.[accountId]?.apr);
+        if (apr === undefined) continue;
+        await saveTerms.mutateAsync({ accountId, patch: { apr } });
       }
     } else {
       const fields = fieldsForStep(current.id);
@@ -351,53 +352,20 @@ export function IntakeCore({
 
         {current.id === "paystub" && (
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Gross pay, year to date">
-              <Input
-                inputMode="decimal"
-                value={val("ps_gross")}
-                onChange={(e) => set("ps_gross", e.target.value)}
-              />
-            </Field>
-            <Field label="Federal tax withheld, YTD">
-              <Input
-                inputMode="decimal"
-                value={val("ps_federal")}
-                onChange={(e) => set("ps_federal", e.target.value)}
-              />
-            </Field>
-            <Field label="State tax withheld, YTD">
-              <Input
-                inputMode="decimal"
-                value={val("ps_state")}
-                onChange={(e) => set("ps_state", e.target.value)}
-              />
-            </Field>
-            <Field label="401(k) pre-tax, YTD">
-              <Input
-                inputMode="decimal"
-                value={val("ps_pretax401k")}
-                onChange={(e) => set("ps_pretax401k", e.target.value)}
-              />
-            </Field>
-            <Field label="401(k) Roth, YTD">
-              <Input
-                inputMode="decimal"
-                value={val("ps_roth401k")}
-                onChange={(e) => set("ps_roth401k", e.target.value)}
-              />
-            </Field>
-            <Field label="HSA, YTD">
-              <Input
-                inputMode="decimal"
-                value={val("ps_hsa")}
-                onChange={(e) => set("ps_hsa", e.target.value)}
-              />
-            </Field>
+            {PAYSTUB_FIELDS.map(({ key, label }) => (
+              <Field key={key} label={label}>
+                <Input
+                  inputMode="decimal"
+                  value={stubVal(key)}
+                  onChange={(e) => setStub((s) => ({ ...s, [key]: e.target.value }))}
+                />
+              </Field>
+            ))}
             <Field label="Paychecks so far this year">
               <Input
                 inputMode="numeric"
-                value={val("ps_ytd_count")}
-                onChange={(e) => set("ps_ytd_count", e.target.value)}
+                value={stubVal("paychecks_ytd")}
+                onChange={(e) => setStub((s) => ({ ...s, paychecks_ytd: e.target.value }))}
               />
             </Field>
             {/* A choice rather than a number box: a "26" placeholder looked
@@ -405,14 +373,9 @@ export function IntakeCore({
             <div className="sm:col-span-2">
               <Field label="How often are you paid?">
                 <Choice
-                  value={val("ps_per_year")}
-                  onChange={(v) => set("ps_per_year", v)}
-                  options={[
-                    { value: "52", label: "Weekly" },
-                    { value: "26", label: "Every two weeks" },
-                    { value: "24", label: "Twice a month" },
-                    { value: "12", label: "Monthly" },
-                  ]}
+                  value={stubVal("paychecks_per_year")}
+                  onChange={(v) => setStub((s) => ({ ...s, paychecks_per_year: v }))}
+                  options={PAY_FREQUENCIES}
                 />
               </Field>
             </div>
@@ -502,7 +465,7 @@ export function IntakeCore({
                       inputMode="decimal"
                       placeholder="22.49"
                       className="w-32"
-                      value={aprs[acct.id] ?? ""}
+                      value={aprVal(acct.id)}
                       onChange={(e) =>
                         setAprs((a) => ({ ...a, [acct.id]: e.target.value }))
                       }

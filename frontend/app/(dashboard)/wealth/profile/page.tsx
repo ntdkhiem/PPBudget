@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { IntakeCore } from "../_components/intake-core";
 import { FocusedQuestions } from "../_components/focused-questions";
 import { EquityGrants } from "../_components/equity-grants";
+import { PaystubCard } from "../_components/paystub-card";
 import {
   useDerivedProfile,
   useFieldRegistry,
@@ -285,6 +286,8 @@ function ProfileView({ firstRun }: { firstRun: boolean }) {
             })}
           </div>
         </section>
+
+        <PaystubCard />
 
         <EquityGrants />
 

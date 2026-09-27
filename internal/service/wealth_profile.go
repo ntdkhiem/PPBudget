@@ -263,9 +263,16 @@ func (s *Service) ListAccountTerms(ctx context.Context, userID string) (map[stri
 	return s.repo.ListAccountTerms(ctx, userID)
 }
 
-// UpsertAccountTerms records the terms an aggregator does not return.
+// UpsertAccountTerms records the terms an aggregator does not return, writing
+// the ones t holds and leaving the rest.
 func (s *Service) UpsertAccountTerms(ctx context.Context, userID string, t domain.AccountTerms) error {
 	return s.repo.UpsertAccountTerms(ctx, userID, t)
+}
+
+// PatchAccountTerms writes only the terms named in setKeys; a named term whose
+// value is nil is cleared.
+func (s *Service) PatchAccountTerms(ctx context.Context, userID string, t domain.AccountTerms, setKeys []string) error {
+	return s.repo.PatchAccountTerms(ctx, userID, t, setKeys)
 }
 
 // ListRetirementAccountTerms maps the user's accounts to tax treatments.

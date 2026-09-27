@@ -347,6 +347,12 @@ func (h *Handler) ListAccountTerms(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpsertAccountTerms records the terms for one account.
+//
+// Only the terms in the body change, and a term sent as null is cleared. The
+// body is decoded twice for the reason UpdateWealthProfile's is: once to learn
+// which terms were sent, once for their values. Terms are entered from more
+// than one screen, and replacing the whole row let a save from one -- setup's
+// APR -- erase what another had recorded, a card's promotional rate.
 func (h *Handler) UpsertAccountTerms(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok || userID == "" {
@@ -354,14 +360,34 @@ func (h *Handler) UpsertAccountTerms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var terms domain.AccountTerms
-	if err := json.NewDecoder(r.Body).Decode(&terms); err != nil {
+	var body json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+	var present map[string]json.RawMessage
+	if err := json.Unmarshal(body, &present); err != nil {
+		writeError(w, http.StatusBadRequest, "terms must be an object")
+		return
+	}
+	var terms domain.AccountTerms
+	if err := json.Unmarshal(body, &terms); err != nil {
+		writeError(w, http.StatusBadRequest, "one or more terms have the wrong type")
 		return
 	}
 	terms.AccountID = chi.URLParam(r, "id")
 
-	if err := h.svc.UpsertAccountTerms(r.Context(), userID, terms); err != nil {
+	// The account is the URL's; a body that repeats it is not naming a term.
+	// Anything else unknown is refused by the repository rather than dropped.
+	setKeys := make([]string, 0, len(present))
+	for key := range present {
+		if key != "account_id" {
+			setKeys = append(setKeys, key)
+		}
+	}
+	sort.Strings(setKeys) // deterministic write order, as for the profile
+
+	if err := h.svc.PatchAccountTerms(r.Context(), userID, terms, setKeys); err != nil {
 		switch {
 		case errors.Is(err, apperrors.ErrForbidden), errors.Is(err, apperrors.ErrNotFound):
 			writeError(w, http.StatusNotFound, "account not found")

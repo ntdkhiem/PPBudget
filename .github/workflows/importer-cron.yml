@@ -15,3 +15,11 @@ jobs:
           curl -X POST "${{ secrets.BACKEND_API_URL }}/api/v1/import/simplefin/cron" \
           -H "Content-Type: application/json" \
           -H "X-API-Key: ${{ secrets.INGEST_API_KEY }}"
+
+      # Deadline reminders also run from the server's own daily cron. This
+      # covers hosts that sleep through it; the job sends each reminder once,
+      # so running it every 12 hours is harmless.
+      - name: Trigger Deadline Reminders
+        run: |
+          curl -sS --fail-with-body -X POST "${{ secrets.BACKEND_API_URL }}/api/v1/wealth/reminders/cron" \
+          -H "X-API-Key: ${{ secrets.INGEST_API_KEY }}"

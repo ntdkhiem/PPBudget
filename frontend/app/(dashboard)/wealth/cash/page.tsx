@@ -30,6 +30,7 @@ import { AllocationPlan } from "./_components/allocation-plan";
 import { PositionCards } from "./_components/position-cards";
 import { TrendStrip } from "./_components/trend-strip";
 import { GoalsProgress } from "./_components/goals-progress";
+import { PlannedExpenses } from "./_components/planned-expenses";
 
 /**
  * The cash surface, now a VIEW of the server's plan rather than a second
@@ -156,11 +157,14 @@ export default function CashPage() {
           <PositionCards baseline={baseline} plan={plan} months={months} loading={loading} />
         </section>
 
+        <PlannedExpenses earmarkedCents={summary?.earmarked ?? 0} />
+
         <GoalsProgress
           baseline={baseline}
           plan={plan}
           accounts={accounts}
           waterfall={waterfall}
+          goalStages={summary?.goals ?? []}
           loading={loading}
           onPlanChange={handleGoalChange}
         />

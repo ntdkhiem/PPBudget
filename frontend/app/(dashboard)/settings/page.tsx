@@ -18,6 +18,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageContainer } from "@/components/page-container";
 import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
+import { DeadlineRemindersToggle } from "./_components/deadline-reminders";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -293,8 +294,11 @@ export default function SettingsPage() {
           </div>
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Email Notifications</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Test your email delivery</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">What we email you, and a delivery test</p>
           </div>
+        </div>
+        <div className="p-6 border-b border-slate-100 dark:border-slate-800">
+          <DeadlineRemindersToggle />
         </div>
         <div className="p-6">
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">

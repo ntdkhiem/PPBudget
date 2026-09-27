@@ -1,10 +1,11 @@
 name: CI/CD Pipeline
 
 on:
+  # The repository's branch is master; triggering on main meant CI never ran.
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "master" ]
 
 jobs:
   backend-test:
@@ -48,6 +49,9 @@ jobs:
           
       - name: Install dependencies
         run: npm ci
-        
+
+      - name: Unit tests
+        run: npm test
+
       - name: Build
         run: npm run build

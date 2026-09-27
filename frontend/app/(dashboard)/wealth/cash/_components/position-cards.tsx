@@ -116,7 +116,11 @@ export function PositionCards({
           <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">{ef.note}</p>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             {formatCurrency(baseline.liquidAssets)} liquid across your checking and savings
-            accounts.{" "}
+            accounts
+            {baseline.earmarkedCents > 0 && (
+              <>, of which {formatCurrency(baseline.earmarkedCents)} is held back for planned expenses</>
+            )}
+            .{" "}
             <Link href="/accounts" className="font-medium underline underline-offset-2">
               Set account roles
             </Link>

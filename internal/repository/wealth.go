@@ -234,30 +234,112 @@ func (r *Repository) ListAccountTerms(ctx context.Context, userID string) (map[s
 // UpsertAccountTerms records the facts an aggregator does not return -- APR
 // above all, which no bank feed supplies. Without it a card gets no payoff
 // action of its own, only a blocked request for the rate.
+//
+// Writes the terms t holds and leaves the rest as they were. Clearing a term
+// takes PatchAccountTerms, which is told which terms to write.
 func (r *Repository) UpsertAccountTerms(ctx context.Context, userID string, t domain.AccountTerms) error {
+	var setKeys []string
+	for _, term := range []struct {
+		key string
+		has bool
+	}{
+		{"apy", t.APY != nil},
+		{"apr", t.APR != nil},
+		{"promo_apr", t.PromoAPR != nil},
+		{"promo_expires_on", t.PromoExpiresOn != nil},
+		{"statement_balance", t.StatementBalance != nil},
+		{"min_payment", t.MinPayment != nil},
+		{"due_day", t.DueDay != nil},
+	} {
+		if term.has {
+			setKeys = append(setKeys, term.key)
+		}
+	}
+	return r.PatchAccountTerms(ctx, userID, t, setKeys)
+}
+
+// PatchAccountTerms writes only the terms named in setKeys, by JSON key --
+// which is also the column. A named term whose value is nil is cleared.
+//
+// Terms are entered from more than one screen: a rate on the Accounts page,
+// the APRs in setup. Replacing the whole row let a save from one erase what
+// another had recorded -- setup's APR wiped a card's promotional rate, and
+// with it the dated action to clear the balance before the promotion ends.
+func (r *Repository) PatchAccountTerms(ctx context.Context, userID string, t domain.AccountTerms, setKeys []string) error {
 	if err := r.checkOwnership(ctx, nil, "accounts", t.AccountID, userID); err != nil {
 		return err
 	}
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO account_terms
-			(account_id, user_id, apy, apr, promo_apr, promo_expires_on,
-			 statement_balance, min_payment, due_day)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (account_id) DO UPDATE SET
-			apy = EXCLUDED.apy,
-			apr = EXCLUDED.apr,
-			promo_apr = EXCLUDED.promo_apr,
-			promo_expires_on = EXCLUDED.promo_expires_on,
-			statement_balance = EXCLUDED.statement_balance,
-			min_payment = EXCLUDED.min_payment,
-			due_day = EXCLUDED.due_day,
-			updated_at = NOW()`,
-		t.AccountID, userID, t.APY, t.APR, t.PromoAPR, t.PromoExpiresOn,
-		t.StatementBalance, t.MinPayment, t.DueDay)
+	if len(setKeys) == 0 {
+		return nil
+	}
+
+	cols := []string{"account_id", "user_id"}
+	placeholders := []string{"$1", "$2"}
+	sets := make([]string, 0, len(setKeys))
+	args := []any{t.AccountID, userID}
+	for _, key := range setKeys {
+		v, ok := accountTermValue(t, key)
+		if !ok {
+			return fmt.Errorf("%w: unknown account term %q", apperrors.ErrInvalidInput, key)
+		}
+		args = append(args, v)
+		cols = append(cols, key)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		sets = append(sets, fmt.Sprintf("%s = $%d", key, len(args)))
+	}
+
+	// Update in place first, and insert only when there is no row yet. An
+	// INSERT ... ON CONFLICT DO UPDATE would not do: Postgres checks the row
+	// it proposes to insert before finding the conflict, so a save naming only
+	// a promotional rate failed the rate-and-date-together check even though
+	// the stored row already had the date.
+	tag, err := r.pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE account_terms SET %s, updated_at = NOW()
+		WHERE account_id = $1 AND user_id = $2`, strings.Join(sets, ", ")),
+		args...)
+	if err == nil && tag.RowsAffected() == 0 {
+		// A first save for this account. Two first saves racing is the one
+		// case the conflict clause is for; the loser's terms land on the row
+		// the winner made.
+		_, err = r.pool.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO account_terms (%s) VALUES (%s)
+			ON CONFLICT (account_id) DO UPDATE SET %s, updated_at = NOW()`,
+			strings.Join(cols, ", "), strings.Join(placeholders, ", "), strings.Join(sets, ", ")),
+			args...)
+	}
 	if err != nil {
+		// The one rule that spans two terms, and so the one a partial save can
+		// trip over: naming the rate without the date it expires.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "account_terms_check" {
+			return fmt.Errorf("%w: a promotional rate and its expiry date are set, and cleared, together",
+				apperrors.ErrInvalidInput)
+		}
 		return constraintError(err, "account terms")
 	}
 	return nil
+}
+
+// accountTermValue returns t's value for the term named by key, and false for
+// a key that names no term.
+func accountTermValue(t domain.AccountTerms, key string) (any, bool) {
+	switch key {
+	case "apy":
+		return t.APY, true
+	case "apr":
+		return t.APR, true
+	case "promo_apr":
+		return t.PromoAPR, true
+	case "promo_expires_on":
+		return t.PromoExpiresOn, true
+	case "statement_balance":
+		return t.StatementBalance, true
+	case "min_payment":
+		return t.MinPayment, true
+	case "due_day":
+		return t.DueDay, true
+	}
+	return nil, false
 }
 
 // ------------------------------------------------- retirement account terms

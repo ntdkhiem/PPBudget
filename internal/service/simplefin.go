@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/smtp"
 	"strings"
 	"sync"
 	"time"
@@ -505,19 +504,14 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 		return nil
 	}
 
-	userEmail, _ := s.repo.GetUserSetting(ctx, userID, "notification_email")
-	if userEmail == "" {
-		if user, err := s.repo.GetUserByID(ctx, userID); err == nil && user != nil {
-			userEmail = user.Email
-		}
-	}
+	userEmail := s.notificationEmail(ctx, userID)
 	if userEmail == "" {
 		s.logger.Info("notification email not configured for user, skipping", "user_id", userID)
 		return fmt.Errorf("no email address configured for this user")
 	}
-	if s.cfg.SMTPHost == "" && s.cfg.ResendAPIKey == "" {
+	if !s.mailConfigured() {
 		s.logger.Info("neither Resend nor SMTP configured, skipping email notification")
-		return fmt.Errorf("server has no SMTP or Resend credentials configured")
+		return errNoMailer
 	}
 
 	// Fetch account names for nicer email
@@ -652,59 +646,12 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 	body.WriteString("<div class=\"footer\">Sent by PPBudget</div>")
 	body.WriteString("</body></html>")
 
-	if s.cfg.ResendAPIKey != "" {
-		// Use Resend HTTP API
-		resendBody := fmt.Sprintf(`{"from": "%s", "to": ["%s"], "subject": "PPBudget Import Completed", "html": %q}`,
-			s.cfg.ResendFromEmail,
-			userEmail,
-			body.String(),
-		)
-
-		req, err := http.NewRequest("POST", "https://api.resend.com/emails", strings.NewReader(resendBody))
-		if err != nil {
-			s.logger.Error("failed to create Resend request", "error", err)
-			return err
-		}
-
-		req.Header.Set("Authorization", "Bearer "+s.cfg.ResendAPIKey)
-		req.Header.Set("Content-Type", "application/json")
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			s.logger.Error("failed to send import notification via Resend", "error", err, "user_id", userID)
-			return err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode >= 400 {
-			s.logger.Error("resend API returned error", "status", resp.StatusCode, "user_id", userID)
-			var errBody []byte
-			if resp.Body != nil {
-				errBody, _ = io.ReadAll(resp.Body)
-			}
-			return fmt.Errorf("resend API returned status %d: %s", resp.StatusCode, string(errBody))
-		}
-
-		s.logger.Info("import notification email sent via Resend", "count", len(txns), "user_id", userID)
-		return nil
-	} else {
-		// Use standard SMTP (works locally or if provider allows port 587)
-		auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
-		msg := []byte("To: " + userEmail + "\r\n" +
-			"Subject: PPBudget Import Completed\r\n" +
-			"MIME-version: 1.0;\r\n" +
-			"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" +
-			body.String())
-
-		err := smtp.SendMail(s.cfg.SMTPHost+":"+s.cfg.SMTPPort, auth, s.cfg.SMTPUser, []string{userEmail}, msg)
-		if err != nil {
-			s.logger.Error("failed to send import notification email via SMTP", "error", err, "user_id", userID)
-			return err
-		}
-
-		s.logger.Info("import notification email sent via SMTP", "count", len(txns), "user_id", userID)
-		return nil
+	if err := s.sendEmail(ctx, userEmail, "PPBudget Import Completed", body.String()); err != nil {
+		s.logger.Error("failed to send import notification email", "error", err, "user_id", userID)
+		return err
 	}
+	s.logger.Info("import notification email sent", "count", len(txns), "user_id", userID)
+	return nil
 }
 
 // importAccountTransactions imports one SimpleFin account's transactions in a single DB
@@ -879,53 +826,14 @@ func (s *Service) UpdateSimplefinAutoSync(ctx context.Context, userID string, en
 }
 
 func (s *Service) SendTestEmail(ctx context.Context, userID string) error {
-	userEmail, _ := s.repo.GetUserSetting(ctx, userID, "notification_email")
-	if userEmail == "" {
-		if user, err := s.repo.GetUserByID(ctx, userID); err == nil && user != nil {
-			userEmail = user.Email
-		}
-	}
+	userEmail := s.notificationEmail(ctx, userID)
 	if userEmail == "" {
 		return fmt.Errorf("no email address configured for this user")
 	}
-	if s.cfg.SMTPHost == "" && s.cfg.ResendAPIKey == "" {
-		return fmt.Errorf("server has no SMTP or Resend credentials configured")
+	if !s.mailConfigured() {
+		return errNoMailer
 	}
 
-	subject := "PPBudget Email Test"
-	htmlBody := "<h2>Success!</h2><p>This is a test email to verify that your email configuration is working correctly.</p>"
-
-	if s.cfg.ResendAPIKey != "" {
-		resendBody := fmt.Sprintf(`{"from": "%s", "to": ["%s"], "subject": "%s", "html": %q}`,
-			s.cfg.ResendFromEmail,
-			userEmail,
-			subject,
-			htmlBody,
-		)
-		req, err := http.NewRequest("POST", "https://api.resend.com/emails", strings.NewReader(resendBody))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Authorization", "Bearer "+s.cfg.ResendAPIKey)
-		req.Header.Set("Content-Type", "application/json")
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			errBody, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("resend API returned status %d: %s", resp.StatusCode, string(errBody))
-		}
-		return nil
-	} else {
-		auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
-		msg := []byte("To: " + userEmail + "\r\n" +
-			"Subject: " + subject + "\r\n" +
-			"MIME-version: 1.0;\r\n" +
-			"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" +
-			htmlBody)
-		return smtp.SendMail(s.cfg.SMTPHost+":"+s.cfg.SMTPPort, auth, s.cfg.SMTPUser, []string{userEmail}, msg)
-	}
+	return s.sendEmail(ctx, userEmail, "PPBudget Email Test",
+		"<h2>Success!</h2><p>This is a test email to verify that your email configuration is working correctly.</p>")
 }

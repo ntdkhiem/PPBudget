@@ -59,6 +59,9 @@ type questContext struct {
 	Retirement []domain.RetirementAccountTerms
 	Grants     []domain.EquityGrant
 	Planned    []domain.PlannedExpense
+	// Goals are the user's own savings targets, in their order. No rule reads
+	// them; the funding schedule queues them behind phase 1.
+	Goals      []domain.Goal
 	Dependents []domain.Dependent
 	Paystub    *domain.PaystubYTD
 
@@ -283,11 +286,16 @@ func (c questContext) accountByID(id string) *domain.PlanningAccount {
 // Every sweep and invest rule subtracts this first. Without it the engine sees
 // idle cash and tells someone with a closing date next quarter to move their
 // down payment into a broad-market index fund.
+//
+// An expense whose day has passed is left out. The money has most likely gone
+// already and is missing from the balances, so holding it back again would
+// count it twice -- and would keep doing so until someone deleted the row.
 func (c questContext) plannedWithin(months int) money.Money {
+	today := time.Date(c.Now.Year(), c.Now.Month(), c.Now.Day(), 0, 0, 0, 0, time.UTC)
 	cutoff := c.Now.AddDate(0, months, 0)
 	var total money.Money
 	for _, e := range c.Planned {
-		if e.TargetDate.Before(cutoff) {
+		if !e.TargetDate.Before(today) && e.TargetDate.Before(cutoff) {
 			total += e.Amount
 		}
 	}

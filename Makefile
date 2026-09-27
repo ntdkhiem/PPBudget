@@ -18,6 +18,9 @@ test:
 test-integration:
 	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test -count=1 -run Integration ./internal/...
 
+# The API applies pending migrations itself when it starts (see
+# internal/db/migrate.go); these targets are for doing it by hand, e.g. with
+# MIGRATE_ON_START=false. Both keep their place in the same schema_migrations table.
 migrate-up:
 	migrate -path internal/db/migrations -database "postgres://ppbudget:ppbudget_password@localhost:5432/ppbudget?sslmode=disable" up
 

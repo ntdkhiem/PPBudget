@@ -42,13 +42,13 @@ const ELSEWHERE: Record<string, { text: string; href: string; cta: string }> = {
   },
   paystub_ytd: {
     text: "This needs the year-to-date figures from a recent paystub.",
-    href: "/wealth/profile",
-    cta: "Run setup again",
+    href: "/wealth/profile#paystub",
+    cta: "Enter a paystub",
   },
   account_apr: {
     text: "This needs the interest rate on each balance.",
-    href: "/wealth/profile",
-    cta: "Run setup again",
+    href: "/accounts",
+    cta: "Add rates on the Accounts page",
   },
   espp_terms: {
     text: "This needs your ESPP discount, contribution rate and plan maximum.",

@@ -205,6 +205,41 @@ export interface FundingStage {
 }
 
 /**
+ * One goal on the server's schedule: funded from the surplus once phase 1 is
+ * paid for, in the user's order, with the first goal taking whatever is left
+ * over in the crossover month.
+ */
+export interface GoalStage {
+  goal_id: string;
+  name: string;
+  target: number;
+  /** The linked account's balance, or the amount kept by hand. */
+  current: number;
+  remaining: number;
+  target_date: string | null;
+  /** Null when the surplus never finishes this goal; zero months once funded. */
+  starts_in_months: number | null;
+  months_to_complete: number | null;
+  /** First day of the month it is funded, in UTC. */
+  completes_on: string | null;
+  /** Dated goals only: whether the queue funds it by the month of its date. */
+  on_track: boolean | null;
+  /** Dated goals only: what a month from now would take on its own. */
+  required_monthly: number | null;
+}
+
+/**
+ * A one-off cost the user can see coming. For the next twelve months the plan
+ * holds it back from the emergency fund and from any cash it tells you to move.
+ */
+export interface PlannedExpense {
+  id: string;
+  label: string;
+  amount: number;
+  target_date: string;
+}
+
+/**
  * The figures every wealth surface needs in common, served alongside the action
  * list so the client stops computing a baseline of its own.
  */
@@ -227,6 +262,10 @@ export interface PlanSummary {
   /** First day of that month, in UTC; null when never, or when there is nothing to fund. */
   crossover_on: string | null;
   funding: FundingStage[];
+  /** The user's goals, continuing the same schedule past the crossover. */
+  goals: GoalStage[];
+  /** Cash held back for planned expenses due in the next twelve months. */
+  earmarked: number;
   /** The independence number, built on this much spending a year. 0 without spending. */
   fi_target: number;
   fi_annual_spend: number;
@@ -312,6 +351,7 @@ const QUESTS_KEY = ["wealth", "quests"] as const;
 const DERIVED_KEY = ["wealth", "derived"] as const;
 const FIELDS_KEY = ["wealth", "fields"] as const;
 const GOALS_KEY = ["wealth", "goals"] as const;
+const PLANNED_KEY = ["wealth", "planned-expenses"] as const;
 const RETIREMENT_ACCOUNTS_KEY = ["wealth", "retirement-accounts"] as const;
 const GRANTS_KEY = ["wealth", "equity-grants"] as const;
 
@@ -465,10 +505,24 @@ export function useSaveGoal() {
     mutationFn: (goal: Partial<Goal> & { name: string; target_amount: number }) =>
       apiFetch<{ id: string }>(
         goal.id ? `/wealth/goals/${goal.id}` : "/wealth/goals",
-        { method: goal.id ? "PUT" : "POST", body: JSON.stringify(goal) },
+        {
+          method: goal.id ? "PUT" : "POST",
+          // A date input gives yyyy-mm-dd, and the server reads timestamps:
+          // sent as it was, every dated goal was refused as an invalid payload.
+          body: JSON.stringify({
+            ...goal,
+            target_date: /^\d{4}-\d{2}-\d{2}$/.test(goal.target_date ?? "")
+              ? `${goal.target_date}T00:00:00Z`
+              : goal.target_date,
+          }),
+        },
         getStoredToken(),
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: GOALS_KEY }),
+    // The schedule that dates each goal comes with the action list.
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: GOALS_KEY });
+      queryClient.invalidateQueries({ queryKey: QUESTS_KEY });
+    },
   });
 }
 
@@ -478,7 +532,58 @@ export function useDeleteGoal() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch(`/wealth/goals/${id}`, { method: "DELETE" }, getStoredToken()),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: GOALS_KEY }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: GOALS_KEY });
+      queryClient.invalidateQueries({ queryKey: QUESTS_KEY });
+    },
+  });
+}
+
+export function usePlannedExpenses() {
+  return useQuery<PlannedExpense[]>({
+    queryKey: PLANNED_KEY,
+    queryFn: async () => {
+      const res = await apiFetch<{ expenses: PlannedExpense[] | null }>(
+        "/wealth/planned-expenses",
+        {},
+        getStoredToken(),
+      );
+      return res.expenses ?? [];
+    },
+  });
+}
+
+/**
+ * Creates or updates a planned expense. The action list is refetched too:
+ * earmarked cash moves the emergency fund's gap and every sweep.
+ */
+export function useSavePlannedExpense() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (e: Omit<PlannedExpense, "id"> & { id?: string }) =>
+      apiFetch<{ id: string }>(
+        e.id ? `/wealth/planned-expenses/${e.id}` : "/wealth/planned-expenses",
+        { method: e.id ? "PUT" : "POST", body: JSON.stringify(e) },
+        getStoredToken(),
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PLANNED_KEY });
+      queryClient.invalidateQueries({ queryKey: QUESTS_KEY });
+    },
+  });
+}
+
+export function useDeletePlannedExpense() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/wealth/planned-expenses/${id}`, { method: "DELETE" }, getStoredToken()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PLANNED_KEY });
+      queryClient.invalidateQueries({ queryKey: QUESTS_KEY });
+    },
   });
 }
 
