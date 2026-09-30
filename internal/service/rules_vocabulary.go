@@ -38,7 +38,15 @@ const (
 	ActionSetCategory        = "set_category"
 	ActionSetAccount         = "set_account"
 	ActionLinkToSubscription = "link_to_subscription"
+	// ActionCountTowardNextMonth moves a transaction that posts in the last N
+	// days of a month (N is the value) to count toward the next -- rent paid a
+	// few days early. One that posts earlier in the month is left alone.
+	ActionCountTowardNextMonth = "count_toward_next_month"
 )
+
+// MaxCountTowardDays bounds count_toward_next_month's window. Past ten days a
+// payment is not early for next month so much as on time for this one.
+const MaxCountTowardDays = 10
 
 // Direction values, for FieldDirection conditions.
 const (
@@ -67,9 +75,10 @@ var fieldOperators = map[string][]string{
 }
 
 var validActionTypes = map[string]bool{
-	ActionSetCategory:        true,
-	ActionSetAccount:         true,
-	ActionLinkToSubscription: true,
+	ActionSetCategory:          true,
+	ActionSetAccount:           true,
+	ActionLinkToSubscription:   true,
+	ActionCountTowardNextMonth: true,
 }
 
 // operatorValidForField reports whether operator may be used with field.

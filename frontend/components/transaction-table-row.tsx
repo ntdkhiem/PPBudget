@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { Transaction, Category, Account } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { countsTowardLabel } from "@/lib/budget-month";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -111,6 +112,13 @@ export const TransactionTableRow = memo(function TransactionTableRow({
       )}
       <TableCell className="py-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
         {formatDate(txn.date)}
+        {/* The posted date is the bank's; when the transaction counts toward
+            another month, say so, or the budget and the ledger look at odds. */}
+        {countsTowardLabel(txn.date, txn.budget_month) && (
+          <div className="mt-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">
+            {countsTowardLabel(txn.date, txn.budget_month)}
+          </div>
+        )}
       </TableCell>
       {showAccount && (
         <TableCell className="py-4 text-slate-600 dark:text-slate-300 max-w-[150px]" title={accountName}>

@@ -70,7 +70,9 @@ func (r *Repository) planningCashflow(ctx context.Context, userID string, months
 		),
 		effective AS (
 			SELECT
-				date_trunc('month', t.date)::date AS month_start,
+				-- Bucketed by the month each transaction counts toward, so rent
+				-- paid a few days early lands in the month it pays for.
+				date_trunc('month', t.effective_date)::date AS month_start,
 				t.category_id,
 				(t.amount
 				 - COALESCE((SELECT SUM(l.amount) FROM transaction_links l WHERE l.source_transaction_id = t.id), 0)
@@ -81,8 +83,8 @@ func (r *Repository) planningCashflow(ctx context.Context, userID string, months
 			WHERE t.user_id = $1
 			  AND t.deleted_at IS NULL
 			  AND (c.type IS NULL OR c.type <> 'transfer')
-			  AND t.date >= (SELECT MIN(month_start) FROM months)
-			  AND t.date <= (SELECT MAX(month_end) FROM months)
+			  AND t.effective_date >= (SELECT MIN(month_start) FROM months)
+			  AND t.effective_date <= (SELECT MAX(month_end) FROM months)
 		),
 		bucketed AS (
 			SELECT

@@ -84,7 +84,16 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	txnType := r.URL.Query().Get("type")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 
+	// date_basis=budget bounds the range by the month each transaction counts
+	// toward instead of the day it posted.
+	dateBasis := r.URL.Query().Get("date_basis")
+	if dateBasis != "" && dateBasis != domain.DateBasisPosted && dateBasis != domain.DateBasisBudget {
+		writeError(w, http.StatusBadRequest, "date_basis must be posted or budget")
+		return
+	}
+
 	filter := domain.TransactionFilter{
+		DateBasis:      dateBasis,
 		Limit:          limit,
 		UserID:         userID,
 		AccountID:      accountID,
@@ -891,6 +900,28 @@ func (h *Handler) BulkUpdateTransactionsCategory(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// parseBudgetMonth reads an update's budget_month: absent means no change,
+// null means the transaction's own month, and "2026-10" or "2026-10-01" names
+// a month. Any day is read as its month.
+func parseBudgetMonth(raw json.RawMessage) (domain.BudgetMonthChange, error) {
+	if len(raw) == 0 {
+		return domain.BudgetMonthChange{}, nil
+	}
+	if string(raw) == "null" {
+		return domain.BudgetMonthChange{Set: true}, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return domain.BudgetMonthChange{}, errors.New("budget_month must be a month like 2026-10, or null")
+	}
+	for _, layout := range []string{"2006-01", "2006-01-02"} {
+		if m, err := time.Parse(layout, s); err == nil {
+			return domain.BudgetMonthChange{Set: true, Month: &m}, nil
+		}
+	}
+	return domain.BudgetMonthChange{}, errors.New("budget_month must be a month like 2026-10, or null")
+}
+
 func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok || userID == "" {
@@ -914,6 +945,9 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		SubscriptionID *string                  `json:"subscription_id"`
 		PaysFor        []domain.TransactionLink `json:"pays_for"`
 		PaidBy         []domain.TransactionLink `json:"paid_by"`
+		// Raw so an absent field can be told from a null one: absent leaves
+		// the month the transaction counts toward alone, null clears it.
+		BudgetMonth json.RawMessage `json:"budget_month"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid payload")
@@ -926,7 +960,13 @@ func (h *Handler) UpdateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.UpdateTransaction(r.Context(), userID, id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID, body.PaysFor, body.PaidBy)
+	budgetMonth, err := parseBudgetMonth(body.BudgetMonth)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	err = h.svc.UpdateTransaction(r.Context(), userID, id, body.AccountID, body.Amount, date, body.Description, body.Notes, body.CategoryID, body.SubscriptionID, body.PaysFor, body.PaidBy, budgetMonth)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")

@@ -6,6 +6,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiFetch, Transaction, Category } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { countsTowardLabel } from "@/lib/budget-month";
 import { format, parseISO } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -210,6 +211,11 @@ export default function ReviewPage() {
                           </p>
                           <p className="text-sm text-slate-500">
                             {formatDate(txn.date)}
+                            {countsTowardLabel(txn.date, txn.budget_month) && (
+                              <span className="ml-2 text-xs font-medium text-indigo-600 dark:text-indigo-400">
+                                {countsTowardLabel(txn.date, txn.budget_month)}
+                              </span>
+                            )}
                           </p>
                         </div>
                         

@@ -36,6 +36,7 @@ export const ACTION_LABELS: Record<RuleActionType, string> = {
   set_category: "Set Category",
   set_account: "Move to Account",
   link_to_subscription: "Link to Subscription",
+  count_toward_next_month: "Count Toward Next Month",
 };
 
 /** Short labels for the compact badges on rule cards. */
@@ -43,7 +44,14 @@ export const ACTION_SHORT_LABELS: Record<RuleActionType, string> = {
   set_category: "Category",
   set_account: "Account",
   link_to_subscription: "Subscription",
+  count_toward_next_month: "Next month",
 };
+
+/**
+ * count_toward_next_month's value is a day window: a payment posted in the
+ * last N days of a month counts toward the next. Mirrors MaxCountTowardDays.
+ */
+export const MAX_COUNT_TOWARD_DAYS = 10;
 
 export const DIRECTION_LABELS = {
   inflow: "Inflow (money in)",
@@ -113,6 +121,12 @@ export function validateRuleDraft(
     const where = `Action ${i + 1}`;
     if (!a.action_type) return `${where}: pick an action.`;
     if (!a.value?.trim()) return `${where}: choose a value.`;
+    if (a.action_type === "count_toward_next_month") {
+      const days = Number(a.value);
+      if (!Number.isInteger(days) || days < 1 || days > MAX_COUNT_TOWARD_DAYS) {
+        return `${where}: enter a number of days from 1 to ${MAX_COUNT_TOWARD_DAYS}.`;
+      }
+    }
   }
 
   return null;

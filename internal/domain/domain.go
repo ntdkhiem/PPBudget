@@ -91,12 +91,17 @@ const (
 )
 
 type Transaction struct {
-	ID                 string            `json:"id"`
-	UserID             string            `json:"user_id"`
-	AccountID          string            `json:"account_id"`
-	CategoryID         *string           `json:"category_id,omitempty"`
-	Amount             money.Money       `json:"amount"`
-	Date               time.Time         `json:"date"`
+	ID         string      `json:"id"`
+	UserID     string      `json:"user_id"`
+	AccountID  string      `json:"account_id"`
+	CategoryID *string     `json:"category_id,omitempty"`
+	Amount     money.Money `json:"amount"`
+	Date       time.Time   `json:"date"`
+	// BudgetMonth is the first of the month the transaction counts toward,
+	// when that is not the month it posted -- rent paid a few days early.
+	// Nil means its own month. Spending by period follows it; the ledger and
+	// balances keep Date.
+	BudgetMonth        *time.Time        `json:"budget_month,omitempty"`
 	Description        string            `json:"description"`
 	Notes              *string           `json:"notes,omitempty"`
 	IsReviewed         bool              `json:"is_reviewed"`
@@ -117,6 +122,17 @@ type TransactionRuleUpdate struct {
 	CategoryID     *string
 	SubscriptionID *string
 	AccountID      string
+	// BudgetMonth is written as given: the transaction's current value when
+	// no rule moved it.
+	BudgetMonth *time.Time
+}
+
+// BudgetMonthChange is an edit to a transaction's budget month. Set false
+// leaves it as it is, so a client that does not know the field cannot clear
+// it; Set with a nil Month returns the transaction to its own month.
+type BudgetMonthChange struct {
+	Set   bool
+	Month *time.Time
 }
 
 type TransactionLink struct {

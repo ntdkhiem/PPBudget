@@ -10,6 +10,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Loader2, Link, Check, ChevronsUpDown, X, Wand2 } from "lucide-react";
 import { Account, Category, Subscription, Transaction } from "@/lib/api";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
+import { budgetMonthOffset, monthLabel, shiftedMonth } from "@/lib/budget-month";
 
 function AllocationAmountInput({ amount, maxAllowed, onChange }: { amount: number, maxAllowed?: number, onChange: (amount: number) => void }) {
   const [inputValue, setInputValue] = useState(amount ? (amount / 100).toString() : '');
@@ -191,6 +192,61 @@ function TransactionAllocationList({
 }
 
 
+/**
+ * The posted date, and the month the transaction counts toward.
+ *
+ * Rent paid on the 28th for next month posts this month; moving the date to
+ * fix the budget made the ledger disagree with the bank. The month here moves
+ * only the counting. It is chosen relative to the date, so correcting the
+ * date keeps "next month" meaning next month, and it submits as a hidden
+ * budgetMonth field: yyyy-mm, or empty for its own month.
+ */
+function DateAndCountsToward({ txn }: { txn: Transaction }) {
+  const [posted, setPosted] = useState(txn.date.split("T")[0]);
+  const [offset, setOffset] = useState(() => budgetMonthOffset(txn.date, txn.budget_month));
+  // A transaction already moved further than a month keeps that option.
+  const offsets = Array.from(new Set([-1, 0, 1, offset])).sort((a, b) => a - b);
+  const describe = (o: number) =>
+    o === 0
+      ? `Its own month (${monthLabel(posted, 0)})`
+      : o === 1
+        ? `Next month (${monthLabel(posted, 1)})`
+        : o === -1
+          ? `Previous month (${monthLabel(posted, -1)})`
+          : monthLabel(posted, o);
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="editDate" className="text-slate-700 dark:text-slate-300 text-lg">Date</Label>
+      <Input
+        id="editDate"
+        name="date"
+        type="date"
+        required
+        value={posted}
+        onChange={(e) => setPosted(e.target.value)}
+        className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg"
+      />
+      <div className="flex items-center gap-2 pt-1">
+        <Label htmlFor="editCountsToward" className="shrink-0 text-sm text-slate-500 dark:text-slate-400">
+          Counts toward
+        </Label>
+        <Select value={String(offset)} onValueChange={(v) => setOffset(Number(v))}>
+          <SelectTrigger id="editCountsToward" className="h-9 rounded-lg border-slate-200 dark:border-slate-700 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
+            {offsets.map((o) => (
+              <SelectItem key={o} value={String(o)}>{describe(o)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <input type="hidden" name="budgetMonth" value={posted && offset !== 0 ? shiftedMonth(posted, offset) : ""} />
+    </div>
+  );
+}
+
 interface EditTransactionDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -269,10 +325,7 @@ export default function EditTransactionDialog({
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="editDate" className="text-slate-700 dark:text-slate-300 text-lg">Date</Label>
-                    <Input id="editDate" name="date" type="date" required defaultValue={selectedTxn.date.split("T")[0]} className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg" />
-                  </div>
+                  <DateAndCountsToward key={selectedTxn.id} txn={selectedTxn} />
                   <div className="space-y-2 md:col-span-2">
                     <Label htmlFor="editDescription" className="text-slate-700 dark:text-slate-300 text-lg">Description</Label>
                     <Input id="editDescription" name="description" required defaultValue={selectedTxn.description} className="rounded-xl border-slate-200 dark:border-slate-700 focus:ring-indigo-500 h-14 text-lg" />

@@ -25,6 +25,7 @@ import {
   ACTION_LABELS,
   ACTION_SHORT_LABELS,
   DIRECTION_LABELS,
+  MAX_COUNT_TOWARD_DAYS,
   MAX_REGEX_LENGTH,
   RULE_FIELDS,
   RULE_ACTION_TYPES,
@@ -32,6 +33,7 @@ import {
   validateRuleDraft,
 } from "@/lib/rules-vocabulary";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { countsTowardLabel } from "@/lib/budget-month";
 import {
   Plus, Trash2, Edit2, Zap, Filter, Save, PlusCircle, ArrowRight, Check,
   AlertTriangle, Eye, Power, Loader2,
@@ -388,6 +390,8 @@ function RulesContent() {
         return accounts?.find((ac) => ac.id === a.value)?.name || a.value;
       case "link_to_subscription":
         return subscriptions?.find((s) => s.id === a.value)?.name || a.value;
+      case "count_toward_next_month":
+        return `if paid in the last ${a.value} day${a.value === "1" ? "" : "s"} of the month`;
       default:
         return a.value;
     }
@@ -841,6 +845,25 @@ function RulesContent() {
                       </SelectContent>
                     </Select>
 
+                    {act.action_type === "count_toward_next_month" ? (
+                      // A day window rather than a pick: rent posted in the last
+                      // N days of a month counts toward the next one.
+                      <div className="flex flex-1 items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                        <span className="shrink-0">if paid in the last</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={MAX_COUNT_TOWARD_DAYS}
+                          inputMode="numeric"
+                          aria-label="Days before the end of the month"
+                          value={act.value}
+                          onChange={(e) => updateAction(act.key, { value: e.target.value })}
+                          placeholder="5"
+                          className="w-20 bg-white dark:bg-slate-900"
+                        />
+                        <span className="shrink-0">days of the month</span>
+                      </div>
+                    ) : (
                     <Select
                       value={act.value}
                       onValueChange={(v) => updateAction(act.key, { value: v })}
@@ -876,6 +899,7 @@ function RulesContent() {
                             ))}
                       </SelectContent>
                     </Select>
+                    )}
 
                     <Button
                       variant="ghost"
@@ -1077,7 +1101,15 @@ function RulesContent() {
                                   <div className="truncate font-medium text-slate-700 dark:text-slate-200">
                                     {s.description}
                                   </div>
-                                  <div className="text-slate-400">{formatDate(s.date)}</div>
+                                  <div className="text-slate-400">
+                                    {formatDate(s.date)}
+                                    {s.new_budget_month !== s.current_budget_month &&
+                                      countsTowardLabel(s.date, s.new_budget_month) && (
+                                        <span className="ml-1.5 font-semibold text-indigo-600 dark:text-indigo-400">
+                                          → {countsTowardLabel(s.date, s.new_budget_month)}
+                                        </span>
+                                      )}
+                                  </div>
                                 </div>
                                 <div className="shrink-0 tabular-nums text-slate-500">
                                   {formatCurrency(s.amount)}

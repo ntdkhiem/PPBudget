@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
@@ -14,20 +16,23 @@ type ruleChange struct {
 	categoryID     *string
 	subscriptionID *string
 	accountID      string
+	budgetMonth    *time.Time
 }
 
 // RulePreviewSample is one before/after row shown in the preview dialog.
 type RulePreviewSample struct {
-	ID                string    `json:"id"`
-	Date              time.Time `json:"date"`
-	Description       string    `json:"description"`
-	Amount            int64     `json:"amount"`
-	CurrentCategoryID *string   `json:"current_category_id"`
-	NewCategoryID     *string   `json:"new_category_id"`
-	CurrentAccountID  string    `json:"current_account_id"`
-	NewAccountID      string    `json:"new_account_id"`
-	CurrentSubID      *string   `json:"current_subscription_id"`
-	NewSubID          *string   `json:"new_subscription_id"`
+	ID                 string     `json:"id"`
+	Date               time.Time  `json:"date"`
+	Description        string     `json:"description"`
+	Amount             int64      `json:"amount"`
+	CurrentCategoryID  *string    `json:"current_category_id"`
+	NewCategoryID      *string    `json:"new_category_id"`
+	CurrentAccountID   string     `json:"current_account_id"`
+	NewAccountID       string     `json:"new_account_id"`
+	CurrentSubID       *string    `json:"current_subscription_id"`
+	NewSubID           *string    `json:"new_subscription_id"`
+	CurrentBudgetMonth *time.Time `json:"current_budget_month"`
+	NewBudgetMonth     *time.Time `json:"new_budget_month"`
 }
 
 // RulePreview is the result of a dry run.
@@ -57,6 +62,7 @@ func (s *Service) evaluateRules(rules []domain.Rule, txns []domain.Transaction) 
 			categoryID:     t.CategoryID,
 			subscriptionID: t.SubscriptionID,
 			accountID:      t.AccountID,
+			budgetMonth:    t.BudgetMonth,
 		}
 		matched := false
 
@@ -81,6 +87,14 @@ func (s *Service) evaluateRules(rules []domain.Rule, txns []domain.Transaction) 
 				case ActionLinkToSubscription:
 					v := act.Value
 					pending.subscriptionID = &v
+				case ActionCountTowardNextMonth:
+					// Only a late-month posting moves; one earlier in the month was
+					// paid on time for its own month and keeps whatever it has.
+					if days, err := strconv.Atoi(strings.TrimSpace(act.Value)); err == nil {
+						if next := nextMonthIfLate(t.Date, days); next != nil {
+							pending.budgetMonth = next
+						}
+					}
 				}
 			}
 		}
@@ -100,7 +114,16 @@ func (s *Service) evaluateRules(rules []domain.Rule, txns []domain.Transaction) 
 func changedFrom(t domain.Transaction, c ruleChange) bool {
 	return !samePtr(t.CategoryID, c.categoryID) ||
 		!samePtr(t.SubscriptionID, c.subscriptionID) ||
-		t.AccountID != c.accountID
+		t.AccountID != c.accountID ||
+		!sameMonth(t.BudgetMonth, c.budgetMonth)
+}
+
+// sameMonth compares two optional budget months by calendar month.
+func sameMonth(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Year() == b.Year() && a.Month() == b.Month()
 }
 
 func samePtr(a, b *string) bool {
@@ -151,6 +174,7 @@ func (s *Service) ApplyRules(ctx context.Context, userID string, rules []domain.
 			CategoryID:     c.categoryID,
 			SubscriptionID: c.subscriptionID,
 			AccountID:      c.accountID,
+			BudgetMonth:    c.budgetMonth,
 		})
 	}
 
@@ -244,16 +268,18 @@ func (s *Service) PreviewRule(ctx context.Context, userID string, rule *domain.R
 			break
 		}
 		preview.Samples = append(preview.Samples, RulePreviewSample{
-			ID:                c.txn.ID,
-			Date:              c.txn.Date,
-			Description:       c.txn.Description,
-			Amount:            c.txn.Amount.ToInt64(),
-			CurrentCategoryID: c.txn.CategoryID,
-			NewCategoryID:     c.categoryID,
-			CurrentAccountID:  c.txn.AccountID,
-			NewAccountID:      c.accountID,
-			CurrentSubID:      c.txn.SubscriptionID,
-			NewSubID:          c.subscriptionID,
+			ID:                 c.txn.ID,
+			Date:               c.txn.Date,
+			Description:        c.txn.Description,
+			Amount:             c.txn.Amount.ToInt64(),
+			CurrentCategoryID:  c.txn.CategoryID,
+			NewCategoryID:      c.categoryID,
+			CurrentAccountID:   c.txn.AccountID,
+			NewAccountID:       c.accountID,
+			CurrentSubID:       c.txn.SubscriptionID,
+			NewSubID:           c.subscriptionID,
+			CurrentBudgetMonth: c.txn.BudgetMonth,
+			NewBudgetMonth:     c.budgetMonth,
 		})
 	}
 

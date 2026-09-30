@@ -92,6 +92,8 @@ export interface Transaction {
   account_id: string;
   amount: number; // cents
   date: string;
+  /** First of the month it counts toward, when not the month it posted. */
+  budget_month?: string | null;
   description: string;
   notes?: string | null;
   is_reviewed: boolean;
@@ -127,7 +129,11 @@ export type RuleOperator =
   | "less_than"
   | "not_equals";
 
-export type RuleActionType = "set_category" | "set_account" | "link_to_subscription";
+export type RuleActionType =
+  | "set_category"
+  | "set_account"
+  | "link_to_subscription"
+  | "count_toward_next_month";
 
 export interface RuleCondition {
   id?: string;
@@ -155,6 +161,8 @@ export interface RulePreviewSample {
   new_account_id: string;
   current_subscription_id: string | null;
   new_subscription_id: string | null;
+  current_budget_month: string | null;
+  new_budget_month: string | null;
 }
 
 export interface RulePreview {

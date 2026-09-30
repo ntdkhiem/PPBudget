@@ -98,6 +98,10 @@ export default function AccountDetailPage() {
       toast.success("Transaction updated successfully");
       setIsEditOpen(false);
       invalidateBalances();
+      // The month it counts toward moves budgets, reports and the plan.
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["wealth"] });
     },
   });
 
@@ -162,6 +166,8 @@ export default function AccountDetailPage() {
       subscription_id: formData.get("subscriptionId") === "none" ? null : formData.get("subscriptionId") || null,
       pays_for: paysFor,
       paid_by: paidBy,
+      // Empty means its own month, which the server stores as none.
+      budget_month: formData.get("budgetMonth") || null,
     });
   };
 

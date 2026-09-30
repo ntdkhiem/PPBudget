@@ -360,3 +360,49 @@ func TestApplyRuleRejectsInvalidIntegration(t *testing.T) {
 		t.Errorf("an invalid rule was stored anyway (%d rows)", count)
 	}
 }
+
+// A count-toward rule writes the budget month for rent posted in the last
+// days of a month, leaves an on-time payment alone, and does nothing on a
+// second run.
+func TestApplyCountTowardNextMonthIntegration(t *testing.T) {
+	pool := sfSetupTestDB(t)
+	ctx := context.Background()
+	svc := newRulesTestService(pool)
+
+	userID := sfCreateTestUser(t, pool)
+	account := mkAccount(t, pool, userID, "Checking")
+	late := mkTxn(t, pool, userID, account, -250000, "2026-06-28", "RENT - OAK APTS")
+	onTime := mkTxn(t, pool, userID, account, -250000, "2026-08-01", "RENT - OAK APTS")
+
+	rule := mkRule(t, svc, userID, "Rent", 0, true,
+		[]domain.RuleCondition{cond(FieldDescription, OpContains, "rent")},
+		[]domain.RuleAction{{ActionType: ActionCountTowardNextMonth, Value: "5"}},
+	)
+
+	updated, err := svc.ApplyRule(ctx, userID, rule.ID, true, nil, nil)
+	if err != nil {
+		t.Fatalf("ApplyRule: %v", err)
+	}
+	if updated != 1 {
+		t.Errorf("updated_count = %d, want 1", updated)
+	}
+
+	budgetMonth := func(id string) *time.Time {
+		t.Helper()
+		var m *time.Time
+		if err := pool.QueryRow(ctx, `SELECT budget_month FROM transactions WHERE id = $1`, id).Scan(&m); err != nil {
+			t.Fatalf("read budget_month: %v", err)
+		}
+		return m
+	}
+	if m := budgetMonth(late); m == nil || m.Format("2006-01-02") != "2026-07-01" {
+		t.Errorf("late rent: budget month %v, want 2026-07-01", m)
+	}
+	if m := budgetMonth(onTime); m != nil {
+		t.Errorf("on-time rent should be left alone; got %v", m)
+	}
+
+	if again, err := svc.ApplyRule(ctx, userID, rule.ID, true, nil, nil); err != nil || again != 0 {
+		t.Errorf("re-applying: updated %d, err %v; want 0", again, err)
+	}
+}

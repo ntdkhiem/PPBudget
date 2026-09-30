@@ -159,8 +159,15 @@ func (s *Service) BulkUpdateTransactionsCategory(ctx context.Context, userID str
 	return s.repo.BulkUpdateTransactionsCategory(ctx, userID, ids, categoryID)
 }
 
-func (s *Service) UpdateTransaction(ctx context.Context, userID, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink) error {
-	return s.repo.UpdateTransaction(ctx, userID, id, accountID, amount, date, description, notes, categoryID, subscriptionID, paysFor, paidBy)
+func (s *Service) UpdateTransaction(ctx context.Context, userID, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink, budgetMonth domain.BudgetMonthChange) error {
+	if budgetMonth.Set {
+		month, err := budgetMonthFor(date, budgetMonth.Month)
+		if err != nil {
+			return err
+		}
+		budgetMonth.Month = month
+	}
+	return s.repo.UpdateTransaction(ctx, userID, id, accountID, amount, date, description, notes, categoryID, subscriptionID, paysFor, paidBy, budgetMonth)
 }
 
 // Reports

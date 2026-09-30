@@ -9,7 +9,7 @@ import (
 func (r *Repository) SearchTransactions(ctx context.Context, userID string, query string, limit int) ([]domain.Transaction, error) {
 	q := `
         SELECT 
-            t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
+            t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.budget_month, t.description, 
             t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id, a.simplefin_id as simplefin_account_id
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
@@ -34,7 +34,7 @@ func (r *Repository) SearchTransactions(ctx context.Context, userID string, quer
 		var subID *string
 
 		err := rows.Scan(
-			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
+			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.BudgetMonth, &t.Description,
 			&notes, &t.IsReviewed, &t.IsReconciled, &subID, &sfAccountID,
 		)
 		if err != nil {

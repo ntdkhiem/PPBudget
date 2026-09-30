@@ -1045,7 +1045,7 @@ func TestBalanceOnlyTransactionGuardIntegration(t *testing.T) {
 	}
 
 	txnID := insertTxn(t, pool, userID, normalID, 2000, "2025-01-11", "to move")
-	if err := repo.UpdateTransaction(ctx, userID, txnID, boID, 2000, date, "moved", nil, nil, nil, nil, nil); !errors.Is(err, apperrors.ErrInvalidInput) {
+	if err := repo.UpdateTransaction(ctx, userID, txnID, boID, 2000, date, "moved", nil, nil, nil, nil, nil, domain.BudgetMonthChange{}); !errors.Is(err, apperrors.ErrInvalidInput) {
 		t.Errorf("UpdateTransaction(move into balance-only) error = %v, want ErrInvalidInput", err)
 	}
 	var accountID string
@@ -1056,7 +1056,7 @@ func TestBalanceOnlyTransactionGuardIntegration(t *testing.T) {
 		t.Errorf("txn account = %s, want unchanged %s", accountID, normalID)
 	}
 
-	if err := repo.UpdateTransaction(ctx, userID, txnID, normalID, 2500, date, "edited", nil, nil, nil, nil, nil); err != nil {
+	if err := repo.UpdateTransaction(ctx, userID, txnID, normalID, 2500, date, "edited", nil, nil, nil, nil, nil, domain.BudgetMonthChange{}); err != nil {
 		t.Errorf("UpdateTransaction(normal): %v", err)
 	}
 	if got := countLiveTxns(t, pool, normalID); got != 2 {

@@ -33,6 +33,9 @@ function SubscriptionsContent() {
     const params = new URLSearchParams();
     if (date?.from) params.append("start_date", format(date.from, "yyyy-MM-dd"));
     if (date?.to) params.append("end_date", format(date.to, "yyyy-MM-dd"));
+    // "Paid for this period" follows the month a payment counts toward, so
+    // rent paid on 28 September still marks October as paid.
+    params.append("date_basis", "budget");
     return params.toString();
   }, [date]);
 

@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
@@ -114,6 +115,12 @@ func validateAction(a domain.RuleAction) error {
 	}
 	if strings.TrimSpace(a.Value) == "" {
 		return fmt.Errorf("%w: action value is required", apperrors.ErrInvalidInput)
+	}
+	if a.ActionType == ActionCountTowardNextMonth {
+		if n, err := strconv.Atoi(strings.TrimSpace(a.Value)); err != nil || n < 1 || n > MaxCountTowardDays {
+			return fmt.Errorf("%w: count toward next month needs a number of days from 1 to %d",
+				apperrors.ErrInvalidInput, MaxCountTowardDays)
+		}
 	}
 	return nil
 }

@@ -130,7 +130,7 @@ func TestVocabularyMatchesFrontend(t *testing.T) {
 		FieldDescription, FieldAmount, FieldDirection, FieldAccount,
 		OpContains, OpNotContains, OpIsExactly, OpStartsWith, OpEndsWith,
 		OpMatchesRegex, OpGreaterThan, OpLessThan, OpNotEquals,
-		ActionSetCategory, ActionSetAccount, ActionLinkToSubscription,
+		ActionSetCategory, ActionSetAccount, ActionLinkToSubscription, ActionCountTowardNextMonth,
 		DirectionInflow, DirectionOutflow,
 	}
 	for _, v := range mustAppear {

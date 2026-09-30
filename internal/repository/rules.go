@@ -228,7 +228,7 @@ func (r *Repository) ApplyRuleUpdates(ctx context.Context, userID string, update
 
 	const query = `
 		UPDATE transactions t
-		SET category_id = $1, subscription_id = $2, account_id = $3, updated_at = NOW()
+		SET category_id = $1, subscription_id = $2, account_id = $3, budget_month = $6, updated_at = NOW()
 		FROM accounts a
 		WHERE t.id = $4 AND t.user_id = $5 AND t.deleted_at IS NULL
 		  AND a.id = $3 AND a.user_id = $5 AND a.balance_only = FALSE
@@ -239,7 +239,7 @@ func (r *Repository) ApplyRuleUpdates(ctx context.Context, userID string, update
 	updated := 0
 	batch := &pgx.Batch{}
 	for _, u := range updates {
-		batch.Queue(query, u.CategoryID, u.SubscriptionID, u.AccountID, u.ID, userID)
+		batch.Queue(query, u.CategoryID, u.SubscriptionID, u.AccountID, u.ID, userID, u.BudgetMonth)
 	}
 
 	br := tx.SendBatch(ctx, batch)

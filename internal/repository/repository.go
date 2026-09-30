@@ -139,7 +139,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 	// Base query
 	query := `
         SELECT 
-            t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
+            t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.budget_month, t.description, 
             t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id,
             (t.amount
              - COALESCE(pays_for_agg.total_amount, 0)
@@ -211,14 +211,21 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 		query += " AND t.is_reviewed = false"
 	}
 
+	// A range either bounds the posted date -- the ledger -- or the month each
+	// transaction counts toward, for "was this paid for October?".
+	dateCol := "t.date"
+	if f.DateBasis == domain.DateBasisBudget {
+		dateCol = "t.effective_date"
+	}
+
 	if f.StartDate != nil {
-		query += fmt.Sprintf(" AND t.date >= $%d", argID)
+		query += fmt.Sprintf(" AND %s >= $%d", dateCol, argID)
 		args = append(args, *f.StartDate)
 		argID++
 	}
 
 	if f.EndDate != nil {
-		query += fmt.Sprintf(" AND t.date <= $%d", argID)
+		query += fmt.Sprintf(" AND %s <= $%d", dateCol, argID)
 		args = append(args, *f.EndDate)
 		argID++
 	}
@@ -245,7 +252,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
             FROM (SELECT DISTINCT account_id, date FROM page) d
         )
         SELECT
-            p.id, p.user_id, p.account_id, p.category_id, p.amount, p.date, p.description,
+            p.id, p.user_id, p.account_id, p.category_id, p.amount, p.date, p.budget_month, p.description,
             p.notes, p.is_reviewed, p.is_reconciled, p.subscription_id,
             (db.balance - COALESCE((
                 SELECT SUM(x.amount)
@@ -284,7 +291,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 		var paidByJson []byte
 
 		err := rows.Scan(
-			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
+			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.BudgetMonth, &t.Description,
 			&notes, &t.IsReviewed, &t.IsReconciled, &subID,
 			&balance, &effectiveAmount, &paysForJson, &paidByJson,
 		)
@@ -314,7 +321,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 func (r *Repository) GetTransactionsByDateRange(ctx context.Context, userID string, startDate, endDate *time.Time) ([]domain.Transaction, error) {
 	query := `
         SELECT 
-            t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description, 
+            t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.budget_month, t.description, 
             t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id, a.simplefin_id as simplefin_account_id,
             (t.amount 
              - COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
@@ -369,7 +376,7 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, userID stri
 		var paidByJson []byte
 
 		err := rows.Scan(
-			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
+			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.BudgetMonth, &t.Description,
 			&notes, &t.IsReviewed, &t.IsReconciled, &subID, &sfAccountID,
 			&effectiveAmount, &paysForJson, &paidByJson,
 		)
@@ -702,7 +709,7 @@ func (r *Repository) BulkUpdateTransactionsCategory(ctx context.Context, userID 
 	return err
 }
 
-func (r *Repository) UpdateTransaction(ctx context.Context, userID, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink) error {
+func (r *Repository) UpdateTransaction(ctx context.Context, userID, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink, budgetMonth domain.BudgetMonthChange) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -737,6 +744,16 @@ func (r *Repository) UpdateTransaction(ctx context.Context, userID, id, accountI
 	}
 	if tag.RowsAffected() == 0 {
 		return apperrors.ErrNotFound
+	}
+
+	// Only when the edit names it: an edit from a screen that does not know
+	// the field leaves the month the transaction counts toward alone.
+	if budgetMonth.Set {
+		if _, err := tx.Exec(ctx,
+			`UPDATE transactions SET budget_month = $1 WHERE id = $2 AND user_id = $3`,
+			budgetMonth.Month, id, userID); err != nil {
+			return constraintError(err, "transaction")
+		}
 	}
 
 	if paysFor != nil {
@@ -846,7 +863,7 @@ func (r *Repository) GetSpendingByCategory(ctx context.Context, userID string, s
 				FROM transaction_links l
 				WHERE l.target_transaction_id = t.id
 			) paid_by_agg ON true
-			WHERE t.user_id = $1 AND t.date >= $2 AND t.date <= $3
+			WHERE t.user_id = $1 AND t.effective_date >= $2 AND t.effective_date <= $3
 			  AND t.deleted_at IS NULL
 			  AND (c.type IS NULL OR c.type != 'transfer')
 		)
@@ -904,7 +921,7 @@ func (r *Repository) GetReportsSummary(ctx context.Context, userID string, start
 				FROM transaction_links l
 				WHERE l.target_transaction_id = t.id
 			) paid_by_agg ON true
-			WHERE t.user_id = $1 AND t.date >= $2 AND t.date <= $3 
+			WHERE t.user_id = $1 AND t.effective_date >= $2 AND t.effective_date <= $3
 			  AND t.deleted_at IS NULL
 		)
 		SELECT 
@@ -938,7 +955,7 @@ func (r *Repository) GetReportsSummary(ctx context.Context, userID string, start
 			SELECT DISTINCT t.id, ABS(t.amount) as amount
 			FROM transactions t
 			JOIN subscriptions s ON t.subscription_id = s.id AND t.deleted_at IS NULL AND s.user_id = $1
-			WHERE t.user_id = $1 AND t.date >= $2 AND t.date <= $3 AND t.amount < 0
+			WHERE t.user_id = $1 AND t.effective_date >= $2 AND t.effective_date <= $3 AND t.amount < 0
 		)
 		SELECT COALESCE(SUM(amount), 0) FROM sub_payments
 	`
@@ -954,8 +971,8 @@ func (r *Repository) GetReportsSummary(ctx context.Context, userID string, start
 			SELECT b.id, COALESCE(SUM(ABS(t.amount)), 0) as spent_total
 			FROM budgets b
 			LEFT JOIN transactions t ON t.category_id = b.category_id 
-				AND t.date >= b.start_date 
-				AND t.date <= b.end_date
+				AND t.effective_date >= b.start_date
+				AND t.effective_date <= b.end_date
 				AND t.deleted_at IS NULL
 				AND t.user_id = $1
 			WHERE b.user_id = $1 AND b.start_date <= $3 AND b.end_date >= $2
@@ -994,7 +1011,7 @@ func (r *Repository) GetReportsSummary(ctx context.Context, userID string, start
 
 func (r *Repository) GetTransaction(ctx context.Context, userID, id string) (*domain.Transaction, error) {
 	q := `
-		SELECT t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.description,
+		SELECT t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.budget_month, t.description,
 		       t.is_reviewed, 
 		       t.is_reconciled, t.notes, t.subscription_id,
 		       a.simplefin_id as simplefin_account_id,
@@ -1039,7 +1056,7 @@ func (r *Repository) GetTransaction(ctx context.Context, userID, id string) (*do
 	var paysForJSON, paidByJSON []byte
 	var catID, notes, sfAccountID, subID *string
 	err := row.Scan(
-		&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.Description,
+		&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.BudgetMonth, &t.Description,
 		&t.IsReviewed, &t.IsReconciled,
 		&notes, &subID, &sfAccountID,
 		&effectiveAmount, &paysForJSON, &paidByJSON,

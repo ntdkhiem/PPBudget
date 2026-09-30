@@ -324,6 +324,9 @@ export default function TransactionsPage() {
       setIsEditOpen(false);
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["reports"] });
+      // The month it counts toward moves budgets and the plan's baseline.
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      queryClient.invalidateQueries({ queryKey: ["wealth"] });
     },
     onError: (err: any) => {
       toast.error(err.message || "Failed to update transaction");
@@ -367,6 +370,8 @@ export default function TransactionsPage() {
       category_id: formData.get("categoryId") || null,
       subscription_id: formData.get("subscriptionId") === "none" ? null : formData.get("subscriptionId") || null,
       pays_for: paysFor, paid_by: paidBy,
+      // Empty means its own month, which the server stores as none.
+      budget_month: formData.get("budgetMonth") || null,
     });
   };
 

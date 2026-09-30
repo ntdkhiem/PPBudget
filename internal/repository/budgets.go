@@ -123,8 +123,10 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, targe
 			SELECT 
 				t.id,
 				t.category_id,
-				t.date,
-				t.amount 
+				-- The month it counts toward, not the day it posted: rent paid
+				-- early belongs to the month it pays for.
+				t.effective_date AS date,
+				t.amount
 				- COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
 				+ COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0) as eff_amount
 			FROM transactions t
