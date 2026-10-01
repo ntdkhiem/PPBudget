@@ -2,13 +2,17 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"ntdkhiem/ppbudget-go/internal/config"
 	"ntdkhiem/ppbudget-go/internal/domain"
+	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 	"ntdkhiem/ppbudget-go/internal/repository"
 )
 
@@ -65,6 +69,32 @@ func (s *Service) UpdateCategory(ctx context.Context, userID, id, name, catType 
 
 func (s *Service) DeleteCategory(ctx context.Context, userID, id string) error {
 	return s.repo.DeleteCategory(ctx, userID, id)
+}
+
+// MergeCategories folds sourceIDs into targetID; see Repository.MergeCategories.
+// Duplicate source ids are ignored.
+func (s *Service) MergeCategories(ctx context.Context, userID, targetID string, sourceIDs []string) (domain.CategoryMergeResult, error) {
+	if _, err := uuid.Parse(targetID); err != nil {
+		return domain.CategoryMergeResult{}, apperrors.ErrNotFound
+	}
+	seen := make(map[string]bool, len(sourceIDs))
+	var sources []string
+	for _, id := range sourceIDs {
+		if _, err := uuid.Parse(id); err != nil {
+			return domain.CategoryMergeResult{}, fmt.Errorf("%w: %q is not a category id", apperrors.ErrInvalidInput, id)
+		}
+		if id == targetID {
+			return domain.CategoryMergeResult{}, fmt.Errorf("%w: a category cannot be merged into itself", apperrors.ErrInvalidInput)
+		}
+		if !seen[id] {
+			seen[id] = true
+			sources = append(sources, id)
+		}
+	}
+	if len(sources) == 0 {
+		return domain.CategoryMergeResult{}, fmt.Errorf("%w: choose at least one category to merge", apperrors.ErrInvalidInput)
+	}
+	return s.repo.MergeCategories(ctx, userID, targetID, sources)
 }
 
 func (s *Service) ListCategories(ctx context.Context, userID string) ([]domain.Category, error) {

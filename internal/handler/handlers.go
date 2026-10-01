@@ -484,6 +484,44 @@ func (h *Handler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// MergeCategories folds the categories in source_ids into the {id} category
+// and deletes them.
+func (h *Handler) MergeCategories(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+
+	var body struct {
+		SourceIDs []string `json:"source_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	res, err := h.svc.MergeCategories(r.Context(), userID, id, body.SourceIDs)
+	if err != nil {
+		switch {
+		case errors.Is(err, apperrors.ErrInvalidInput):
+			writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, apperrors.ErrNotFound):
+			writeError(w, http.StatusNotFound, "category not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to merge categories")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // --- Budgets ---
 
 func (h *Handler) CreateBudget(w http.ResponseWriter, r *http.Request) {

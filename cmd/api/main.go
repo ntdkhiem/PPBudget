@@ -194,6 +194,7 @@ func main() {
 			r.Post("/categories", h.CreateCategory)
 			r.Put("/categories/{id}", h.UpdateCategory)
 			r.Delete("/categories/{id}", h.DeleteCategory)
+			r.Post("/categories/{id}/merge", h.MergeCategories)
 
 			// Rules
 			r.Get("/rules", h.ListRules)

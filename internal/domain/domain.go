@@ -156,6 +156,16 @@ type Category struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+// CategoryMergeResult counts what a category merge repointed at the target.
+// Budgets is the number of source budget rows folded into the target's.
+type CategoryMergeResult struct {
+	Transactions      int64 `json:"transactions"`
+	Subscriptions     int64 `json:"subscriptions"`
+	RuleActions       int64 `json:"rule_actions"`
+	Budgets           int64 `json:"budgets"`
+	DeletedCategories int64 `json:"deleted_categories"`
+}
+
 type Rule struct {
 	ID          string          `json:"id"`
 	UserID      string          `json:"user_id"`

@@ -113,6 +113,15 @@ export interface Category {
   transaction_count?: number;
 }
 
+/** What POST /categories/{id}/merge repointed at the target. */
+export interface CategoryMergeResult {
+  transactions: number;
+  subscriptions: number;
+  rule_actions: number;
+  budgets: number;
+  deleted_categories: number;
+}
+
 // Canonical rules vocabulary. These strings must stay in sync with
 // internal/service/rules_vocabulary.go -- the Go test
 // TestVocabularyMatchesFrontend fails if they drift.

@@ -522,6 +522,131 @@ func (r *Repository) DeleteCategory(ctx context.Context, userID, id string) erro
 	return nil
 }
 
+// MergeCategories folds the source categories into the target and deletes them,
+// in one transaction. Everything that names a source by id moves to the target:
+// transactions (soft-deleted ones too, so a restore lands in the right place),
+// subscriptions and set_category rule actions. A source budget is added onto the
+// target's budget for the same period, or becomes the target's budget for a
+// period the target never budgeted, so the combined limit is the sum of the old
+// ones. The target keeps its own name, type and buckets.
+//
+// sourceIDs must be distinct and must not include targetID; the service checks.
+func (r *Repository) MergeCategories(ctx context.Context, userID, targetID string, sourceIDs []string) (domain.CategoryMergeResult, error) {
+	var res domain.CategoryMergeResult
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return res, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock every category involved so a concurrent edit or merge waits, and
+	// confirm they all belong to the user. A foreign id reads as not found.
+	allIDs := append([]string{targetID}, sourceIDs...)
+	var targetName string
+	var owned int
+	err = tx.QueryRow(ctx, `
+		WITH locked AS (
+			SELECT id, name FROM categories WHERE user_id = $1 AND id = ANY($2) FOR UPDATE
+		)
+		SELECT count(*), COALESCE(max(name) FILTER (WHERE id = $3), '') FROM locked`,
+		userID, allIDs, targetID,
+	).Scan(&owned, &targetName)
+	if err != nil {
+		return res, err
+	}
+	if owned != len(allIDs) {
+		return res, apperrors.ErrNotFound
+	}
+
+	err = tx.QueryRow(ctx, `
+		WITH moved AS (
+			UPDATE transactions SET category_id = $2
+			WHERE user_id = $1 AND category_id = ANY($3)
+			RETURNING deleted_at
+		)
+		SELECT count(*) FROM moved WHERE deleted_at IS NULL`,
+		userID, targetID, sourceIDs,
+	).Scan(&res.Transactions)
+	if err != nil {
+		return res, fmt.Errorf("move transactions: %w", err)
+	}
+
+	tag, err := tx.Exec(ctx,
+		`UPDATE subscriptions SET category_id = $2 WHERE user_id = $1 AND category_id = ANY($3)`,
+		userID, targetID, sourceIDs)
+	if err != nil {
+		return res, fmt.Errorf("move subscriptions: %w", err)
+	}
+	res.Subscriptions = tag.RowsAffected()
+
+	tag, err = tx.Exec(ctx, `
+		UPDATE rule_actions a SET value = $2
+		FROM rules r
+		WHERE a.rule_id = r.id AND r.user_id = $1
+		  AND a.action_type = 'set_category' AND a.value = ANY($3)`,
+		userID, targetID, sourceIDs)
+	if err != nil {
+		return res, fmt.Errorf("repoint rule actions: %w", err)
+	}
+	res.RuleActions = tag.RowsAffected()
+
+	// Budgets: add each period's source limits onto the target's budget for
+	// that period...
+	_, err = tx.Exec(ctx, `
+		UPDATE budgets t SET amount = t.amount + s.amount, updated_at = NOW()
+		FROM (
+			SELECT period_type, start_date, SUM(amount) AS amount
+			FROM budgets
+			WHERE user_id = $1 AND category_id = ANY($3)
+			GROUP BY period_type, start_date
+		) s
+		WHERE t.user_id = $1 AND t.category_id = $2
+		  AND t.period_type = s.period_type AND t.start_date = s.start_date`,
+		userID, targetID, sourceIDs)
+	if err != nil {
+		return res, fmt.Errorf("fold budgets: %w", err)
+	}
+	// ...and give the target one budget for each period only the sources
+	// budgeted, taking the bucket of the largest source limit.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, bucket, user_id)
+		SELECT $4::text || ' Budget', $2, SUM(s.amount), s.period_type, s.start_date, MAX(s.end_date),
+		       (array_agg(s.bucket ORDER BY s.amount DESC))[1], $1
+		FROM budgets s
+		WHERE s.user_id = $1 AND s.category_id = ANY($3)
+		  AND NOT EXISTS (
+			SELECT 1 FROM budgets t
+			WHERE t.user_id = $1 AND t.category_id = $2
+			  AND t.period_type = s.period_type AND t.start_date = s.start_date
+		  )
+		GROUP BY s.period_type, s.start_date`,
+		userID, targetID, sourceIDs, targetName)
+	if err != nil {
+		return res, fmt.Errorf("move budgets: %w", err)
+	}
+	tag, err = tx.Exec(ctx,
+		`DELETE FROM budgets WHERE user_id = $1 AND category_id = ANY($2)`,
+		userID, sourceIDs)
+	if err != nil {
+		return res, fmt.Errorf("delete source budgets: %w", err)
+	}
+	res.Budgets = tag.RowsAffected()
+
+	tag, err = tx.Exec(ctx,
+		`DELETE FROM categories WHERE user_id = $1 AND id = ANY($2)`,
+		userID, sourceIDs)
+	if err != nil {
+		return res, fmt.Errorf("delete source categories: %w", err)
+	}
+	res.DeletedCategories = tag.RowsAffected()
+
+	if err := tx.Commit(ctx); err != nil {
+		return res, fmt.Errorf("failed to commit merge: %w", err)
+	}
+	return res, nil
+}
+
 func (r *Repository) ListCategories(ctx context.Context, userID string) ([]domain.Category, error) {
 	query := `
 		SELECT c.id, c.user_id, c.name, c.type, c.created_at, COUNT(t.id) as transaction_count

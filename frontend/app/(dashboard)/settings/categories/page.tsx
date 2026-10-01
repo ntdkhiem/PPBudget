@@ -2,8 +2,8 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiFetch, Category } from "@/lib/api";
-import { Plus, Edit2, Check, X, Trash2, Tag, AlertTriangle } from "lucide-react";
+import { apiFetch, Category, CategoryMergeResult } from "@/lib/api";
+import { Plus, Edit2, Check, X, Trash2, Tag, AlertTriangle, GitMerge } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +31,10 @@ export default function CategoriesPage() {
 
   // Delete Dialog state
   const [catToDelete, setCatToDelete] = useState<Category | null>(null);
+
+  // Merge Dialog state: the category that survives, and the ones folded into it
+  const [mergeTarget, setMergeTarget] = useState<Category | null>(null);
+  const [mergeSources, setMergeSources] = useState<Set<string>>(new Set());
 
   const { data: categories, isLoading } = useQuery<Category[]>({
     queryKey: ["categories"],
@@ -97,7 +101,51 @@ export default function CategoriesPage() {
     },
   });
 
+  const mergeMutation = useMutation({
+    mutationFn: (data: { targetId: string; sourceIds: string[] }) =>
+      apiFetch<CategoryMergeResult>(
+        `/categories/${data.targetId}/merge`,
+        {
+          method: "POST",
+          body: JSON.stringify({ source_ids: data.sourceIds }),
+        },
+        token
+      ),
+    onSuccess: (res) => {
+      // A merge touches everything that can name a category.
+      for (const key of ["categories", "transactions", "reports", "budgets", "rules", "subscriptions", "unreviewed"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      toast.success(
+        `Merged ${res.deleted_categories} categor${res.deleted_categories === 1 ? "y" : "ies"} into ${mergeTarget?.name}, moving ${res.transactions} transaction${res.transactions === 1 ? "" : "s"}`
+      );
+      setMergeTarget(null);
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Failed to merge categories");
+    },
+  });
+
+  const openMerge = (cat: Category) => {
+    setMergeTarget(cat);
+    setMergeSources(new Set());
+  };
+
+  const toggleMergeSource = (id: string) => {
+    setMergeSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   if (isLoading) return <div className="p-8 text-center text-slate-500">Loading categories...</div>;
+
+  const mergeCandidates = (categories ?? []).filter((c) => c.id !== mergeTarget?.id);
+  const selectedSources = mergeCandidates.filter((c) => mergeSources.has(c.id));
+  const movingCount = selectedSources.reduce((sum, c) => sum + (c.transaction_count ?? 0), 0);
+  const crossTypeSources = selectedSources.filter((c) => c.type !== mergeTarget?.type);
 
   const expenses = categories?.filter((c) => c.type === "expense") || [];
   const incomes = categories?.filter((c) => c.type === "income") || [];
@@ -179,6 +227,15 @@ export default function CategoriesPage() {
               className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:hover:bg-indigo-500/10"
             >
               <Edit2 size={16} />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              title={`Merge other categories into ${cat.name}`}
+              onClick={() => openMerge(cat)}
+              className="text-slate-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-500/10"
+            >
+              <GitMerge size={16} />
             </Button>
             <Button
               size="icon"
@@ -294,6 +351,78 @@ export default function CategoriesPage() {
               disabled={deleteMutation.isPending}
             >
               Yes, delete category
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Merge Dialog */}
+      <Dialog open={!!mergeTarget} onOpenChange={(open) => !open && setMergeTarget(null)}>
+        <DialogContent className="sm:max-w-[480px] rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitMerge className="h-5 w-5 text-violet-600" /> Merge into {mergeTarget?.name}
+            </DialogTitle>
+            <DialogDescription className="pt-2 text-sm text-slate-600 dark:text-slate-300">
+              The categories you pick are deleted. Their transactions, subscriptions and rules move to{" "}
+              <strong className="text-slate-900 dark:text-white">{mergeTarget?.name}</strong>, and their monthly
+              budgets are added onto its budget.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-72 overflow-y-auto -mx-1 px-1 space-y-4">
+            {(["expense", "income", "transfer"] as const).map((type) => {
+              const list = mergeCandidates.filter((c) => c.type === type);
+              if (list.length === 0) return null;
+              return (
+                <div key={type}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 mb-1 px-2">{type}</p>
+                  {list.map((c) => (
+                    <label
+                      key={c.id}
+                      className="flex items-center gap-3 px-2 py-2 rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={mergeSources.has(c.id)}
+                        onChange={() => toggleMergeSource(c.id)}
+                        className="h-4 w-4 accent-violet-600"
+                      />
+                      <span className="flex-1 text-slate-900 dark:text-slate-100">{c.name}</span>
+                      {(c.transaction_count ?? 0) > 0 && (
+                        <span className="text-xs text-slate-500">{c.transaction_count}</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+
+          {crossTypeSources.length > 0 && (
+            <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 p-3 rounded-xl">
+              <p className="text-amber-800 dark:text-amber-400 text-sm">
+                {crossTypeSources.map((c) => c.name).join(", ")}{" "}
+                {crossTypeSources.length === 1 ? "is" : "are"} not {mergeTarget?.type}. After merging, those
+                transactions count as {mergeTarget?.type}.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setMergeTarget(null)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button
+              className="rounded-xl bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={() => {
+                if (mergeTarget) mergeMutation.mutate({ targetId: mergeTarget.id, sourceIds: [...mergeSources] });
+              }}
+              disabled={mergeMutation.isPending || selectedSources.length === 0}
+            >
+              {selectedSources.length === 0
+                ? "Merge"
+                : `Merge ${selectedSources.length} (${movingCount} transaction${movingCount === 1 ? "" : "s"})`}
             </Button>
           </DialogFooter>
         </DialogContent>
