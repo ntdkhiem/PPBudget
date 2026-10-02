@@ -151,7 +151,7 @@ export default function BudgetsPage() {
         spent: budget?.spent_total || 0,
         bucket: budget?.bucket || "needs",
       };
-    }).filter(c => c.limit > 0 || c.spent > 0) || [];
+    }).filter(c => c.budgetId) || [];
   }, [categories, budgets]);
 
   const totalLimit = budgetCards.reduce((acc, curr) => acc + curr.limit, 0);
@@ -181,7 +181,7 @@ export default function BudgetsPage() {
 
   const renderCard = (card: any, idx: number) => {
     const isEditing = editingId === card.catId;
-    const progress = card.limit > 0 ? Math.min((card.spent / card.limit) * 100, 100) : 0;
+    const progress = card.limit > 0 ? Math.min((card.spent / card.limit) * 100, 100) : (card.spent > 0 ? 100 : 0);
     const isOverLimit = card.spent > card.limit;
     const remaining = Math.max(0, card.limit - card.spent);
     
