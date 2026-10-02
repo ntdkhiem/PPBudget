@@ -1093,9 +1093,14 @@ func (r *Repository) GetReportsSummary(ctx context.Context, userID string, start
 
 	queryBudgets := `
 		WITH budget_spent AS (
-			SELECT b.id, COALESCE(SUM(ABS(t.amount)), 0) as spent_total
+			-- Net of refunds and link-adjusted, as on the budgets page.
+			SELECT b.id, COALESCE(-SUM(
+				t.amount
+				- COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
+				+ COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0)
+			), 0) as spent_total
 			FROM budgets b
-			LEFT JOIN transactions t ON t.category_id = b.category_id 
+			LEFT JOIN transactions t ON t.category_id = b.category_id
 				AND t.effective_date >= b.start_date
 				AND t.effective_date <= b.end_date
 				AND t.deleted_at IS NULL

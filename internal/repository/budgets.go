@@ -133,7 +133,8 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, targe
 			WHERE t.user_id = $1 AND t.deleted_at IS NULL
 		),
 		budget_spent AS (
-			SELECT b.id as budget_id, COALESCE(SUM(ABS(t.eff_amount)), 0) as spent_total
+			-- Outflows less inflows: a refund in the category gives budget back.
+			SELECT b.id as budget_id, COALESCE(-SUM(t.eff_amount), 0) as spent_total
 			FROM budgets b
 			LEFT JOIN effective_transactions t ON t.category_id = b.category_id 
 				AND t.date >= $3::date 
