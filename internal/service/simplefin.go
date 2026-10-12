@@ -479,14 +479,15 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 			}
 		}
 
-		// Apply all active rules to imported transactions. One pass over a
-		// single load of the transaction set, rather than a full load per rule.
+		// Apply all active rules to only the transactions this sync inserted.
+		// Scoping by date instead re-ran rules over every older row in the
+		// window and reverted categories the user had changed by hand.
 		if req.ApplyRules {
-			var sDate *time.Time
-			if !startTime.IsZero() {
-				sDate = &startTime
+			ids := make([]string, 0, len(importedTxns))
+			for _, t := range importedTxns {
+				ids = append(ids, t.ID)
 			}
-			if _, err := s.ApplyActiveRules(bgCtx, userID, false, sDate, nil); err != nil {
+			if _, err := s.ApplyActiveRulesToTransactions(bgCtx, userID, ids); err != nil {
 				s.logger.Error("failed to apply rules during import", "error", err, "user_id", userID)
 			}
 		}

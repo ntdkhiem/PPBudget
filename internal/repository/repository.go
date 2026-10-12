@@ -319,8 +319,29 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 
 // GetTransactionsByDateRange fetches all transactions (or bounded by dates) without limits
 func (r *Repository) GetTransactionsByDateRange(ctx context.Context, userID string, startDate, endDate *time.Time) ([]domain.Transaction, error) {
-	query := `
-        SELECT 
+	query := fullTransactionSelect + `
+        WHERE t.user_id = $1 AND t.deleted_at IS NULL
+          AND ($2::date IS NULL OR t.date >= $2::date)
+          AND ($3::date IS NULL OR t.date <= $3::date)
+    `
+	return r.queryFullTransactions(ctx, query, userID, startDate, endDate)
+}
+
+// GetTransactionsByIDs fetches the named live transactions in the same shape
+// as GetTransactionsByDateRange. IDs that are deleted or owned by another user
+// are left out.
+func (r *Repository) GetTransactionsByIDs(ctx context.Context, userID string, ids []string) ([]domain.Transaction, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	query := fullTransactionSelect + `
+        WHERE t.user_id = $1 AND t.deleted_at IS NULL AND t.id = ANY($2)
+    `
+	return r.queryFullTransactions(ctx, query, userID, ids)
+}
+
+const fullTransactionSelect = `
+        SELECT
             t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.budget_month, t.description, 
             t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id, a.simplefin_id as simplefin_account_id,
             (t.amount 
@@ -350,13 +371,10 @@ func (r *Repository) GetTransactionsByDateRange(ctx context.Context, userID stri
                 WHERE l.target_transaction_id = t.id
             ), '[]'::json) as paid_by
         FROM transactions t
-        JOIN accounts a ON t.account_id = a.id
-        WHERE t.user_id = $1 AND t.deleted_at IS NULL
-          AND ($2::date IS NULL OR t.date >= $2::date)
-          AND ($3::date IS NULL OR t.date <= $3::date)
-    `
+        JOIN accounts a ON t.account_id = a.id`
 
-	rows, err := r.pool.Query(ctx, query, userID, startDate, endDate)
+func (r *Repository) queryFullTransactions(ctx context.Context, query string, args ...interface{}) ([]domain.Transaction, error) {
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

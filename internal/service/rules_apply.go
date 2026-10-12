@@ -161,7 +161,12 @@ func (s *Service) ApplyRules(ctx context.Context, userID string, rules []domain.
 	if err != nil {
 		return 0, err
 	}
+	return s.applyRulesTo(ctx, userID, rules, txns)
+}
 
+// applyRulesTo evaluates rules against an already-loaded transaction set and
+// writes the resulting changes.
+func (s *Service) applyRulesTo(ctx context.Context, userID string, rules []domain.Rule, txns []domain.Transaction) (int, error) {
 	changes := s.evaluateRules(rules, txns)
 	if len(changes) == 0 {
 		return 0, nil
@@ -204,12 +209,39 @@ func (s *Service) ApplyRule(ctx context.Context, userID, ruleID string, runAll b
 	return s.ApplyRules(ctx, userID, []domain.Rule{*rule}, runAll, startDate, endDate)
 }
 
-// ApplyActiveRules applies every active rule for a user in one pass. This is
-// the sync path (internal/service/simplefin.go).
+// ApplyActiveRules applies every active rule for a user in one pass over the
+// transactions in a date range.
 func (s *Service) ApplyActiveRules(ctx context.Context, userID string, runAll bool, startDate, endDate *time.Time) (int, error) {
-	all, err := s.repo.ListRulesDetailed(ctx, userID)
+	active, err := s.activeRules(ctx, userID)
 	if err != nil {
 		return 0, err
+	}
+	return s.ApplyRules(ctx, userID, active, runAll, startDate, endDate)
+}
+
+// ApplyActiveRulesToTransactions applies every active rule to only the named
+// transactions. This is the sync path (internal/service/simplefin.go): it
+// passes the rows the sync just inserted, so a category the user set by hand
+// on an older transaction is never overwritten by the next sync.
+func (s *Service) ApplyActiveRulesToTransactions(ctx context.Context, userID string, ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	active, err := s.activeRules(ctx, userID)
+	if err != nil || len(active) == 0 {
+		return 0, err
+	}
+	txns, err := s.repo.GetTransactionsByIDs(ctx, userID, ids)
+	if err != nil {
+		return 0, err
+	}
+	return s.applyRulesTo(ctx, userID, active, txns)
+}
+
+func (s *Service) activeRules(ctx context.Context, userID string) ([]domain.Rule, error) {
+	all, err := s.repo.ListRulesDetailed(ctx, userID)
+	if err != nil {
+		return nil, err
 	}
 
 	active := make([]domain.Rule, 0, len(all))
@@ -218,8 +250,7 @@ func (s *Service) ApplyActiveRules(ctx context.Context, userID string, runAll bo
 			active = append(active, r)
 		}
 	}
-
-	return s.ApplyRules(ctx, userID, active, runAll, startDate, endDate)
+	return active, nil
 }
 
 // PreviewRule runs a rule without writing anything and reports what would

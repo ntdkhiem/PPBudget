@@ -406,3 +406,65 @@ func TestApplyCountTowardNextMonthIntegration(t *testing.T) {
 		t.Errorf("re-applying: updated %d, err %v; want 0", again, err)
 	}
 }
+
+// A sync with rules on used to re-run them over every transaction in its
+// window, so a category the user changed by hand was reverted by the next
+// sync. Rules must now touch only the rows the sync inserted.
+func TestSyncRulesKeepManualCategoryIntegration(t *testing.T) {
+	pool := sfSetupTestDB(t)
+	ctx := context.Background()
+	svc := newRulesTestService(pool)
+
+	userID := sfCreateTestUser(t, pool)
+	coffee := mkCategory(t, pool, userID, "Coffee")
+	personal := mkCategory(t, pool, userID, "Personal")
+	mkRule(t, svc, userID, "Coffee", 0, true,
+		[]domain.RuleCondition{cond(FieldDescription, OpContains, "starbucks")},
+		[]domain.RuleAction{{ActionType: ActionSetCategory, Value: coffee}},
+	)
+
+	sfID := sfUniqueID("sf-sync-rules-manual")
+	todayUnix := time.Now().UTC().Unix()
+	sync := func(txns []sfTransaction) {
+		t.Helper()
+		srv := newSimplefinServer(t, []SFAccount{{ID: sfID, Name: "Checking", Currency: "USD", Balance: "100.00", BalanceDate: todayUnix, Transactions: txns}})
+		req := SimplefinExecuteRequest{AccessURL: srv.URL, AccountMapping: map[string]string{sfID: "new"}, ApplyRules: true}
+		if err := svc.SimpleFinExecute(ctx, userID, req); err != nil {
+			t.Fatalf("SimpleFinExecute: %v", err)
+		}
+		if st := waitForImportDone(t, userID); st.Status != "completed" {
+			t.Fatalf("sync finished with status %q, want completed (error: %s)", st.Status, st.Error)
+		}
+	}
+	txnBySFID := func(sfTxnID string) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx,
+			`SELECT id FROM transactions WHERE user_id = $1 AND simplefin_id = $2`, userID, sfTxnID).Scan(&id); err != nil {
+			t.Fatalf("select txn %s: %v", sfTxnID, err)
+		}
+		return id
+	}
+
+	first := sfTransaction{ID: "srm1", Posted: todayUnix, Amount: "-4.50", Description: "STARBUCKS #1"}
+	sync([]sfTransaction{first})
+
+	firstID := txnBySFID("srm1")
+	if got := categoryOf(t, pool, firstID); got == nil || *got != coffee {
+		t.Fatalf("after first sync, category = %v, want the rule's %s", got, coffee)
+	}
+
+	// The user overrides the rule by hand.
+	if err := svc.BulkUpdateTransactionsCategory(ctx, userID, []string{firstID}, personal); err != nil {
+		t.Fatalf("BulkUpdateTransactionsCategory: %v", err)
+	}
+
+	sync([]sfTransaction{first, {ID: "srm2", Posted: todayUnix, Amount: "-5.25", Description: "STARBUCKS #2"}})
+
+	if got := categoryOf(t, pool, firstID); got == nil || *got != personal {
+		t.Errorf("after second sync, edited txn category = %v, want the manual %s", got, personal)
+	}
+	if got := categoryOf(t, pool, txnBySFID("srm2")); got == nil || *got != coffee {
+		t.Errorf("after second sync, new txn category = %v, want the rule's %s", got, coffee)
+	}
+}
