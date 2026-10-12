@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo, useEffect } from "react";
 import { apiFetch, BudgetSummary, Category } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, parseDollarsToCents } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Edit2, Check, X, Plus, Target, TrendingUp, Calendar, AlertCircle, Trash2 } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, getDaysInMonth, getDate, isSameMonth } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
@@ -20,6 +20,18 @@ import { PageContainer } from "@/components/page-container";
 import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
 
+type Bucket = NonNullable<BudgetSummary["bucket"]>;
+
+interface BudgetCard {
+  catId: string;
+  catName: string;
+  budgetId: string;
+  limit: number;
+  spent: number;
+  bucket: Bucket;
+  periodType: string;
+}
+
 export default function BudgetsPage() {
   const queryClient = useQueryClient();
   const token = typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
@@ -29,7 +41,7 @@ export default function BudgetsPage() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLimit, setEditLimit] = useState("");
-  const [editBucket, setEditBucket] = useState<"needs" | "wants" | "savings">("needs");
+  const [editBucket, setEditBucket] = useState<Bucket>("needs");
   
   // Paycheck state
   const [expectedPaycheckStr, setExpectedPaycheckStr] = useState("");
@@ -46,8 +58,8 @@ export default function BudgetsPage() {
     }
   }, [paycheckData]);
 
-  const expectedPaycheck = parseFloat(expectedPaycheckStr) || 0;
-  const expectedPaycheckCents = expectedPaycheck * 100;
+  const paycheckInputCents = parseDollarsToCents(expectedPaycheckStr);
+  const expectedPaycheckCents = paycheckInputCents ?? 0;
 
   const savePaycheckMutation = useMutation({
     mutationFn: (value: string) => apiFetch("/settings/values/expected_paycheck", {
@@ -58,18 +70,22 @@ export default function BudgetsPage() {
       queryClient.invalidateQueries({ queryKey: ["setting", "expected_paycheck"] });
       setIsEditingPaycheck(false);
       toast.success("Expected paycheck saved");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Failed to save expected paycheck");
     }
   });
 
   const handleSavePaycheck = () => {
-    savePaycheckMutation.mutate(expectedPaycheckStr);
+    if (paycheckInputCents === null) return;
+    savePaycheckMutation.mutate((paycheckInputCents / 100).toFixed(2));
   };
 
   // New Budget Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newCategoryId, setNewCategoryId] = useState("");
   const [newLimit, setNewLimit] = useState("");
-  const [newBucket, setNewBucket] = useState<"needs" | "wants" | "savings">("needs");
+  const [newBucket, setNewBucket] = useState<Bucket>("needs");
 
   // Delete Budget Modal State
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -114,6 +130,9 @@ export default function BudgetsPage() {
       setNewLimit("");
       setNewBucket("needs");
     },
+    onError: (err: Error) => {
+      toast.error(err.message || "Failed to save budget");
+    },
   });
 
   const deleteMutation = useMutation({
@@ -125,7 +144,7 @@ export default function BudgetsPage() {
       setBudgetToDelete(null);
       toast.success("Budget deleted successfully");
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || "Failed to delete budget");
     }
   });
@@ -137,30 +156,44 @@ export default function BudgetsPage() {
   const today = new Date();
   const currentMonthStart = startOfMonth(today);
   const isFutureMonth = currentMonth > currentMonthStart;
+  const isPastMonth = currentMonth < currentMonthStart;
+  const isCurrentMonth = !isFutureMonth && !isPastMonth;
   const currentDay = isSameMonth(today, currentMonth) ? getDate(today) : (today > currentMonth ? daysInMonth : 1);
   const daysRemaining = daysInMonth - currentDay + 1;
 
-  const budgetCards = useMemo(() => {
-    return categories?.map(cat => {
+  const budgetCards = useMemo<BudgetCard[]>(() => {
+    return categories?.flatMap(cat => {
       const budget = budgets?.find(b => b.category_id === cat.id);
-      return {
+      if (!budget) return [];
+      return [{
         catId: cat.id,
         catName: cat.name,
-        budgetId: budget?.id,
-        limit: budget?.amount_cents || 0,
-        spent: budget?.spent_total || 0,
-        bucket: budget?.bucket || "needs",
-      };
-    }).filter(c => c.budgetId) || [];
+        budgetId: budget.id,
+        limit: budget.amount_cents || 0,
+        spent: budget.spent_total || 0,
+        bucket: (budget.bucket || "needs") as Bucket,
+        periodType: budget.period_type,
+      }];
+    }) || [];
   }, [categories, budgets]);
 
   const totalLimit = budgetCards.reduce((acc, curr) => acc + curr.limit, 0);
-  const totalSpent = budgetCards.reduce((acc, curr) => acc + curr.spent, 0);
-  
+
+  // Pacing is about spending, so it leaves Savings out: putting money away
+  // early is not overspending.
+  const spendingCards = budgetCards.filter(c => c.bucket !== "savings");
+  const spendingLimit = spendingCards.reduce((acc, curr) => acc + curr.limit, 0);
+  const spendingSpent = spendingCards.reduce((acc, curr) => acc + curr.spent, 0);
+
   const monthProgress = (currentDay / daysInMonth) * 100;
-  const globalProgress = totalLimit > 0 ? Math.min((totalSpent / totalLimit) * 100, 100) : 0;
-  const globalRemaining = Math.max(0, totalLimit - totalSpent);
+  const globalProgress = spendingLimit > 0 ? Math.min((spendingSpent / spendingLimit) * 100, 100) : 0;
+  const globalRemaining = Math.max(0, spendingLimit - spendingSpent);
   const isOverPacing = globalProgress > monthProgress;
+  const isOverSpent = spendingSpent > spendingLimit;
+
+  const unbudgetedCents = expectedPaycheckCents - totalLimit;
+  const newLimitCents = parseDollarsToCents(newLimit);
+  const editLimitCents = parseDollarsToCents(editLimit);
   
   const handleAddBudgetOpenChange = (open: boolean) => {
     if (!open) {
@@ -179,14 +212,21 @@ export default function BudgetsPage() {
     }
   };
 
-  const renderCard = (card: any, idx: number) => {
+  const renderCard = (card: BudgetCard, idx: number) => {
     const isEditing = editingId === card.catId;
     const progress = card.limit > 0 ? Math.min((card.spent / card.limit) * 100, 100) : (card.spent > 0 ? 100 : 0);
-    const isOverLimit = card.spent > card.limit;
+    // For Savings the limit is a goal: going past it is good, not overspending.
+    const isSavings = card.bucket === "savings";
+    const isOverLimit = !isSavings && card.spent > card.limit;
+    const isGoalMet = isSavings && card.limit > 0 && card.spent >= card.limit;
     const remaining = Math.max(0, card.limit - card.spent);
-    
+
     const safeToSpendPerDay = remaining / Math.max(1, daysRemaining);
     const avgSpentPerDay = card.spent / Math.max(1, currentDay);
+
+    const barColor = isSavings
+      ? (isGoalMet ? 'bg-emerald-500' : 'bg-indigo-500')
+      : (isOverLimit ? 'bg-red-500' : progress > 80 ? 'bg-amber-400' : 'bg-indigo-500');
 
     return (
       <motion.div 
@@ -204,7 +244,7 @@ export default function BudgetsPage() {
           <div className="flex items-center gap-2">
             <h3 className="text-md font-bold text-slate-800 dark:text-slate-100 truncate pr-2">{card.catName}</h3>
             {isEditing && (
-              <Select value={editBucket} onValueChange={(val: any) => setEditBucket(val)}>
+              <Select value={editBucket} onValueChange={(val) => setEditBucket(val as Bucket)}>
                 <SelectTrigger className="h-7 w-24 text-xs px-2">
                   <SelectValue />
                 </SelectTrigger>
@@ -225,10 +265,14 @@ export default function BudgetsPage() {
                 exit={{ opacity: 0, scale: 0.9 }}
                 className="flex gap-1"
               >
-                <Button 
+                <Button
                   size="icon-sm"
                   variant="ghost"
-                  onClick={() => updateMutation.mutate({ id: card.budgetId, category_id: card.catId, limit_amount: Math.round(parseFloat(editLimit) * 100), bucket: editBucket })}
+                  aria-label="Save budget"
+                  disabled={editLimitCents === null || updateMutation.isPending}
+                  // Send the budget's own period type: leaving it out turned a
+                  // one-time budget into a monthly one that rolls forward.
+                  onClick={() => editLimitCents !== null && updateMutation.mutate({ id: card.budgetId, category_id: card.catId, limit_amount: editLimitCents, period_type: card.periodType, bucket: editBucket })}
                   className="text-emerald-600 hover:bg-emerald-50 h-8 w-8"
                 >
                   <Check size={16} />
@@ -254,7 +298,7 @@ export default function BudgetsPage() {
                   <Button
                     size="icon-sm"
                     variant="ghost"
-                    onClick={() => { setEditingId(card.catId); setEditLimit((card.limit / 100).toString()); setEditBucket(card.bucket as "needs" | "wants" | "savings"); }}
+                    onClick={() => { setEditingId(card.catId); setEditLimit((card.limit / 100).toString()); setEditBucket(card.bucket); }}
                     className="text-slate-400 hover:text-indigo-600 h-8 w-8"
                   >
                     <Edit2 size={14} />
@@ -264,7 +308,7 @@ export default function BudgetsPage() {
                       size="icon-sm"
                       variant="ghost"
                       onClick={() => {
-                        setBudgetToDelete(card.budgetId as string);
+                        setBudgetToDelete(card.budgetId);
                         setDeleteModalOpen(true);
                       }}
                       className="text-slate-400 hover:text-red-500 h-8 w-8"
@@ -280,13 +324,13 @@ export default function BudgetsPage() {
 
         <div className="flex justify-between items-end mb-3">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Spent</p>
-            <p className={`text-xl font-bold tracking-tight ${isOverLimit && card.limit > 0 ? "text-red-600" : "text-slate-900 dark:text-slate-100"}`}>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{isSavings ? "Saved" : "Spent"}</p>
+            <p className={`text-xl font-bold tracking-tight ${isOverLimit && card.limit > 0 ? "text-red-600" : isGoalMet ? "text-emerald-600 dark:text-emerald-400" : "text-slate-900 dark:text-slate-100"}`}>
               {formatCurrency(card.spent)}
             </p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Limit</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{isSavings ? "Goal" : "Limit"}</p>
             <AnimatePresence mode="wait">
               {isEditing ? (
                 <motion.div 
@@ -321,10 +365,8 @@ export default function BudgetsPage() {
         </div>
 
         <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 mb-3 overflow-hidden">
-          <motion.div 
-            className={`h-full rounded-full ${
-              isOverLimit ? 'bg-red-500' : progress > 80 ? 'bg-amber-400' : 'bg-indigo-500'
-            }`}
+          <motion.div
+            className={`h-full rounded-full ${barColor}`}
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
             transition={{ duration: 1, ease: "easeOut" }}
@@ -334,17 +376,38 @@ export default function BudgetsPage() {
         {card.limit > 0 && (
           <div className="flex justify-between mt-auto pt-3 border-t border-slate-100 dark:border-slate-800/50">
              <div className="text-left">
-              <p className="text-[9px] uppercase font-bold text-slate-400 mb-0.5">Left</p>
-              <p className={`text-xs font-semibold ${remaining === 0 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
-                {formatCurrency(remaining)}
+              <p className="text-[9px] uppercase font-bold text-slate-400 mb-0.5">{isSavings ? "To Go" : "Left"}</p>
+              <p className={`text-xs font-semibold ${
+                isSavings
+                  ? (isGoalMet ? 'text-emerald-600' : 'text-slate-700 dark:text-slate-300')
+                  : (remaining === 0 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300')
+              }`}>
+                {isGoalMet ? "Goal met" : formatCurrency(remaining)}
               </p>
             </div>
-            <div className="text-right">
-              <p className="text-[9px] uppercase font-bold text-slate-400 mb-0.5">Safe / Day</p>
-              <p className={`text-xs font-semibold ${safeToSpendPerDay === 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                {formatCurrency(safeToSpendPerDay)}
-              </p>
-            </div>
+            {isSavings ? (
+              <div className="text-right">
+                <p className="text-[9px] uppercase font-bold text-slate-400 mb-0.5">Progress</p>
+                <p className={`text-xs font-semibold ${isGoalMet ? 'text-emerald-600' : 'text-slate-700 dark:text-slate-300'}`}>
+                  {Math.round((card.spent / card.limit) * 100)}%
+                </p>
+              </div>
+            ) : isPastMonth ? (
+              // The month is over, so there is no daily allowance left to show.
+              <div className="text-right">
+                <p className="text-[9px] uppercase font-bold text-slate-400 mb-0.5">Avg / Day</p>
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  {formatCurrency(avgSpentPerDay)}
+                </p>
+              </div>
+            ) : (
+              <div className="text-right">
+                <p className="text-[9px] uppercase font-bold text-slate-400 mb-0.5">Safe / Day</p>
+                <p className={`text-xs font-semibold ${safeToSpendPerDay === 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                  {formatCurrency(safeToSpendPerDay)}
+                </p>
+              </div>
+            )}
           </div>
         )}
       </motion.div>
@@ -405,7 +468,7 @@ export default function BudgetsPage() {
                 </div>
                 <div className="grid gap-2">
                   <Label>Bucket</Label>
-                  <Select value={newBucket} onValueChange={(val: any) => setNewBucket(val)}>
+                  <Select value={newBucket} onValueChange={(val) => setNewBucket(val as Bucket)}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select bucket..." />
                     </SelectTrigger>
@@ -428,16 +491,16 @@ export default function BudgetsPage() {
               </div>
               <div className="flex flex-col gap-3 mt-6">
                 <Button 
-                  onClick={() => updateMutation.mutate({ category_id: newCategoryId, limit_amount: Math.round(parseFloat(newLimit) * 100), period_type: "monthly", bucket: newBucket })}
-                  disabled={!newCategoryId || !newLimit || updateMutation.isPending}
+                  onClick={() => newLimitCents !== null && updateMutation.mutate({ category_id: newCategoryId, limit_amount: newLimitCents, period_type: "monthly", bucket: newBucket })}
+                  disabled={!newCategoryId || newLimitCents === null || updateMutation.isPending}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white w-full"
                 >
                   {updateMutation.isPending ? "Saving..." : "Add for This & Future Months"}
                 </Button>
                 <Button 
                   variant="secondary"
-                  onClick={() => updateMutation.mutate({ category_id: newCategoryId, limit_amount: Math.round(parseFloat(newLimit) * 100), period_type: "one_time", bucket: newBucket })}
-                  disabled={!newCategoryId || !newLimit || updateMutation.isPending}
+                  onClick={() => newLimitCents !== null && updateMutation.mutate({ category_id: newCategoryId, limit_amount: newLimitCents, period_type: "one_time", bucket: newBucket })}
+                  disabled={!newCategoryId || newLimitCents === null || updateMutation.isPending}
                   className="w-full bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50"
                 >
                   {updateMutation.isPending ? "Saving..." : "Add Only for This Month"}
@@ -519,7 +582,7 @@ export default function BudgetsPage() {
                     className="w-24 h-8 px-2 font-bold text-slate-900 dark:text-slate-100"
                     autoFocus
                   />
-                  <Button size="sm" onClick={handleSavePaycheck} className="h-8">Save</Button>
+                  <Button size="sm" onClick={handleSavePaycheck} disabled={paycheckInputCents === null || savePaycheckMutation.isPending} className="h-8">Save</Button>
                 </div>
               ) : (
                 <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingPaycheck(true)}>
@@ -532,29 +595,39 @@ export default function BudgetsPage() {
             </div>
 
             <div className="text-right">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Left to Budget</p>
-              <p className={`text-2xl font-bold ${expectedPaycheckCents - totalLimit < 0 ? 'text-red-500' : 'text-slate-400'}`}>
-                {formatCurrency(Math.max(0, expectedPaycheckCents - totalLimit))}
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                {unbudgetedCents < 0 && expectedPaycheckCents > 0 ? "Over-Budgeted By" : "Left to Budget"}
+              </p>
+              <p className={`text-2xl font-bold ${
+                expectedPaycheckCents === 0 ? 'text-slate-400'
+                  : unbudgetedCents < 0 ? 'text-red-500'
+                  : 'text-slate-900 dark:text-slate-100'
+              }`}>
+                {expectedPaycheckCents === 0 ? "—" : formatCurrency(Math.abs(unbudgetedCents))}
               </p>
             </div>
           </div>
         </div>
 
         <div className="relative pt-6 pb-2 mt-8 border-t border-transparent">
-          {/* Pacing Marker */}
-          <div 
-            className="absolute top-0 w-px h-full bg-slate-300 z-10 hidden md:block" 
-            style={{ left: `${monthProgress}%` }}
-          >
-            <div className="absolute -top-6 -translate-x-1/2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm text-xs font-semibold text-slate-600 dark:text-slate-400 px-2 py-1 rounded-md flex items-center gap-1 whitespace-nowrap">
-              <Calendar size={12}/> Today (Day {currentDay})
+          {/* Pacing Marker: only the current month has a "today" */}
+          {isCurrentMonth && (
+            <div
+              className="absolute top-0 w-px h-full bg-slate-300 z-10 hidden md:block"
+              style={{ left: `${monthProgress}%` }}
+            >
+              <div className="absolute -top-6 -translate-x-1/2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm text-xs font-semibold text-slate-600 dark:text-slate-400 px-2 py-1 rounded-md flex items-center gap-1 whitespace-nowrap">
+                <Calendar size={12}/> Today (Day {currentDay})
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden relative">
-            <motion.div 
+            <motion.div
               className={`h-full rounded-full relative z-20 ${
-                isOverPacing ? 'bg-amber-500' : 'bg-indigo-500'
+                isPastMonth
+                  ? (isOverSpent ? 'bg-red-500' : 'bg-emerald-500')
+                  : isCurrentMonth && isOverPacing ? 'bg-amber-500' : 'bg-indigo-500'
               }`}
               initial={{ width: 0 }}
               animate={{ width: `${globalProgress}%` }}
@@ -565,17 +638,39 @@ export default function BudgetsPage() {
 
         <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
           <div className="flex items-center gap-2">
-            {isOverPacing ? (
-              <AlertCircle size={16} className="text-amber-500" />
+            {isPastMonth ? (
+              isOverSpent ? (
+                <>
+                  <AlertCircle size={16} className="text-red-500" />
+                  <span className="text-sm font-medium text-red-600">Finished over budget</span>
+                </>
+              ) : (
+                <>
+                  <TrendingUp size={16} className="text-emerald-500" />
+                  <span className="text-sm font-medium text-emerald-600">Finished within budget</span>
+                </>
+              )
+            ) : isFutureMonth ? (
+              <>
+                <Calendar size={16} className="text-slate-400" />
+                <span className="text-sm font-medium text-slate-500">Starts {format(currentMonth, "MMMM d")}</span>
+              </>
+            ) : isOverPacing ? (
+              <>
+                <AlertCircle size={16} className="text-amber-500" />
+                <span className="text-sm font-medium text-amber-600">Pacing ahead of schedule</span>
+              </>
             ) : (
-              <TrendingUp size={16} className="text-emerald-500" />
+              <>
+                <TrendingUp size={16} className="text-emerald-500" />
+                <span className="text-sm font-medium text-emerald-600">On track for the month</span>
+              </>
             )}
-            <span className={`text-sm font-medium ${isOverPacing ? 'text-amber-600' : 'text-emerald-600'}`}>
-              {isOverPacing ? "Pacing ahead of schedule" : "On track for the month"}
-            </span>
           </div>
           <div className="text-sm font-medium text-slate-600 dark:text-slate-400">
-            {formatCurrency(globalRemaining)} remaining
+            {isOverSpent
+              ? `${formatCurrency(spendingSpent - spendingLimit)} over`
+              : `${formatCurrency(globalRemaining)} ${isPastMonth ? "unspent" : "left to spend"}`}
           </div>
         </div>
       </motion.div>

@@ -609,36 +609,40 @@ func (r *Repository) MergeCategories(ctx context.Context, userID, targetID strin
 	}
 	res.RuleActions = tag.RowsAffected()
 
-	// Budgets: add each period's source limits onto the target's budget for
-	// that period...
+	// Budgets: add each month's source limits onto the target's budget for
+	// that month (a category has at most one per month, whatever its period
+	// type)...
 	_, err = tx.Exec(ctx, `
 		UPDATE budgets t SET amount = t.amount + s.amount, updated_at = NOW()
 		FROM (
-			SELECT period_type, start_date, SUM(amount) AS amount
+			SELECT start_date, SUM(amount) AS amount
 			FROM budgets
 			WHERE user_id = $1 AND category_id = ANY($3)
-			GROUP BY period_type, start_date
+			GROUP BY start_date
 		) s
 		WHERE t.user_id = $1 AND t.category_id = $2
-		  AND t.period_type = s.period_type AND t.start_date = s.start_date`,
+		  AND t.start_date = s.start_date`,
 		userID, targetID, sourceIDs)
 	if err != nil {
 		return res, fmt.Errorf("fold budgets: %w", err)
 	}
-	// ...and give the target one budget for each period only the sources
-	// budgeted, taking the bucket of the largest source limit.
+	// ...and give the target one budget for each month only the sources
+	// budgeted, taking the bucket of the largest source limit. It recurs if
+	// any source did, so the next month's rollover still carries it.
 	_, err = tx.Exec(ctx, `
 		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, bucket, user_id)
-		SELECT $4::text || ' Budget', $2, SUM(s.amount), s.period_type, s.start_date, MAX(s.end_date),
+		SELECT $4::text || ' Budget', $2, SUM(s.amount),
+		       (array_agg(s.period_type ORDER BY s.period_type = 'one_time', s.amount DESC))[1],
+		       s.start_date, MAX(s.end_date),
 		       (array_agg(s.bucket ORDER BY s.amount DESC))[1], $1
 		FROM budgets s
 		WHERE s.user_id = $1 AND s.category_id = ANY($3)
 		  AND NOT EXISTS (
 			SELECT 1 FROM budgets t
 			WHERE t.user_id = $1 AND t.category_id = $2
-			  AND t.period_type = s.period_type AND t.start_date = s.start_date
+			  AND t.start_date = s.start_date
 		  )
-		GROUP BY s.period_type, s.start_date`,
+		GROUP BY s.start_date`,
 		userID, targetID, sourceIDs, targetName)
 	if err != nil {
 		return res, fmt.Errorf("move budgets: %w", err)

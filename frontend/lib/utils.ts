@@ -12,6 +12,18 @@ export function formatCurrency(cents: number): string {
   }).format(cents / 100);
 }
 
+/**
+ * Whole cents from a dollar amount typed into a form ("12.5" -> 1250), or null
+ * when it is empty, not a number, or negative.
+ */
+export function parseDollarsToCents(input: string): number | null {
+  const trimmed = input.trim();
+  if (trimmed === "") return null;
+  const dollars = Number(trimmed);
+  if (!Number.isFinite(dollars) || dollars < 0) return null;
+  return Math.round(dollars * 100);
+}
+
 export function formatDate(dateStr: string): string {
   if (!dateStr) return "";
   return new Date(dateStr).toLocaleDateString("en-US", {

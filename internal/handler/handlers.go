@@ -544,6 +544,10 @@ func (h *Handler) CreateBudget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.CreateBudget(r.Context(), userID, &budget); err != nil {
+		if errors.Is(err, apperrors.ErrConflict) {
+			writeError(w, http.StatusConflict, "this category already has a budget for that month")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create budget")
 		return
 	}
@@ -574,6 +578,10 @@ func (h *Handler) UpdateBudget(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.UpdateBudget(r.Context(), userID, &budget); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "budget not found")
+			return
+		}
+		if errors.Is(err, apperrors.ErrConflict) {
+			writeError(w, http.StatusConflict, "this category already has a budget for that month")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update budget")

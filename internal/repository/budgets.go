@@ -2,13 +2,22 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"ntdkhiem/ppbudget-go/internal/domain"
 	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 	"ntdkhiem/ppbudget-go/pkg/money"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// isDuplicateBudget reports whether err is budgets_user_category_month_key
+// rejecting a second budget for a category in the same month.
+func isDuplicateBudget(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "budgets_user_category_month_key"
+}
 
 func (r *Repository) CreateBudget(ctx context.Context, budget *domain.Budget) error {
 	if budget.CategoryID != "" {
@@ -22,6 +31,9 @@ func (r *Repository) CreateBudget(ctx context.Context, budget *domain.Budget) er
 	`
 	err := r.pool.QueryRow(ctx, query, budget.Name, budget.CategoryID, budget.Amount.ToInt64(), budget.PeriodType, budget.StartDate, budget.EndDate, budget.Bucket, budget.UserID).
 		Scan(&budget.ID, &budget.CreatedAt, &budget.UpdatedAt)
+	if isDuplicateBudget(err) {
+		return apperrors.ErrConflict
+	}
 	return err
 }
 
@@ -57,6 +69,9 @@ func (r *Repository) UpdateBudget(ctx context.Context, budget *domain.Budget) er
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return apperrors.ErrNotFound
+			}
+			if isDuplicateBudget(err) {
+				return apperrors.ErrConflict
 			}
 			return err
 		}
@@ -209,11 +224,14 @@ func (r *Repository) rolloverBudgets(ctx context.Context, userID string, targetM
 		return nil
 	}
 
+	// Two requests for a new month can both find it empty and both copy; the
+	// unique key lets the second copy skip instead of duplicating every row.
 	queryCopy := `
 		INSERT INTO budgets (name, category_id, amount, period_type, start_date, end_date, bucket, user_id, created_at, updated_at)
 		SELECT name, category_id, amount, period_type, $1, $2, bucket, $3, NOW(), NOW()
 		FROM budgets
 		WHERE user_id = $3 AND start_date = $4 AND period_type != 'one_time'
+		ON CONFLICT (user_id, category_id, start_date) DO NOTHING
 	`
 	_, err = r.pool.Exec(ctx, queryCopy, targetStart, targetEnd, userID, *latestStart)
 	return err
