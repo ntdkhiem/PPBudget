@@ -230,6 +230,8 @@ export interface Subscription {
   billing_cycle: "weekly" | "monthly" | "yearly";
   next_billing_date: string;
   category_id?: string | null;
+  /** Posted date of the latest payment linked to it; only GET /subscriptions sets it. */
+  last_paid_date?: string | null;
 }
 
 export interface NetWorthDataPoint {

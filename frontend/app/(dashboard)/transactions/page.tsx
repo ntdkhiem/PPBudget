@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, Transaction, Category, Account, Subscription } from "@/lib/api";
@@ -25,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -76,6 +78,9 @@ import { DashboardCard } from "@/components/dashboard-card";
 import { PageHeader } from "@/components/page-header";
 import { TransactionTableRow } from "@/components/transaction-table-row";
 
+// GET /transactions returns at most this many rows; a full page means there may be more.
+const PAGE_SIZE = 100;
+
 export default function TransactionsPage() {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -86,7 +91,10 @@ export default function TransactionsPage() {
   const [selectedTxn, setSelectedTxn] = useState<Transaction | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [quickEditTxnId, setQuickEditTxnId] = useState<string | null>(null);
-  const [cursorStack, setCursorStack] = useState<{date: string, id: string}[]>([]);
+  // Pages already passed through, each saved with the filters it was made
+  // under; see `cursorStack` below.
+  const [pager, setPager] = useState<{ filterKey: string; stack: { date: string; id: string }[] }>({ filterKey: "", stack: [] });
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isBulkCategoryOpen, setIsBulkCategoryOpen] = useState(false);
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
@@ -131,9 +139,15 @@ export default function TransactionsPage() {
 
   const { date } = useDateRange();
 
-  useEffect(() => {
-    setCursorStack([]);
-  }, [date]);
+  // A cursor only means something under the filters it was made with, so any
+  // filter change (search, category, account, type, dates) starts from page
+  // one again. Deriving this, rather than clearing it in an effect, also
+  // avoids one fetch with the new filters but the old cursor.
+  const filterKey = JSON.stringify([
+    date?.from?.getTime(), date?.to?.getTime(), debouncedSearchQuery, selectedCategories, selectedAccounts, selectedType,
+  ]);
+  const cursorStack = pager.filterKey === filterKey ? pager.stack : [];
+  const setCursorStack = (stack: { date: string; id: string }[]) => setPager({ filterKey, stack });
 
   const currentCursor = cursorStack[cursorStack.length - 1];
 
@@ -221,6 +235,8 @@ export default function TransactionsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["reports"] });
+      // Linked payments decide which bills show as paid or overdue.
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
       setSelectedIds([]);
       setIsBulkDeleteOpen(false);
       toast.success("Transactions deleted successfully");
@@ -265,9 +281,12 @@ export default function TransactionsPage() {
       apiFetch(`/transactions/${id}`, { method: "DELETE" }, token),
     onSuccess: () => {
       toast.success("Transaction deleted successfully");
+      setPendingDeleteId(null);
       setIsEditOpen(false);
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["reports"] });
+      // Linked payments decide which bills show as paid or overdue.
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
     },
     onError: (err: any) => {
       toast.error(err.message || "Failed to delete transaction");
@@ -310,6 +329,8 @@ export default function TransactionsPage() {
       setIsAddOpen(false);
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["reports"] });
+      // Linked payments decide which bills show as paid or overdue.
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
     },
     onError: (err: any) => {
       toast.error(err.message || "Failed to create transaction");
@@ -324,6 +345,8 @@ export default function TransactionsPage() {
       setIsEditOpen(false);
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["reports"] });
+      // Linked payments decide which bills show as paid or overdue.
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
       // The month it counts toward moves budgets and the plan's baseline.
       queryClient.invalidateQueries({ queryKey: ["budgets"] });
       queryClient.invalidateQueries({ queryKey: ["wealth"] });
@@ -333,12 +356,11 @@ export default function TransactionsPage() {
     },
   });
 
+  // Asks in the app's own dialog (rendered below) rather than the browser's.
   const handleDelete = useCallback((id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (confirm("Are you sure you want to delete this transaction?")) {
-      deleteMutation.mutate(id);
-    }
-  }, [deleteMutation]);
+    setPendingDeleteId(id);
+  }, []);
 
   const handleCreateSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -390,7 +412,7 @@ export default function TransactionsPage() {
   }, [router]);
 
   const handleNextPage = () => {
-    if (transactions && transactions.length === 100) {
+    if (transactions && transactions.length === PAGE_SIZE) {
       const last = transactions[transactions.length - 1];
       setCursorStack([...cursorStack, { date: last.date, id: last.id }]);
     }
@@ -416,10 +438,10 @@ export default function TransactionsPage() {
           asChild
           className="rounded-xl shadow-sm text-amber-600 border-amber-200 hover:bg-amber-50 flex items-center gap-2 px-5 h-11 bg-white dark:bg-slate-900 transition-all active:scale-95"
         >
-          <a href="/review">
-            <Inbox className="h-4 w-4" /> 
+          <Link href="/review">
+            <Inbox className="h-4 w-4" />
             Needs Review {unreviewedTransactions?.length ? `(${unreviewedTransactions.length})` : ''}
-          </a>
+          </Link>
         </Button>
         <AddTransactionDialog
           isOpen={isAddOpen}
@@ -544,7 +566,9 @@ export default function TransactionsPage() {
         {/* Pagination Controls */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-700/60 dark:border-slate-800/60 bg-slate-50 dark:bg-slate-900/50">
           <p className="text-sm text-slate-500">
-            {transactions?.length === 50 ? "Showing 50 transactions" : `Showing ${transactions?.length || 0} transactions`}
+            {transactions?.length
+              ? `Showing ${cursorStack.length * PAGE_SIZE + 1}–${cursorStack.length * PAGE_SIZE + transactions.length}`
+              : "No transactions"}
           </p>
           <div className="flex items-center gap-2">
             <Button
@@ -560,7 +584,7 @@ export default function TransactionsPage() {
               variant="outline"
               size="sm"
               onClick={handleNextPage}
-              disabled={!transactions || transactions.length < 100 || isLoading}
+              disabled={!transactions || transactions.length < PAGE_SIZE || isLoading}
               className="text-slate-600 dark:text-slate-300"
             >
               Next
@@ -654,6 +678,17 @@ export default function TransactionsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => { if (!open) setPendingDeleteId(null); }}
+        title="Delete transaction?"
+        description="This transaction will be removed from your history."
+        confirmText="Delete"
+        isDestructive
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => { if (pendingDeleteId) deleteMutation.mutate(pendingDeleteId); }}
+      />
 
       {/* Bulk Delete Modal */}
       <Dialog open={isBulkDeleteOpen} onOpenChange={setIsBulkDeleteOpen}>

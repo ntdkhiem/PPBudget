@@ -248,8 +248,11 @@ type Subscription struct {
 	BillingCycle    string      `json:"billing_cycle"`
 	NextBillingDate time.Time   `json:"next_billing_date"`
 	CategoryID      *string     `json:"category_id,omitempty"`
-	CreatedAt       time.Time   `json:"created_at"`
-	UpdatedAt       time.Time   `json:"updated_at"`
+	// LastPaidDate is the posted date of the latest payment linked to the
+	// subscription, if any. Only ListSubscriptions fills it.
+	LastPaidDate *time.Time `json:"last_paid_date"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 type SearchResult struct {

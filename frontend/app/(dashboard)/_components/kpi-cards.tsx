@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ArrowDownUp, PiggyBank, ShieldCheck } from "lucide-react";
-import { apiFetch, budgetMonthParams, getStoredToken, BudgetSummary } from "@/lib/api";
+import { apiFetch, budgetMonthParams, getStoredToken, BudgetSummary, CategorySpend } from "@/lib/api";
 import { cn, formatCurrency } from "@/lib/utils";
 import { StatCard } from "@/components/stat-card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -82,13 +82,24 @@ export function SafeToSpendCard() {
   const month = format(now, "yyyy-MM");
   const monthName = format(now, "MMMM");
 
-  const { data: budgets, isLoading } = useQuery<BudgetSummary[]>({
+  // Same keys as the budgets page, so the two share one fetch and refresh together.
+  const { data: budgets, isLoading: loadingBudgets } = useQuery<BudgetSummary[]>({
     queryKey: ["budgets", month],
     queryFn: () => apiFetch<BudgetSummary[]>(`/budgets/summary?${budgetMonthParams(month)}`, {}, getStoredToken()),
   });
+  const { data: unbudgeted, isLoading: loadingUnbudgeted } = useQuery<CategorySpend[]>({
+    queryKey: ["budgets", "unbudgeted", month],
+    queryFn: () => apiFetch<CategorySpend[]>(`/budgets/unbudgeted?${budgetMonthParams(month)}`, {}, getStoredToken()),
+  });
+  const isLoading = loadingBudgets || loadingUnbudgeted;
 
-  const allocated = budgets?.reduce((acc, b) => acc + b.amount_cents, 0) ?? 0;
-  const spent = budgets?.reduce((acc, b) => acc + b.spent_total, 0) ?? 0;
+  // What's left to spend: Needs and Wants limits less what they've spent and
+  // less spending no budget covers. Savings is money put aside, not spending
+  // money, so its budgets count on neither side.
+  const spending = (budgets ?? []).filter((b) => b.bucket !== "savings");
+  const allocated = spending.reduce((acc, b) => acc + b.amount_cents, 0);
+  const unbudgetedSpent = (unbudgeted ?? []).reduce((acc, s) => acc + s.total_spent, 0);
+  const spent = spending.reduce((acc, b) => acc + b.spent_total, 0) + unbudgetedSpent;
   const hasBudgets = allocated > 0;
   const spentPercent = hasBudgets ? (spent / allocated) * 100 : 0;
 
@@ -101,6 +112,7 @@ export function SafeToSpendCard() {
         {hasBudgets ? (
           <>
             {formatCurrency(spent)} of {formatCurrency(allocated)} spent
+            {unbudgetedSpent > 0 && <> (incl. {formatCurrency(unbudgetedSpent)} unbudgeted)</>}
             {spent > allocated && <span className="text-rose-600 dark:text-rose-400"> · over by {formatCurrency(spent - allocated)}</span>}
           </>
         ) : (

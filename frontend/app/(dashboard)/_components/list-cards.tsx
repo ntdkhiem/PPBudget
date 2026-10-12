@@ -3,17 +3,18 @@
 import Link from "next/link";
 import { useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { addDays, format } from "date-fns";
-import { ArrowRight, CalendarClock, CheckCircle2, CreditCard, Inbox, ReceiptText, Repeat } from "lucide-react";
+import { AlertCircle, ArrowRight, CalendarClock, CheckCircle2, CreditCard, Inbox, ReceiptText, Repeat } from "lucide-react";
 import { apiFetch, getStoredToken, CategorySpend, Subscription, Transaction } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatCard } from "@/components/stat-card";
 import { useCategoryNames, useRangeQueryParams } from "./dashboard-data";
 import { ListSkeleton, TransactionListItem } from "./transaction-list-item";
+import { billsDue } from "./upcoming-bills";
 
 const TOP_SPENDING_COUNT = 5;
 const RECENT_COUNT = 5;
 const NEEDS_REVIEW_PREVIEW = 3;
+const UPCOMING_DAYS = 7;
 // GET /transactions returns at most this many rows.
 const TRANSACTIONS_PAGE_SIZE = 100;
 
@@ -71,35 +72,34 @@ export function UpcomingBillsCard() {
     queryFn: () => apiFetch<Subscription[]>("/subscriptions", {}, getStoredToken()),
   });
 
-  const upcoming = useMemo(() => {
-    // Billing dates are calendar dates, so compare yyyy-MM-dd strings; that keeps
-    // bills due today in the list regardless of the viewer's timezone.
-    const today = format(new Date(), "yyyy-MM-dd");
-    const weekOut = format(addDays(new Date(), 7), "yyyy-MM-dd");
-    return (subscriptions ?? [])
-      .filter((s) => {
-        const day = s.next_billing_date.slice(0, 10);
-        return day >= today && day <= weekOut;
-      })
-      .sort((a, b) => a.next_billing_date.localeCompare(b.next_billing_date));
-  }, [subscriptions]);
+  const bills = useMemo(() => billsDue(subscriptions ?? [], new Date(), UPCOMING_DAYS), [subscriptions]);
 
   return (
     <StatCard title="Upcoming Bills" icon={CalendarClock} tone="purple" action={<CardLink href="/subscriptions">Manage</CardLink>}>
-      <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2 mb-3">Next 7 days</p>
+      <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2 mb-3">Overdue and next {UPCOMING_DAYS} days</p>
       {isLoading ? (
         <ListSkeleton rows={3} />
-      ) : upcoming.length > 0 ? (
+      ) : bills.length > 0 ? (
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {upcoming.map((sub) => (
-            <div key={sub.id} className="flex items-center justify-between py-2.5 gap-4">
+          {bills.map(({ sub, due, status }) => (
+            <div key={`${sub.id}-${due}`} className="flex items-center justify-between py-2.5 gap-4">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center bg-purple-500/10 text-purple-600 dark:text-purple-400">
-                  <Repeat className="w-4 h-4" />
+                <div
+                  className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center ${
+                    status === "overdue"
+                      ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                      : "bg-purple-500/10 text-purple-600 dark:text-purple-400"
+                  }`}
+                >
+                  {status === "overdue" ? <AlertCircle className="w-4 h-4" /> : <Repeat className="w-4 h-4" />}
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{sub.name}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{formatDate(sub.next_billing_date)}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {formatDate(due)}
+                    {status === "overdue" && <span className="font-medium text-rose-600 dark:text-rose-400"> · Overdue</span>}
+                    {status === "paid" && <span className="font-medium text-emerald-600 dark:text-emerald-400"> · Paid</span>}
+                  </p>
                 </div>
               </div>
               <span className="text-sm font-semibold text-slate-900 dark:text-white shrink-0">{formatCurrency(sub.amount)}</span>
@@ -107,7 +107,7 @@ export function UpcomingBillsCard() {
           ))}
         </div>
       ) : (
-        <EmptyMessage>No bills due in the next 7 days.</EmptyMessage>
+        <EmptyMessage>No bills overdue or due in the next {UPCOMING_DAYS} days.</EmptyMessage>
       )}
     </StatCard>
   );
