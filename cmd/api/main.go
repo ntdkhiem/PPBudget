@@ -207,6 +207,7 @@ func main() {
 
 			// Budgets
 			r.Get("/budgets/summary", h.GetBudgetsSummary)
+			r.Get("/budgets/unbudgeted", h.GetUnbudgetedSpending)
 			r.Post("/budgets", h.CreateBudget)
 			r.Put("/budgets/{id}", h.UpdateBudget)
 			r.Delete("/budgets/{id}", h.DeleteBudget)

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ArrowDownUp, PiggyBank, ShieldCheck } from "lucide-react";
-import { apiFetch, getStoredToken, BudgetSummary } from "@/lib/api";
+import { apiFetch, budgetMonthParams, getStoredToken, BudgetSummary } from "@/lib/api";
 import { cn, formatCurrency } from "@/lib/utils";
 import { StatCard } from "@/components/stat-card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -84,7 +84,7 @@ export function SafeToSpendCard() {
 
   const { data: budgets, isLoading } = useQuery<BudgetSummary[]>({
     queryKey: ["budgets", month],
-    queryFn: () => apiFetch<BudgetSummary[]>(`/budgets/summary?month=${month}`, {}, getStoredToken()),
+    queryFn: () => apiFetch<BudgetSummary[]>(`/budgets/summary?${budgetMonthParams(month)}`, {}, getStoredToken()),
   });
 
   const allocated = budgets?.reduce((acc, b) => acc + b.amount_cents, 0) ?? 0;

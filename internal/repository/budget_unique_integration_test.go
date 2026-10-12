@@ -56,7 +56,7 @@ func TestBudgetRolloverConcurrentIntegration(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := repo.GetBudgetsSummary(ctx, userID, june); err != nil {
+			if _, err := repo.GetBudgetsSummary(ctx, userID, june, time.Now()); err != nil {
 				errs <- err
 			}
 		}()
@@ -70,7 +70,7 @@ func TestBudgetRolloverConcurrentIntegration(t *testing.T) {
 	if n := countBudgets(t, repo, userID, "2026-06-01"); n != 3 {
 		t.Errorf("June budgets = %d, want 3 (one per category)", n)
 	}
-	sums, err := repo.GetBudgetsSummary(ctx, userID, june)
+	sums, err := repo.GetBudgetsSummary(ctx, userID, june, time.Now())
 	if err != nil {
 		t.Fatalf("GetBudgetsSummary: %v", err)
 	}
@@ -145,5 +145,81 @@ func TestMergeCategoriesMixedPeriodTypesIntegration(t *testing.T) {
 		if n != 1 || periodType != want.periodType || amount != want.amount {
 			t.Errorf("%s: %d rows, %s, %d; want 1 row, %s, %d", want.month, n, periodType, amount, want.periodType, want.amount)
 		}
+	}
+}
+
+// Unbudgeted spending is what the month's budgets miss: expense categories
+// without a budget (net of refunds) and uncategorized outflows. Income and
+// transfers are not spending.
+func TestGetUnbudgetedSpendingIntegration(t *testing.T) {
+	pool := setupTestDB(t)
+	ctx := context.Background()
+	repo := New(pool)
+	userID := createTestUser(t, pool, "budget-unbudgeted")
+
+	acct, err := repo.CreateAccount(ctx, userID, "Checking", "asset", "USD", 0, nil)
+	if err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	category := func(name, kind string) string {
+		var id string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO categories (user_id, name, type) VALUES ($1, $2, $3) RETURNING id`, userID, name, kind,
+		).Scan(&id); err != nil {
+			t.Fatalf("category %s: %v", name, err)
+		}
+		return id
+	}
+	groceries := category("Groceries", "expense")
+	coffee := category("Coffee", "expense")
+	gifts := category("Gifts", "expense")
+	salary := category("Salary", "income")
+	moves := category("Card Payment", "transfer")
+	mergeTestBudget(t, pool, userID, groceries, "2026-06-01", "2026-06-30", "needs", 50_000)
+
+	for _, txn := range []struct {
+		amount   int64
+		date     string
+		category *string
+	}{
+		{-8_000, "2026-06-03", &groceries}, // budgeted
+		{-500, "2026-06-04", &coffee},
+		{-300, "2026-06-10", &coffee},
+		{200, "2026-06-11", &coffee},   // refund nets off
+		{-1_000, "2026-06-12", &gifts}, // fully refunded: nothing left over
+		{1_500, "2026-06-13", &gifts},
+		{500_000, "2026-06-15", &salary},
+		{-40_000, "2026-06-16", &moves},
+		{-1_200, "2026-06-17", nil},     // uncategorized outflow
+		{300_000, "2026-06-18", nil},    // uncategorized paycheck: not netted
+		{-9_999, "2026-07-01", &coffee}, // next month
+	} {
+		id := insertTxn(t, pool, userID, acct, txn.amount, txn.date, "txn")
+		if txn.category != nil {
+			if _, err := pool.Exec(ctx, `UPDATE transactions SET category_id = $1 WHERE id = $2`, *txn.category, id); err != nil {
+				t.Fatalf("categorise: %v", err)
+			}
+		}
+	}
+
+	june := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
+	got, err := repo.GetUnbudgetedSpending(ctx, userID, june, time.Now())
+	if err != nil {
+		t.Fatalf("GetUnbudgetedSpending: %v", err)
+	}
+	want := []struct {
+		name  string
+		spent int64
+	}{{"Uncategorized", 1_200}, {"Coffee", 600}}
+	if len(got) != len(want) {
+		t.Fatalf("got %d rows %+v, want %d", len(got), got, len(want))
+	}
+	for i, w := range want {
+		if got[i].Name != w.name || got[i].TotalSpent.ToInt64() != w.spent {
+			t.Errorf("row %d = %s %d, want %s %d", i, got[i].Name, got[i].TotalSpent.ToInt64(), w.name, w.spent)
+		}
+	}
+	if got[0].CategoryID != nil {
+		t.Errorf("Uncategorized category_id = %v, want nil", *got[0].CategoryID)
 	}
 }

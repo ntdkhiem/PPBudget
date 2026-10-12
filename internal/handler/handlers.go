@@ -617,27 +617,72 @@ func (h *Handler) GetBudgetsSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	monthStr := r.URL.Query().Get("month")
-	if monthStr == "" {
-		writeError(w, http.StatusBadRequest, "month is required")
+	month, today, err := parseBudgetMonthQuery(r, time.Now())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	month, err := time.Parse("2006-01", monthStr)
-	if err != nil {
-		month, err = time.Parse("2006-01-02", monthStr)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid month format")
-			return
-		}
-	}
-
-	budgets, err := h.svc.GetBudgetsSummary(r.Context(), userID, month)
+	budgets, err := h.svc.GetBudgetsSummary(r.Context(), userID, month, today)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch budgets summary")
 		return
 	}
 	writeJSON(w, http.StatusOK, budgets)
+}
+
+func (h *Handler) GetUnbudgetedSpending(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok || userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	month, today, err := parseBudgetMonthQuery(r, time.Now())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	spending, err := h.svc.GetUnbudgetedSpending(r.Context(), userID, month, today)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch unbudgeted spending")
+		return
+	}
+	writeJSON(w, http.StatusOK, spending)
+}
+
+// parseBudgetMonthQuery reads ?month=yyyy-mm (or yyyy-mm-dd) and the optional
+// ?today=yyyy-mm-dd, the viewer's own calendar date. The server's clock is
+// UTC, which for a US evening is already tomorrow; on the last day of a month
+// that would mark the month finished. A today more than a day from the
+// server's is ignored, since no timezone is that far off.
+func parseBudgetMonthQuery(r *http.Request, now time.Time) (month, today time.Time, err error) {
+	q := r.URL.Query()
+	monthStr := q.Get("month")
+	if monthStr == "" {
+		return month, today, errors.New("month is required")
+	}
+	month, err = time.Parse("2006-01", monthStr)
+	if err != nil {
+		month, err = time.Parse("2006-01-02", monthStr)
+		if err != nil {
+			return month, today, errors.New("invalid month format")
+		}
+	}
+
+	now = now.UTC()
+	today = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if raw := q.Get("today"); raw != "" {
+		viewer, perr := time.Parse("2006-01-02", raw)
+		if perr != nil {
+			return month, today, errors.New("invalid today format")
+		}
+		if d := viewer.Sub(today); d >= -24*time.Hour && d <= 24*time.Hour {
+			today = viewer
+		}
+	}
+	return month, today, nil
 }
 
 // --- Accounts ---

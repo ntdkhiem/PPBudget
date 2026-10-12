@@ -149,8 +149,12 @@ func (s *Service) DeleteBudget(ctx context.Context, userID, id string, allMonths
 	return s.repo.DeleteBudget(ctx, userID, id, allMonths)
 }
 
-func (s *Service) GetBudgetsSummary(ctx context.Context, userID string, month time.Time) ([]domain.BudgetSummary, error) {
-	return s.repo.GetBudgetsSummary(ctx, userID, month)
+func (s *Service) GetBudgetsSummary(ctx context.Context, userID string, month, today time.Time) ([]domain.BudgetSummary, error) {
+	return s.repo.GetBudgetsSummary(ctx, userID, month, today)
+}
+
+func (s *Service) GetUnbudgetedSpending(ctx context.Context, userID string, month, today time.Time) ([]domain.CategorySpend, error) {
+	return s.repo.GetUnbudgetedSpending(ctx, userID, month, today)
 }
 
 // Accounts

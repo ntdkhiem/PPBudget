@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"math"
 	"ntdkhiem/ppbudget-go/internal/domain"
 	apperrors "ntdkhiem/ppbudget-go/internal/errors"
 	"ntdkhiem/ppbudget-go/pkg/money"
@@ -109,62 +110,105 @@ func (r *Repository) DeleteBudget(ctx context.Context, userID, id string, allMon
 	return nil
 }
 
-func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, targetMonth time.Time) ([]domain.BudgetSummary, error) {
-	now := time.Now()
-	currentMonthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	targetMonthStart := time.Date(targetMonth.Year(), targetMonth.Month(), 1, 0, 0, 0, 0, time.UTC)
-	targetMonthEnd := targetMonthStart.AddDate(0, 1, -1)
+// effectiveTransactionsCTE is every live transaction of user $1 with the
+// month it counts toward and its link-adjusted amount. Budget spending and
+// unbudgeted spending both read it, so the two always add up the same way.
+const effectiveTransactionsCTE = `
+	effective_transactions AS (
+		SELECT
+			t.id,
+			t.category_id,
+			-- The month it counts toward, not the day it posted: rent paid
+			-- early belongs to the month it pays for.
+			t.effective_date AS date,
+			t.amount
+			- COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
+			+ COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0) as eff_amount
+		FROM transactions t
+		WHERE t.user_id = $1 AND t.deleted_at IS NULL
+	)`
 
-	isFuture := targetMonthStart.After(currentMonthStart)
-	budgetTemplateMonth := targetMonthStart
+// budgetMonthBounds returns the first and last day of the month containing t.
+func budgetMonthBounds(t time.Time) (time.Time, time.Time) {
+	start := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return start, start.AddDate(0, 1, -1)
+}
 
-	if isFuture {
+// resolveBudgetMonth returns the month whose budget rows apply to the month
+// starting targetStart. A future month has no rows of its own and is projected
+// from the latest month up to today's; the current or a past month uses its
+// own rows, copying last month's forward the first time it is viewed.
+func (r *Repository) resolveBudgetMonth(ctx context.Context, userID string, targetStart, today time.Time) time.Time {
+	currentMonthStart, _ := budgetMonthBounds(today)
+
+	if targetStart.After(currentMonthStart) {
 		var latestStart *time.Time
 		err := r.pool.QueryRow(ctx, "SELECT MAX(start_date) FROM budgets WHERE user_id = $1 AND start_date <= $2", userID, currentMonthStart).Scan(&latestStart)
 		if err == nil && latestStart != nil {
-			budgetTemplateMonth = *latestStart
+			return *latestStart
 		}
-	} else {
-		// Auto-rollover budgets if none exist for this month
-		var count int
-		err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM budgets WHERE user_id = $1 AND start_date = $2", userID, targetMonthStart).Scan(&count)
-		if err == nil && count == 0 {
-			_ = r.rolloverBudgets(ctx, userID, targetMonthStart)
-		}
+		return targetStart
 	}
 
+	var count int
+	err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM budgets WHERE user_id = $1 AND start_date = $2", userID, targetStart).Scan(&count)
+	if err == nil && count == 0 {
+		_ = r.rolloverBudgets(ctx, userID, targetStart)
+	}
+	return targetStart
+}
+
+// budgetDayRates spreads a month's spending over the days gone and what is
+// left over the days remaining. Both counts include today, which can still be
+// spent; a finished month has no days remaining and a future one none gone.
+func budgetDayRates(monthStart, monthEnd, today time.Time, spent, left int64) (spentPerDay, leftPerDay int64) {
+	day := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	totalDays := int64(monthEnd.Sub(monthStart).Hours()/24) + 1
+	clamp := func(n int64) int64 { return max(0, min(n, totalDays)) }
+
+	elapsed := clamp(int64(day.Sub(monthStart).Hours()/24) + 1)
+	remaining := clamp(int64(monthEnd.Sub(day).Hours()/24) + 1)
+
+	if elapsed > 0 {
+		spentPerDay = roundDiv(spent, elapsed)
+	}
+	if remaining > 0 && left > 0 {
+		leftPerDay = roundDiv(left, remaining)
+	}
+	return spentPerDay, leftPerDay
+}
+
+// roundDiv divides to the nearest cent, half away from zero: $620 over 30
+// days is $20.67 a day, not the $20.66 integer division truncates to.
+func roundDiv(a, b int64) int64 {
+	return int64(math.Round(float64(a) / float64(b)))
+}
+
+// GetBudgetsSummary returns the budgets for targetMonth with what has been
+// spent against each. today is the viewer's calendar date, which decides
+// which months are past or future and the per-day figures.
+func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, targetMonth, today time.Time) ([]domain.BudgetSummary, error) {
+	targetMonthStart, targetMonthEnd := budgetMonthBounds(targetMonth)
+	budgetTemplateMonth := r.resolveBudgetMonth(ctx, userID, targetMonthStart, today)
+
 	query := `
-		WITH effective_transactions AS (
-			SELECT 
-				t.id,
-				t.category_id,
-				-- The month it counts toward, not the day it posted: rent paid
-				-- early belongs to the month it pays for.
-				t.effective_date AS date,
-				t.amount
-				- COALESCE((SELECT SUM(amount) FROM transaction_links WHERE source_transaction_id = t.id), 0)
-				+ COALESCE((SELECT SUM(amount) FROM transaction_links WHERE target_transaction_id = t.id), 0) as eff_amount
-			FROM transactions t
-			WHERE t.user_id = $1 AND t.deleted_at IS NULL
-		),
+		WITH ` + effectiveTransactionsCTE + `,
 		budget_spent AS (
 			-- Outflows less inflows: a refund in the category gives budget back.
 			SELECT b.id as budget_id, COALESCE(-SUM(t.eff_amount), 0) as spent_total
 			FROM budgets b
-			LEFT JOIN effective_transactions t ON t.category_id = b.category_id 
-				AND t.date >= $3::date 
+			LEFT JOIN effective_transactions t ON t.category_id = b.category_id
+				AND t.date >= $3::date
 				AND t.date <= $4::date
 			WHERE b.user_id = $1
 			  AND b.start_date = $2::date
 			GROUP BY b.id
 		)
 		SELECT b.id, b.user_id, b.name, b.category_id, b.amount as amount_cents, b.period_type, b.start_date, b.end_date, b.bucket, b.created_at, b.updated_at,
-		       s.spent_total,
-			   ($4::date - $3::date) + 1 as total_days,
-			   (LEAST(CURRENT_DATE, $4::date) - $3::date) + 1 as elapsed_days
+		       s.spent_total
 		FROM budgets b
 		JOIN budget_spent s ON b.id = s.budget_id
-		WHERE b.user_id = $1 
+		WHERE b.user_id = $1
 		  AND b.start_date = $2::date
 		  AND ($2::date = $3::date OR b.period_type != 'one_time')
 		ORDER BY b.start_date DESC
@@ -180,33 +224,68 @@ func (r *Repository) GetBudgetsSummary(ctx context.Context, userID string, targe
 		var s domain.BudgetSummary
 		var amountCents int64
 		var spentTotal int64
-		var totalDays int32
-		var elapsedDays int32
 
-		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.CategoryID, &amountCents, &s.PeriodType, &s.StartDate, &s.EndDate, &s.Bucket, &s.CreatedAt, &s.UpdatedAt, &spentTotal, &totalDays, &elapsedDays); err != nil {
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.CategoryID, &amountCents, &s.PeriodType, &s.StartDate, &s.EndDate, &s.Bucket, &s.CreatedAt, &s.UpdatedAt, &spentTotal); err != nil {
 			return nil, err
 		}
 
 		s.Amount = money.Money(amountCents)
 		s.SpentTotal = money.Money(spentTotal)
 		s.LeftTotal = money.Money(amountCents - spentTotal)
-
-		if elapsedDays > 0 {
-			s.SpentPerDay = money.Money(spentTotal / int64(elapsedDays))
-		} else {
-			s.SpentPerDay = money.Money(0)
-		}
-
-		remainingDays := totalDays - elapsedDays
-		if remainingDays > 0 {
-			s.LeftPerDay = money.Money(s.LeftTotal.ToInt64() / int64(remainingDays))
-		} else {
-			s.LeftPerDay = money.Money(0)
-		}
+		spentPerDay, leftPerDay := budgetDayRates(targetMonthStart, targetMonthEnd, today, spentTotal, amountCents-spentTotal)
+		s.SpentPerDay = money.Money(spentPerDay)
+		s.LeftPerDay = money.Money(leftPerDay)
 
 		summaries = append(summaries, s)
 	}
-	return summaries, nil
+	return summaries, rows.Err()
+}
+
+// GetUnbudgetedSpending returns what was spent in targetMonth outside any
+// budget: expense categories with no budget that month, plus uncategorized
+// outflows. Income and transfer categories are not spending and are left out.
+func (r *Repository) GetUnbudgetedSpending(ctx context.Context, userID string, targetMonth, today time.Time) ([]domain.CategorySpend, error) {
+	targetMonthStart, targetMonthEnd := budgetMonthBounds(targetMonth)
+	budgetTemplateMonth := r.resolveBudgetMonth(ctx, userID, targetMonthStart, today)
+
+	// A category nets refunds against spending, as a budget does. Uncategorized
+	// counts outflows only: its inflows are mostly paychecks, which would
+	// otherwise cancel out real spending.
+	query := `
+		WITH ` + effectiveTransactionsCTE + `
+		SELECT t.category_id, COALESCE(c.name, 'Uncategorized'),
+		       -SUM(CASE WHEN t.category_id IS NULL THEN LEAST(t.eff_amount, 0) ELSE t.eff_amount END) AS spent
+		FROM effective_transactions t
+		LEFT JOIN categories c ON c.id = t.category_id
+		WHERE t.date >= $3::date AND t.date <= $4::date
+		  AND (t.category_id IS NULL OR c.type = 'expense')
+		  AND NOT EXISTS (
+			SELECT 1 FROM budgets b
+			WHERE b.user_id = $1 AND b.category_id = t.category_id
+			  AND b.start_date = $2::date
+			  AND ($2::date = $3::date OR b.period_type != 'one_time')
+		  )
+		GROUP BY t.category_id, c.name
+		HAVING -SUM(CASE WHEN t.category_id IS NULL THEN LEAST(t.eff_amount, 0) ELSE t.eff_amount END) > 0
+		ORDER BY spent DESC, 2
+	`
+	rows, err := r.pool.Query(ctx, query, userID, budgetTemplateMonth, targetMonthStart, targetMonthEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	spending := []domain.CategorySpend{}
+	for rows.Next() {
+		var s domain.CategorySpend
+		var total int64
+		if err := rows.Scan(&s.CategoryID, &s.Name, &total); err != nil {
+			return nil, err
+		}
+		s.TotalSpent = money.Money(total)
+		spending = append(spending, s)
+	}
+	return spending, rows.Err()
 }
 
 func (r *Repository) rolloverBudgets(ctx context.Context, userID string, targetMonth time.Time) error {

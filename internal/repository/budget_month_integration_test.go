@@ -62,7 +62,7 @@ func TestBudgetMonthMovesSpendingNotTheLedgerIntegration(t *testing.T) {
 
 	spent := func(month time.Time) int64 {
 		t.Helper()
-		sums, err := repo.GetBudgetsSummary(ctx, userID, month)
+		sums, err := repo.GetBudgetsSummary(ctx, userID, month, time.Now())
 		if err != nil {
 			t.Fatalf("GetBudgetsSummary %s: %v", month.Format("Jan"), err)
 		}

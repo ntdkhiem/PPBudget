@@ -4,6 +4,16 @@ export function getStoredToken(): string {
   return typeof window !== "undefined" ? localStorage.getItem("ppbudget_token") || "" : "";
 }
 
+/**
+ * Query string for the /budgets endpoints: the month ("2026-10") plus the
+ * viewer's own date, so "today" is theirs and not the server's UTC one.
+ */
+export function budgetMonthParams(month: string): string {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return new URLSearchParams({ month, today }).toString();
+}
+
 export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {},

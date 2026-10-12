@@ -47,7 +47,7 @@ func TestBudgetSpentNetsRefundsIntegration(t *testing.T) {
 	}
 
 	june := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
-	sums, err := repo.GetBudgetsSummary(ctx, userID, june)
+	sums, err := repo.GetBudgetsSummary(ctx, userID, june, time.Now())
 	if err != nil {
 		t.Fatalf("GetBudgetsSummary: %v", err)
 	}
