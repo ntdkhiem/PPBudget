@@ -191,11 +191,7 @@ func (s *Service) BulkUpdateTransactionsCategory(ctx context.Context, userID str
 
 func (s *Service) UpdateTransaction(ctx context.Context, userID, id, accountID string, amount int64, date time.Time, description string, notes *string, categoryID *string, subscriptionID *string, paysFor []domain.TransactionLink, paidBy []domain.TransactionLink, budgetMonth domain.BudgetMonthChange) error {
 	if budgetMonth.Set {
-		month, err := budgetMonthFor(date, budgetMonth.Month)
-		if err != nil {
-			return err
-		}
-		budgetMonth.Month = month
+		budgetMonth.Month = budgetMonthFor(date, budgetMonth.Month)
 	}
 	return s.repo.UpdateTransaction(ctx, userID, id, accountID, amount, date, description, notes, categoryID, subscriptionID, paysFor, paidBy, budgetMonth)
 }

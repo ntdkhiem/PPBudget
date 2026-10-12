@@ -16,32 +16,22 @@ func TestBudgetMonthFor(t *testing.T) {
 	month := func(y int, m time.Month, d int) *time.Time { v := day(y, m, d); return &v }
 
 	cases := []struct {
-		name    string
-		month   *time.Time
-		want    *time.Time
-		invalid bool
+		name  string
+		month *time.Time
+		want  *time.Time
 	}{
-		{"nothing asked", nil, nil, false},
-		{"next month", month(2026, time.October, 1), month(2026, time.October, 1), false},
-		{"any day reads as its month", month(2026, time.October, 17), month(2026, time.October, 1), false},
-		{"its own month is stored as none", month(2026, time.September, 1), nil, false},
-		{"previous month", month(2026, time.August, 1), month(2026, time.August, 1), false},
-		{"two either side is allowed", month(2026, time.November, 1), month(2026, time.November, 1), false},
-		{"three away is a slip", month(2026, time.December, 1), nil, true},
-		{"across a year", month(2025, time.July, 1), nil, true},
+		{"nothing asked", nil, nil},
+		{"next month", month(2026, time.October, 1), month(2026, time.October, 1)},
+		{"any day reads as its month", month(2026, time.October, 17), month(2026, time.October, 1)},
+		{"its own month is stored as none", month(2026, time.September, 1), nil},
+		{"previous month", month(2026, time.August, 1), month(2026, time.August, 1)},
+		{"months away", month(2026, time.December, 1), month(2026, time.December, 1)},
+		{"across a year", month(2025, time.July, 1), month(2025, time.July, 1)},
+		{"same month a year on is not its own", month(2027, time.September, 1), month(2027, time.September, 1)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := budgetMonthFor(posted, c.month)
-			if c.invalid {
-				if !errors.Is(err, apperrors.ErrInvalidInput) {
-					t.Fatalf("want ErrInvalidInput, got %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
+			got := budgetMonthFor(posted, c.month)
 			if (got == nil) != (c.want == nil) || (got != nil && !got.Equal(*c.want)) {
 				t.Errorf("got %v want %v", got, c.want)
 			}

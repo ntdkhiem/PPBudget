@@ -197,23 +197,41 @@ function TransactionAllocationList({
  *
  * Rent paid on the 28th for next month posts this month; moving the date to
  * fix the budget made the ledger disagree with the bank. The month here moves
- * only the counting. It is chosen relative to the date, so correcting the
- * date keeps "next month" meaning next month, and it submits as a hidden
- * budgetMonth field: yyyy-mm, or empty for its own month.
+ * only the counting. The previous, own and next month are chosen relative to
+ * the date, so correcting the date keeps "next month" meaning next month;
+ * "Another month" names a fixed month and year that stays put. It submits as
+ * a hidden budgetMonth field: yyyy-mm, or empty for its own month.
  */
 function DateAndCountsToward({ txn }: { txn: Transaction }) {
   const [posted, setPosted] = useState(txn.date.split("T")[0]);
-  const [offset, setOffset] = useState(() => budgetMonthOffset(txn.date, txn.budget_month));
-  // A transaction already moved further than a month keeps that option.
-  const offsets = Array.from(new Set([-1, 0, 1, offset])).sort((a, b) => a - b);
+  const initialOffset = budgetMonthOffset(txn.date, txn.budget_month);
+  // "-1", "0" or "1" months from the posted date, or "other" for a fixed month.
+  const [choice, setChoice] = useState(() => (Math.abs(initialOffset) <= 1 ? String(initialOffset) : "other"));
+  const [other, setOther] = useState(() => shiftedMonth(txn.date, initialOffset));
+  const [otherYear, otherMonth] = other.split("-").map(Number);
+  const yyyymm = (y: number, m: number) => `${y}-${String(m).padStart(2, "0")}`;
+
+  const postedYear = Number(posted.slice(0, 4)) || otherYear;
+  const years = Array.from(new Set([...Array.from({ length: 7 }, (_, i) => postedYear - 3 + i), otherYear])).sort((a, b) => a - b);
+
+  const pick = (v: string) => {
+    // Open the fixed picker on the month the transaction counts toward now.
+    if (v === "other" && choice !== "other" && posted) setOther(shiftedMonth(posted, Number(choice)));
+    setChoice(v);
+  };
+  const budgetMonth = !posted
+    ? ""
+    : choice === "other"
+      ? other
+      : choice !== "0"
+        ? shiftedMonth(posted, Number(choice))
+        : "";
   const describe = (o: number) =>
     o === 0
       ? `Its own month (${monthLabel(posted, 0)})`
       : o === 1
         ? `Next month (${monthLabel(posted, 1)})`
-        : o === -1
-          ? `Previous month (${monthLabel(posted, -1)})`
-          : monthLabel(posted, o);
+        : `Previous month (${monthLabel(posted, -1)})`;
 
   return (
     <div className="space-y-2">
@@ -231,18 +249,45 @@ function DateAndCountsToward({ txn }: { txn: Transaction }) {
         <Label htmlFor="editCountsToward" className="shrink-0 text-sm text-slate-500 dark:text-slate-400">
           Counts toward
         </Label>
-        <Select value={String(offset)} onValueChange={(v) => setOffset(Number(v))}>
+        <Select value={choice} onValueChange={pick}>
           <SelectTrigger id="editCountsToward" className="h-9 rounded-lg border-slate-200 dark:border-slate-700 text-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
-            {offsets.map((o) => (
+            {[-1, 0, 1].map((o) => (
               <SelectItem key={o} value={String(o)}>{describe(o)}</SelectItem>
             ))}
+            <SelectItem value="other">Another month…</SelectItem>
           </SelectContent>
         </Select>
       </div>
-      <input type="hidden" name="budgetMonth" value={posted && offset !== 0 ? shiftedMonth(posted, offset) : ""} />
+      {choice === "other" && (
+        <div className="flex items-center gap-2">
+          <Select value={String(otherMonth)} onValueChange={(v) => setOther(yyyymm(otherYear, Number(v)))}>
+            <SelectTrigger aria-label="Month it counts toward" className="h-9 rounded-lg border-slate-200 dark:border-slate-700 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
+              {Array.from({ length: 12 }, (_, i) => (
+                <SelectItem key={i} value={String(i + 1)}>
+                  {new Date(Date.UTC(2000, i, 1)).toLocaleDateString("en-US", { month: "long", timeZone: "UTC" })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={String(otherYear)} onValueChange={(v) => setOther(yyyymm(Number(v), otherMonth))}>
+            <SelectTrigger aria-label="Year it counts toward" className="h-9 w-28 rounded-lg border-slate-200 dark:border-slate-700 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-slate-200 dark:border-slate-700">
+              {years.map((y) => (
+                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      <input type="hidden" name="budgetMonth" value={budgetMonth} />
     </div>
   );
 }
