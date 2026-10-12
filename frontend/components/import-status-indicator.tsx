@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
-import { RefreshCw, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { apiFetch, ImportStatus } from "@/lib/api";
+import { AlertTriangle, RefreshCw, CheckCircle2, XCircle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 
@@ -11,7 +11,7 @@ export function ImportStatusIndicator() {
 
   const { data: statusData } = useQuery({
     queryKey: ["importStatus"],
-    queryFn: () => apiFetch<{ status: string; current: number; total: number; error: string }>("/import/simplefin/status", {}, token),
+    queryFn: () => apiFetch<ImportStatus>("/import/simplefin/status", {}, token),
     enabled: !!token,
     refetchInterval: (query: any) => (query.state?.data?.status === "running" ? 2000 : 30000), // poll every 2s if running, else every 30s
   });
@@ -28,6 +28,8 @@ export function ImportStatusIndicator() {
   const isRunning = statusData.status === "running";
   const isError = statusData.status === "error";
   const isCompleted = statusData.status === "completed";
+  // SimpleFIN's notices from the last sync; the import still succeeded.
+  const warnings = statusData.warnings ?? [];
   
   let nextSyncStr = "";
   if (configData.auto_sync && configData.next_sync_time && new Date(configData.next_sync_time).getFullYear() > 2000) {
@@ -48,7 +50,15 @@ export function ImportStatusIndicator() {
           <span className="text-red-600 dark:text-red-400 truncate max-w-[150px]" title={statusData.error || "Sync failed"}>Failed</span>
         </>
       )}
-      {!isRunning && !isError && isCompleted && (
+      {!isRunning && !isError && isCompleted && warnings.length > 0 && (
+        <>
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+          <span className="text-amber-600 dark:text-amber-400" title={warnings.join("\n")}>
+            Synced · {warnings.length} {warnings.length === 1 ? "notice" : "notices"}
+          </span>
+        </>
+      )}
+      {!isRunning && !isError && isCompleted && warnings.length === 0 && (
         <>
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
           <span className="text-emerald-600 dark:text-emerald-400">Synced</span>

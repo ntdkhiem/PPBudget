@@ -1141,7 +1141,7 @@ func TestSetAccountBalanceOnlyWaitsForConcurrentImportIntegration(t *testing.T) 
 		t.Fatalf("AccountBalanceOnlyForShare = true, want false before enabling")
 	}
 
-	if _, _, err := repo.InsertIngestedTransaction(ctx, t1, userID, accID, money.Money(-500), mustParseDate(t, "2025-01-10"), "concurrent import", uniqueEmail("race-import-sf"), nil, nil, false); err != nil {
+	if _, _, err := repo.InsertIngestedTransaction(ctx, t1, userID, accID, money.Money(-500), mustParseDate(t, "2025-01-10"), "concurrent import", uniqueEmail("race-import-sf"), nil, nil, false, false); err != nil {
 		t.Fatalf("InsertIngestedTransaction: %v", err)
 	}
 

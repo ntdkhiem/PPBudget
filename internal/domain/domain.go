@@ -106,6 +106,7 @@ type Transaction struct {
 	Notes              *string           `json:"notes,omitempty"`
 	IsReviewed         bool              `json:"is_reviewed"`
 	IsReconciled       bool              `json:"is_reconciled"`
+	IsPending          bool              `json:"is_pending"` // imported before it posted; only ListTransactions fills it
 	SimplefinAccountID *string           `json:"simplefin_account_id,omitempty"`
 	SubscriptionID     *string           `json:"subscription_id,omitempty"`
 	PaysFor            []TransactionLink `json:"pays_for,omitempty"`

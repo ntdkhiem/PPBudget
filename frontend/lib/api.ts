@@ -107,6 +107,8 @@ export interface Transaction {
   description: string;
   notes?: string | null;
   is_reviewed: boolean;
+  /** Imported before it posted; the bank may still change its amount or date. */
+  is_pending?: boolean;
   running_balance?: number; // cents
   category_id?: string | null;
   effective_amount?: number;
@@ -239,6 +241,16 @@ export interface NetWorthDataPoint {
   assets: number;
   liabilities: number;
   net_worth: number;
+}
+
+/** GET /import/simplefin/status: the latest SimpleFIN import for this user. */
+export interface ImportStatus {
+  status: "idle" | "running" | "completed" | "error" | string;
+  current: number;
+  total: number;
+  error: string;
+  /** SimpleFIN's own messages for the run, e.g. a bank connection needing attention. */
+  warnings?: string[];
 }
 
 export interface CategorySpend {

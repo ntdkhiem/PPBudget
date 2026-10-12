@@ -895,3 +895,207 @@ func TestSimpleFinImportClassifiesNewAccountsIntegration(t *testing.T) {
 		t.Errorf("a sync overwrote the user's correction: role is %s, want loan", got)
 	}
 }
+
+// A start date further back than SimpleFIN's 90-day cap imports the whole
+// range: the fake bridge truncates any request over 90 days, so this only
+// passes if the import asks in windows. SimpleFIN's messages reach the status.
+func TestSimpleFinExecuteImportsBeyondNinetyDaysIntegration(t *testing.T) {
+	pool := sfSetupTestDB(t)
+	ctx := context.Background()
+	repo := repository.New(pool)
+	svc := New(repo, slog.New(slog.NewTextHandler(io.Discard, nil)), &config.Config{FrontendURL: "http://localhost:3000"})
+	userID := sfCreateTestUser(t, pool)
+
+	now := time.Now().UTC()
+	sfID := sfUniqueID("sf-long-range")
+	ago := func(days int) time.Time { return now.AddDate(0, 0, -days) }
+	bridge := &fakeBridge{
+		now: now,
+		txns: map[string][]sfTransaction{sfID: {
+			posted(sfUniqueID("t190"), ago(190)),
+			posted(sfUniqueID("t120"), ago(120)),
+			posted(sfUniqueID("t60"), ago(60)),
+			posted(sfUniqueID("t5"), ago(5)),
+		}},
+		errlist: []sfError{{Code: "con.auth", Msg: "Reconnect Example Bank"}},
+	}
+	accessURL := newFakeBridge(t, bridge)
+
+	if err := svc.SimpleFinExecute(ctx, userID, SimplefinExecuteRequest{
+		AccessURL:      accessURL,
+		AccountMapping: map[string]string{sfID: "new"},
+		StartDate:      ago(200).Format("2006-01-02"),
+	}); err != nil {
+		t.Fatalf("SimpleFinExecute: %v", err)
+	}
+	final := waitForImportDone(t, userID)
+	if final.Status != "completed" {
+		t.Fatalf("status = %q (error %q), want completed", final.Status, final.Error)
+	}
+
+	accountID, err := repo.GetAccountBySimplefinID(ctx, nil, userID, sfID)
+	if err != nil {
+		t.Fatalf("GetAccountBySimplefinID: %v", err)
+	}
+	if n := sfCountLiveTxns(t, pool, accountID); n != 4 {
+		t.Errorf("imported %d transactions, want all 4 across 200 days", n)
+	}
+	if len(bridge.requests) != 3 {
+		t.Errorf("made %d requests, want 3 windows for 200 days", len(bridge.requests))
+	}
+	if fmt.Sprint(final.Warnings) != "[Reconnect Example Bank]" {
+		t.Errorf("warnings = %v, want SimpleFIN's message", final.Warnings)
+	}
+}
+
+// A pending transaction's life across syncs with "Import pending" on:
+// imported flagged, refreshed in place when it posts under the same id
+// (keeping the user's category), and replaced when it posts under a new id,
+// including when the posted one looks identical and content de-duplication
+// is on. Posted rows are never rewritten. With the option off, pending ones
+// aren't asked for.
+func TestSimpleFinPendingLifecycleIntegration(t *testing.T) {
+	pool := sfSetupTestDB(t)
+	ctx := context.Background()
+	repo := repository.New(pool)
+	svc := New(repo, slog.New(slog.NewTextHandler(io.Discard, nil)), &config.Config{FrontendURL: "http://localhost:3000"})
+	userID := sfCreateTestUser(t, pool)
+
+	// Noon UTC, so every date below is the same calendar day in any timezone
+	// the test machine is likely to be in.
+	now := time.Now().UTC()
+	noon := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	ago := func(days int) time.Time { return noon.AddDate(0, 0, -days) }
+	id := func(name string) string { return sfUniqueID(name) }
+	ids := map[string]string{}
+	for _, n := range []string{"p1", "pendA", "pendB", "postB", "pendC", "postC", "pendD"} {
+		ids[n] = id(n)
+	}
+
+	sfAcct := sfUniqueID("sf-pending")
+	bridge := &fakeBridge{now: now, txns: map[string][]sfTransaction{sfAcct: {
+		{ID: ids["p1"], Posted: ago(10).Unix(), Amount: "-10.00", Description: "GROCER"},
+		{ID: ids["pendA"], Pending: true, TransactedAt: ago(2).Unix(), Amount: "-20.00", Description: "BISTRO PENDING"},
+		{ID: ids["pendB"], Pending: true, Posted: ago(1).Unix(), Amount: "-15.00", Description: "SHOP"},
+		{ID: ids["pendC"], Pending: true, Posted: ago(3).Unix(), Amount: "-9.99", Description: "CAFE"},
+	}}}
+	accessURL := newFakeBridge(t, bridge)
+
+	sync := func(importPending bool) {
+		t.Helper()
+		if err := svc.SimpleFinExecute(ctx, userID, SimplefinExecuteRequest{
+			AccessURL:      accessURL,
+			AccountMapping: map[string]string{sfAcct: "new"},
+			StartDate:      ago(30).Format("2006-01-02"),
+			ImportPending:  importPending,
+			ContentDedup:   true,
+		}); err != nil {
+			t.Fatalf("SimpleFinExecute: %v", err)
+		}
+		if st := waitForImportDone(t, userID); st.Status != "completed" {
+			t.Fatalf("status = %q (%s)", st.Status, st.Error)
+		}
+		// "completed" is set just before the import's lock is released.
+		for deadline := time.Now().Add(5 * time.Second); ImportRunning(userID) && time.Now().Before(deadline); {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	type row struct {
+		rowID, date, desc, category string
+		amount                      int64
+		pending                     bool
+	}
+	rows := func() map[string]row {
+		t.Helper()
+		rs, err := pool.Query(ctx, `
+			SELECT simplefin_id, id, to_char(date, 'YYYY-MM-DD'), description, COALESCE(category_id::text, ''), amount, is_pending
+			FROM transactions WHERE user_id = $1 AND deleted_at IS NULL`, userID)
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		defer rs.Close()
+		out := map[string]row{}
+		for rs.Next() {
+			var sfID string
+			var r row
+			if err := rs.Scan(&sfID, &r.rowID, &r.date, &r.desc, &r.category, &r.amount, &r.pending); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			out[sfID] = r
+		}
+		return out
+	}
+	day := func(t time.Time) string { return t.Format("2006-01-02") }
+
+	// Sync 1: everything comes in, pending ones flagged and dated.
+	sync(true)
+	if !bridge.pendingAsked[0] {
+		t.Errorf("sync 1 did not send pending=1")
+	}
+	got := rows()
+	if len(got) != 4 {
+		t.Fatalf("after sync 1: %d rows, want 4: %+v", len(got), got)
+	}
+	if a := got[ids["pendA"]]; !a.pending || a.date != day(ago(2)) {
+		t.Errorf("pending A = %+v, want pending, dated by transacted_at %s", a, day(ago(2)))
+	}
+	if got[ids["p1"]].pending {
+		t.Errorf("posted p1 imported as pending")
+	}
+
+	// The user categorizes the pending charge before it posts.
+	var category string
+	if err := pool.QueryRow(ctx, `INSERT INTO categories (user_id, name, type) VALUES ($1, 'Dining', 'expense') RETURNING id`, userID).Scan(&category); err != nil {
+		t.Fatalf("category: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE transactions SET category_id = $1 WHERE id = $2`, category, got[ids["pendA"]].rowID); err != nil {
+		t.Fatalf("categorize: %v", err)
+	}
+	pendARow := got[ids["pendA"]].rowID
+
+	// Sync 2: A posts under its own id with the tip added; B and C post under
+	// new ids (C with identical details); p1's amount changes at the bank.
+	bridge.txns[sfAcct] = []sfTransaction{
+		{ID: ids["p1"], Posted: ago(10).Unix(), Amount: "-11.00", Description: "GROCER"},
+		{ID: ids["pendA"], Posted: ago(1).Unix(), Amount: "-24.00", Description: "BISTRO"},
+		{ID: ids["postB"], Posted: ago(0).Unix(), Amount: "-15.00", Description: "SHOP"},
+		{ID: ids["postC"], Posted: ago(3).Unix(), Amount: "-9.99", Description: "CAFE"},
+	}
+	sync(true)
+	got = rows()
+	if len(got) != 4 {
+		t.Fatalf("after sync 2: %d rows, want 4: %+v", len(got), got)
+	}
+	a := got[ids["pendA"]]
+	if a.rowID != pendARow || a.pending || a.amount != -2400 || a.date != day(ago(1)) || a.desc != "BISTRO" || a.category != category {
+		t.Errorf("A after posting = %+v; want the same row, posted, -2400 on %s, BISTRO, category kept", a, day(ago(1)))
+	}
+	for _, gone := range []string{"pendB", "pendC"} {
+		if _, ok := got[ids[gone]]; ok {
+			t.Errorf("%s still present after posting under a new id", gone)
+		}
+	}
+	for _, posted := range []string{"postB", "postC"} {
+		if r, ok := got[ids[posted]]; !ok || r.pending {
+			t.Errorf("%s = %+v, %v; want imported as posted", posted, r, ok)
+		}
+	}
+	if p1 := got[ids["p1"]]; p1.amount != -1000 {
+		t.Errorf("p1 amount = %d, want -1000: a posted row is never rewritten", p1.amount)
+	}
+
+	// Sync 3, option off: pending ones aren't requested or imported.
+	bridge.txns[sfAcct] = append(bridge.txns[sfAcct],
+		sfTransaction{ID: ids["pendD"], Pending: true, Posted: ago(0).Unix(), Amount: "-3.00", Description: "SNACK"})
+	before := len(bridge.pendingAsked)
+	sync(false)
+	for _, asked := range bridge.pendingAsked[before:] {
+		if asked {
+			t.Errorf("sync with the option off sent pending=1")
+		}
+	}
+	if _, ok := rows()[ids["pendD"]]; ok {
+		t.Errorf("pending D imported with the option off")
+	}
+}

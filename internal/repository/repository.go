@@ -109,30 +109,80 @@ func (r *Repository) GetAccountBySimplefinID(ctx context.Context, tx pgx.Tx, use
 	return accountID, nil
 }
 
-// InsertIngestedTransaction inserts a transaction, returning the ID, and true if created, false if it was a duplicate
-func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, userID, accountID string, amount money.Money, date time.Time, description, simplefinTxID string, categoryID *string, subscriptionID *string, isReviewed bool) (string, bool, error) {
+// IngestResult says what InsertIngestedTransaction did with a transaction.
+type IngestResult int
+
+const (
+	// IngestSkipped: already imported and posted, so left as it is.
+	IngestSkipped IngestResult = iota
+	// IngestInserted: new to this user.
+	IngestInserted
+	// IngestUpdated: already imported while pending; it took the bank's
+	// latest amount, date, description and pending state.
+	IngestUpdated
+)
+
+// InsertIngestedTransaction imports a bank transaction, keyed by its SimpleFIN
+// id, and returns the row's id with what it did. A row imported while
+// pending is refreshed from the bank until it posts, keeping the user's
+// category and other edits; once posted, an import never rewrites it.
+func (r *Repository) InsertIngestedTransaction(ctx context.Context, tx pgx.Tx, userID, accountID string, amount money.Money, date time.Time, description, simplefinTxID string, categoryID *string, subscriptionID *string, isReviewed, isPending bool) (string, IngestResult, error) {
 	query := `
-		INSERT INTO transactions (account_id, amount, date, description, simplefin_id, category_id, subscription_id, is_reviewed, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (user_id, simplefin_id) DO NOTHING
-		RETURNING id
+		INSERT INTO transactions (account_id, amount, date, description, simplefin_id, category_id, subscription_id, is_reviewed, user_id, is_pending)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (user_id, simplefin_id) DO UPDATE
+			SET amount = EXCLUDED.amount, date = EXCLUDED.date,
+			    description = EXCLUDED.description, is_pending = EXCLUDED.is_pending,
+			    updated_at = NOW()
+			WHERE transactions.is_pending
+		RETURNING id, (xmax = 0) AS inserted
 	`
-	args := []interface{}{accountID, amount.ToInt64(), date, description, simplefinTxID, categoryID, subscriptionID, isReviewed, userID}
+	args := []interface{}{accountID, amount.ToInt64(), date, description, simplefinTxID, categoryID, subscriptionID, isReviewed, userID, isPending}
 
 	var id string
+	var inserted bool
 	var err error
 	if tx != nil {
-		err = tx.QueryRow(ctx, query, args...).Scan(&id)
+		err = tx.QueryRow(ctx, query, args...).Scan(&id, &inserted)
 	} else {
-		err = r.pool.QueryRow(ctx, query, args...).Scan(&id)
+		err = r.pool.QueryRow(ctx, query, args...).Scan(&id, &inserted)
 	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", false, nil // Duplicate safely ignored
+			return "", IngestSkipped, nil // already imported and posted
 		}
-		return "", false, fmt.Errorf("failed to insert transaction: %w", err)
+		return "", IngestSkipped, fmt.Errorf("failed to insert transaction: %w", err)
 	}
-	return id, true, nil
+	if inserted {
+		return id, IngestInserted, nil
+	}
+	return id, IngestUpdated, nil
+}
+
+// DeleteStalePendingTransactions removes an account's imported pending rows
+// that the bank no longer reports: the sync that returned reportedIDs (every
+// SimpleFIN id it had for the account) covered them, and they're gone, either
+// dropped or posted under a new id that this sync imports instead. Only rows
+// dated on or after since are judged, since older ones were outside what the
+// sync asked for; a zero since judges them all. Returns how many were removed.
+func (r *Repository) DeleteStalePendingTransactions(ctx context.Context, tx pgx.Tx, userID, accountID string, reportedIDs []string, since time.Time) (int64, error) {
+	var sinceArg *time.Time
+	if !since.IsZero() {
+		sinceArg = &since
+	}
+	if reportedIDs == nil {
+		reportedIDs = []string{}
+	}
+	tag, err := tx.Exec(ctx, `
+		DELETE FROM transactions
+		WHERE user_id = $1 AND account_id = $2 AND is_pending
+		  AND simplefin_id IS NOT NULL AND NOT (simplefin_id = ANY($3))
+		  AND ($4::date IS NULL OR date >= $4::date)`,
+		userID, accountID, reportedIDs, sinceArg)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete stale pending transactions: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionFilter) ([]domain.TransactionWithBalance, error) {
@@ -140,7 +190,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 	query := `
         SELECT 
             t.id, t.user_id, t.account_id, t.category_id, t.amount, t.date, t.budget_month, t.description, 
-            t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id,
+            t.notes, t.is_reviewed, t.is_reconciled, t.subscription_id, t.is_pending,
             (t.amount
              - COALESCE(pays_for_agg.total_amount, 0)
              + COALESCE(paid_by_agg.total_amount, 0)
@@ -253,7 +303,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
         )
         SELECT
             p.id, p.user_id, p.account_id, p.category_id, p.amount, p.date, p.budget_month, p.description,
-            p.notes, p.is_reviewed, p.is_reconciled, p.subscription_id,
+            p.notes, p.is_reviewed, p.is_reconciled, p.subscription_id, p.is_pending,
             (db.balance - COALESCE((
                 SELECT SUM(x.amount)
                 FROM transactions x
@@ -292,7 +342,7 @@ func (r *Repository) ListTransactions(ctx context.Context, f domain.TransactionF
 
 		err := rows.Scan(
 			&t.ID, &t.UserID, &t.AccountID, &catID, &amount, &t.Date, &t.BudgetMonth, &t.Description,
-			&notes, &t.IsReviewed, &t.IsReconciled, &subID,
+			&notes, &t.IsReviewed, &t.IsReconciled, &subID, &t.IsPending,
 			&balance, &effectiveAmount, &paysForJson, &paidByJson,
 		)
 		if err != nil {

@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"ntdkhiem/ppbudget-go/internal/domain"
 	apperrors "ntdkhiem/ppbudget-go/internal/errors"
+	"ntdkhiem/ppbudget-go/internal/repository"
 	"ntdkhiem/ppbudget-go/pkg/money"
 )
 
@@ -72,15 +75,85 @@ func snapshotFromSFAccount(acc SFAccount, now time.Time) (balance money.Money, a
 }
 
 type sfTransaction struct {
-	ID          string `json:"id"`
-	Posted      int64  `json:"posted"`
-	Amount      string `json:"amount"`
-	Description string `json:"description"`
-	Pending     bool   `json:"pending"`
+	ID           string `json:"id"`
+	Posted       int64  `json:"posted"`
+	TransactedAt int64  `json:"transacted_at,omitempty"`
+	Amount       string `json:"amount"`
+	Description  string `json:"description"`
+	Pending      bool   `json:"pending"`
+}
+
+// date is when the transaction belongs: when it posted, or for a pending one,
+// which SimpleFIN may send with posted 0, when it happened, else now.
+func (t sfTransaction) date(now time.Time) time.Time {
+	switch {
+	case t.Posted != 0:
+		return time.Unix(t.Posted, 0)
+	case t.TransactedAt != 0:
+		return time.Unix(t.TransactedAt, 0)
+	default:
+		return now
+	}
 }
 
 type sfResponse struct {
 	Accounts []SFAccount `json:"accounts"`
+	// Messages SimpleFIN means to be shown to the user, such as a truncated
+	// date range or a bank connection that needs attention: `errors` in
+	// protocol v1, `errlist` in v2.
+	Errors  []string  `json:"errors,omitempty"`
+	ErrList []sfError `json:"errlist,omitempty"`
+}
+
+type sfError struct {
+	Code      string `json:"code"`
+	Msg       string `json:"msg"`
+	ConnID    string `json:"conn_id,omitempty"`
+	AccountID string `json:"account_id,omitempty"`
+}
+
+// messages returns the response's user-facing errors from both lists.
+func (r sfResponse) messages() []string {
+	out := append([]string(nil), r.Errors...)
+	for _, e := range r.ErrList {
+		if e.Msg != "" {
+			out = append(out, e.Msg)
+		} else if e.Code != "" {
+			out = append(out, e.Code)
+		}
+	}
+	return out
+}
+
+// simplefinWindowDays is how much history one GET /accounts asks for.
+// SimpleFIN Bridge caps a request at 90 days and returns only the most recent
+// 90 when asked for more, so a longer import is split into windows; 85 leaves
+// a margin under the cap.
+const simplefinWindowDays = 85
+
+// fetchWindow is one request's date range. A zero end leaves end-date off, so
+// the newest window also takes anything posted after the request was built.
+type fetchWindow struct {
+	start, end time.Time
+}
+
+// simplefinWindows splits the time from start to now into consecutive windows
+// of at most simplefinWindowDays. Each window's end is the next one's start;
+// SimpleFIN's end-date is exclusive, so they neither overlap nor leave a gap.
+// No start, or one that isn't in the past, is a single request as before.
+func simplefinWindows(start, now time.Time) []fetchWindow {
+	if start.IsZero() || !start.Before(now) {
+		return []fetchWindow{{start: start}}
+	}
+	var windows []fetchWindow
+	for from := start; ; {
+		to := from.AddDate(0, 0, simplefinWindowDays)
+		if !to.Before(now) {
+			return append(windows, fetchWindow{start: from})
+		}
+		windows = append(windows, fetchWindow{start: from, end: to})
+		from = to
+	}
 }
 
 type SimplefinExecuteRequest struct {
@@ -220,6 +293,9 @@ type ImportStatus struct {
 	Current int    `json:"current"`
 	Total   int    `json:"total"`
 	Error   string `json:"error"`
+	// Warnings are SimpleFIN's own messages for the run. They don't fail the
+	// import, but they explain one that brought back less than asked for.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 var userProgress = struct {
@@ -285,6 +361,106 @@ func ImportRunning(userID string) bool {
 	return importLocks.running[userID]
 }
 
+// fetchSimplefinAccounts fetches every account's transactions since start,
+// one request per window (see simplefinWindows), and merges them: each
+// account's transactions from all windows, a transaction id once, and the
+// account details and balance from the newest window that has the account.
+// It also returns SimpleFIN's user-facing messages, each listed once. Any
+// failed request fails the whole fetch, so an import never runs on part of
+// the range.
+func fetchSimplefinAccounts(ctx context.Context, client *http.Client, accessURL string, start, now time.Time, includePending bool) ([]SFAccount, []string, error) {
+	var accounts []SFAccount
+	accountIndex := map[string]int{}
+	txnIndex := map[string]map[string]int{} // account id -> transaction id -> index
+	var warnings []string
+	seenWarning := map[string]bool{}
+
+	for _, w := range simplefinWindows(start, now) {
+		q := url.Values{}
+		if !w.start.IsZero() {
+			q.Set("start-date", strconv.FormatInt(w.start.Unix(), 10))
+		}
+		if !w.end.IsZero() {
+			q.Set("end-date", strconv.FormatInt(w.end.Unix(), 10))
+		}
+		// SimpleFIN leaves pending transactions out unless asked.
+		if includePending {
+			q.Set("pending", "1")
+		}
+		accountsURL := accessURL + "/accounts"
+		if len(q) > 0 {
+			accountsURL += "?" + q.Encode()
+		}
+
+		data, err := getSimplefinAccounts(ctx, client, accountsURL)
+		if err != nil {
+			if !w.start.IsZero() {
+				return nil, nil, fmt.Errorf("%w (transactions from %s)", err, w.start.UTC().Format("2006-01-02"))
+			}
+			return nil, nil, err
+		}
+
+		for _, msg := range data.messages() {
+			if !seenWarning[msg] {
+				seenWarning[msg] = true
+				warnings = append(warnings, msg)
+			}
+		}
+
+		for _, acc := range data.Accounts {
+			i, ok := accountIndex[acc.ID]
+			if !ok {
+				i = len(accounts)
+				accountIndex[acc.ID] = i
+				accounts = append(accounts, SFAccount{})
+				txnIndex[acc.ID] = map[string]int{}
+			}
+			// Windows run oldest first, so this leaves the newest details.
+			txns := accounts[i].Transactions
+			accounts[i] = acc
+			for _, txn := range acc.Transactions {
+				if j, dup := txnIndex[acc.ID][txn.ID]; dup && txn.ID != "" {
+					txns[j] = txn
+					continue
+				}
+				txnIndex[acc.ID][txn.ID] = len(txns)
+				txns = append(txns, txn)
+			}
+			accounts[i].Transactions = txns
+		}
+	}
+	return accounts, warnings, nil
+}
+
+// getSimplefinAccounts makes one GET /accounts request. The access URL carries
+// its credentials as userinfo, which become basic auth.
+func getSimplefinAccounts(ctx context.Context, client *http.Client, accountsURL string) (sfResponse, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, accountsURL, nil)
+	if err != nil {
+		return sfResponse{}, fmt.Errorf("failed to create execute request: %w", err)
+	}
+	if httpReq.URL.User != nil {
+		password, _ := httpReq.URL.User.Password()
+		httpReq.SetBasicAuth(httpReq.URL.User.Username(), password)
+	}
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return sfResponse{}, fmt.Errorf("failed to fetch accounts: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return sfResponse{}, fmt.Errorf("accounts request failed with status: %d", resp.StatusCode)
+	}
+
+	var data sfResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return sfResponse{}, fmt.Errorf("failed to parse simplefin response: %w", err)
+	}
+	return data, nil
+}
+
 // 3. Execute
 func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req SimplefinExecuteRequest) error {
 	if !tryAcquireImportLock(userID) {
@@ -298,8 +474,6 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 			releaseImportLock(userID)
 		}
 	}()
-
-	accountsURL := req.AccessURL + "/accounts"
 
 	// Format start date if provided
 	var startTime time.Time
@@ -316,36 +490,19 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 		} else {
 			startTime = parsed
 		}
-
-		if !startTime.IsZero() {
-			accountsURL += fmt.Sprintf("?start-date=%d", startTime.Unix())
-		}
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, accountsURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create execute request: %w", err)
-	}
-	if httpReq.URL.User != nil {
-		password, _ := httpReq.URL.User.Password()
-		httpReq.SetBasicAuth(httpReq.URL.User.Username(), password)
-	}
-
+	// One request per window of under 90 days; asked for more in one go,
+	// SimpleFIN quietly returns only the latest 90.
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(httpReq)
+	fetched, warnings, err := fetchSimplefinAccounts(ctx, client, req.AccessURL, startTime, time.Now(), req.ImportPending)
 	if err != nil {
-		return fmt.Errorf("failed to fetch accounts: %w", err)
+		return err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("accounts request failed with status: %d", resp.StatusCode)
+	for _, msg := range warnings {
+		s.logger.Warn("simplefin reported a problem", "message", msg, "user_id", userID)
 	}
-
-	var sfData sfResponse
-	if err := json.NewDecoder(resp.Body).Decode(&sfData); err != nil {
-		return fmt.Errorf("failed to parse simplefin response: %w", err)
-	}
+	sfData := sfResponse{Accounts: fetched}
 
 	flags, err := s.repo.BalanceOnlyAccountIDs(ctx, userID)
 	if err != nil {
@@ -386,7 +543,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 				continue
 			}
 
-			date := time.Unix(txn.Posted, 0)
+			date := txn.date(time.Now())
 			if !startTime.IsZero() && date.Before(startTime) {
 				continue
 			}
@@ -399,6 +556,7 @@ func (s *Service) SimpleFinExecute(ctx context.Context, userID string, req Simpl
 		p.Current = 0
 		p.Total = totalTransactions
 		p.Error = ""
+		p.Warnings = warnings
 	})
 
 	// Save account mapping to db
@@ -660,13 +818,18 @@ func (s *Service) sendImportNotification(ctx context.Context, userID string, txn
 // balance-only, so a concurrent SetAccountBalanceOnly either runs before (import skipped) or
 // waits until this commit (and then soft-deletes these rows). Progress counts every
 // transaction considered, even when the import is skipped or fails.
+//
+// Pending transactions (with req.ImportPending) are imported flagged, refreshed
+// while they stay pending, and removed once SimpleFIN stops reporting them;
+// see InsertIngestedTransaction and DeleteStalePendingTransactions.
 func (s *Service) importAccountTransactions(ctx context.Context, userID, accountID string, acc SFAccount, req SimplefinExecuteRequest, startTime time.Time, imported *[]domain.Transaction) {
+	now := time.Now()
 	var candidates []sfTransaction
 	for _, txn := range acc.Transactions {
 		if txn.Pending && !req.ImportPending {
 			continue
 		}
-		if !startTime.IsZero() && time.Unix(txn.Posted, 0).Before(startTime) {
+		if !startTime.IsZero() && txn.date(now).Before(startTime) {
 			continue
 		}
 		candidates = append(candidates, txn)
@@ -696,7 +859,7 @@ func (s *Service) importAccountTransactions(ctx context.Context, userID, account
 
 	var created []domain.Transaction
 	for _, txn := range candidates {
-		date := time.Unix(txn.Posted, 0)
+		date := txn.date(now)
 		amount, err := money.NewFromString(txn.Amount)
 		if err != nil {
 			markDone(1)
@@ -711,10 +874,10 @@ func (s *Service) importAccountTransactions(ctx context.Context, userID, account
 			}
 		}
 
-		txnID, isNew, err := s.repo.InsertIngestedTransaction(ctx, tx, userID, accountID, amount, date, txn.Description, txn.ID, nil, nil, false)
+		txnID, result, err := s.repo.InsertIngestedTransaction(ctx, tx, userID, accountID, amount, date, txn.Description, txn.ID, nil, nil, false, txn.Pending)
 		if err != nil {
 			s.logger.Error("failed to insert transaction", "error", err, "sf_txn_id", txn.ID, "user_id", userID)
-		} else if isNew {
+		} else if result == repository.IngestInserted {
 			created = append(created, domain.Transaction{
 				ID:          txnID,
 				AccountID:   accountID,
@@ -725,6 +888,18 @@ func (s *Service) importAccountTransactions(ctx context.Context, userID, account
 			})
 		}
 		markDone(1)
+	}
+
+	// Pending rows SimpleFIN no longer reports have either been dropped or
+	// posted under a new id, which the loop above just imported.
+	reported := make([]string, 0, len(acc.Transactions))
+	for _, txn := range acc.Transactions {
+		reported = append(reported, txn.ID)
+	}
+	if n, err := s.repo.DeleteStalePendingTransactions(ctx, tx, userID, accountID, reported, startTime); err != nil {
+		s.logger.Error("failed to remove stale pending transactions", "error", err, "sf_id", acc.ID, "user_id", userID)
+	} else if n > 0 {
+		s.logger.Info("removed pending transactions no longer reported", "count", n, "sf_id", acc.ID, "user_id", userID)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

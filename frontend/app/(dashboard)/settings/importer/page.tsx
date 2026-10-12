@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Database, Loader2, CheckCircle2, ChevronRight, ChevronLeft, Calendar as CalendarIcon, Check, RefreshCw } from "lucide-react";
+import { AlertTriangle, Database, Loader2, CheckCircle2, ChevronRight, ChevronLeft, Calendar as CalendarIcon, Check, RefreshCw } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, Account } from "@/lib/api";
+import { apiFetch, Account, ImportStatus } from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,7 +73,7 @@ export default function SimpleFinImporterWizard() {
 
   const { data: statusData } = useQuery({
     queryKey: ["simplefin-status"],
-    queryFn: () => apiFetch<{ status: string; current: number; total: number; message: string }>("/import/simplefin/status", {}, token),
+    queryFn: () => apiFetch<ImportStatus & { message?: string }>("/import/simplefin/status", {}, token),
     refetchInterval: isExecuting ? 1000 : false,
     enabled: isExecuting,
   });
@@ -658,7 +658,7 @@ export default function SimpleFinImporterWizard() {
               key="step5"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="p-12 flex flex-col items-center justify-center text-center h-[450px]"
+              className="p-12 flex flex-col items-center justify-center text-center min-h-[450px]"
             >
               <div className="w-24 h-24 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-xl shadow-emerald-500/10">
                 <CheckCircle2 className="w-12 h-12" />
@@ -667,6 +667,18 @@ export default function SimpleFinImporterWizard() {
               <p className="text-slate-500 dark:text-slate-400 max-w-md mb-8 text-lg">
                 Your data has been successfully imported and synchronized.
               </p>
+              {/* SimpleFIN's own notices, such as a bank that only shares
+                  recent history: they explain an import that came back short. */}
+              {statusData?.warnings?.length ? (
+                <div className="w-full max-w-md mb-8 p-4 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 text-left">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0" /> SimpleFIN reported
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 text-sm text-amber-900 dark:text-amber-200">
+                    {statusData.warnings.map((w) => <li key={w}>{w}</li>)}
+                  </ul>
+                </div>
+              ) : null}
               <Button onClick={() => {
                 setStep(configData?.connected ? 0 : 1);
                 setSimpleFinAccounts([]);

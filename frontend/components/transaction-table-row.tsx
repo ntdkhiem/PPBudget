@@ -7,7 +7,7 @@ import { countsTowardLabel } from "@/lib/budget-month";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CheckCircle2, Edit2, Link, Repeat, Trash2, Wand2 } from "lucide-react";
+import { CheckCircle2, Clock, Edit2, Link, Repeat, Trash2, Wand2 } from "lucide-react";
 
 const truncateText = (text: string, maxLength: number = 100) => {
   if (!text) return "";
@@ -76,6 +76,14 @@ export const TransactionTableRow = memo(function TransactionTableRow({
       <TableCell className="py-4 font-medium text-slate-900 dark:text-slate-100 max-w-xs" title={txn.description}>
         <div className="line-clamp-3 whitespace-pre-wrap break-words">{truncateText(txn.description)}</div>
         <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+          {txn.is_pending && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2.5 py-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300"
+              title="Not posted yet: the amount or date may change when it clears."
+            >
+              <Clock size={12} /> Pending
+            </span>
+          )}
           {!txn.is_reviewed && (
             <span className="inline-flex items-center rounded-full bg-amber-100/80 dark:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
               Needs Review

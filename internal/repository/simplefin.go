@@ -39,12 +39,16 @@ func (r *Repository) LinkSimplefinAccount(ctx context.Context, userID, accountID
 	return nil
 }
 
-// TransactionExistsByDetails checks if a transaction with the same exact amount, date, and description exists
+// TransactionExistsByDetails checks if a transaction with the same exact amount, date, and description exists.
+// Pending rows don't count: when a pending transaction posts under a new id
+// with the same details, the posted one must still be imported, because the
+// pending row is about to be removed as stale.
 func (r *Repository) TransactionExistsByDetails(ctx context.Context, userID, accountID string, amount int64, date time.Time, description string) (bool, error) {
 	query := `
 		SELECT EXISTS(
-			SELECT 1 FROM transactions 
-			WHERE user_id = $1 AND account_id = $2 AND amount = $3 AND date = $4 AND description = $5 AND deleted_at IS NULL
+			SELECT 1 FROM transactions
+			WHERE user_id = $1 AND account_id = $2 AND amount = $3 AND date = $4 AND description = $5
+			  AND deleted_at IS NULL AND NOT is_pending
 		)
 	`
 	var exists bool
